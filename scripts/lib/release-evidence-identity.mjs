@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const SHA_PINNED_BRANCH_PATTERN = /^release-ci\/[a-f0-9]{12}-[1-9][0-9]*$/u;
 const TRUSTED_RELEASE_PUBLISH_TAG_PATTERN =
   /^refs\/tags\/release-publish\/([a-f0-9]{12})-[1-9][0-9]*$/u;
-export const RELEASE_EVIDENCE_SCRIPT = "scripts/release-ci-summary.mjs";
+const RELEASE_EVIDENCE_SCRIPT = "scripts/release-ci-summary.mjs";
 export const RELEASE_EVIDENCE_FILE = fileURLToPath(
   new URL("../release-ci-summary.mjs", import.meta.url),
 );
