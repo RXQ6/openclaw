@@ -532,28 +532,13 @@ function openAgentDatabaseBackend(
         admit,
       );
     }
-    if (command.type === "session.archivePruning.deletePublished" && archivePruning) {
-      return archivePruning.deletePublishedSessionArchiveInDatabase(
-        openWriter(),
-        options,
-        command.input,
-        admit,
-      );
-    }
-    if (command.type === "session.archivePruning.removeLegacy" && archivePruning) {
-      return archivePruning.removeLegacySessionArchiveInDatabase(
-        openWriter(),
-        options,
-        command.input.filePath,
-        admit,
-      );
-    }
-    if (command.type === "session.archivePruning.reclaimPages" && archivePruning) {
-      return archivePruning.reclaimSessionArchivePagesInWorker(
-        openWriter(),
-        command.input.maxPages,
-        admit,
-      );
+    if (
+      archivePruning &&
+      (command.type === "session.archivePruning.deletePublished" ||
+        command.type === "session.archivePruning.removeLegacy" ||
+        command.type === "session.archivePruning.reclaimPages")
+    ) {
+      return archivePruning.executeSessionArchivePruning(openWriter(), options, command, admit);
     }
     throw new Error("Unknown agent database operation");
   };

@@ -250,7 +250,10 @@ it("retires every borrower when native opening reports a protocol failure", asyn
             throw new Error("Protocol failure fixture lost admission");
           }
         }, binding.attachment);
-        admission.port.postMessage({ kind: "native-settlement", settlement: { kind: "invalid" } });
+        admission.port.postMessage(
+          { kind: "native-settlement", settlement: { kind: "invalid" } },
+          [],
+        );
         admission.service();
         return { nativeLocations: binding.nativeLocations, admission };
       };
