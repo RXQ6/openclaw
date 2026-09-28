@@ -1439,7 +1439,7 @@ describe("release validation no-push transport", () => {
     );
     expect(binderCheckout?.candidate.with).toMatchObject({
       repository: "openclaw/openclaw",
-      ref: "${{ steps.workflow.outputs.sha }}",
+      ref: "${{ github.sha }}",
       "persist-credentials": false,
     });
     const binder = job(workflow, "bind_full_release_candidate_evidence");
@@ -1448,6 +1448,13 @@ describe("release validation no-push transport", () => {
       binder.steps!.indexOf(binderCheckout!.candidate),
     );
     expect(binderIdentity.run).not.toContain('"fetch"');
+    const binderRestore = step(binder, "Restore exact trusted workflow revision");
+    expect(binder.steps!.indexOf(binderRestore)).toBe(
+      binder.steps!.indexOf(binderCheckout!.candidate) + 1,
+    );
+    expect(binder.steps!.indexOf(binderRestore)).toBeLessThan(
+      binder.steps!.indexOf(step(binder, "Setup trusted release harness")),
+    );
     const exactRevisionCheckouts = trustedCheckouts.filter(
       ({ jobName }) => jobName !== "bind_full_release_candidate_evidence",
     );
@@ -1664,7 +1671,9 @@ describe("release validation no-push transport", () => {
     expect(readFileSync(LIVE_E2E, "utf8")).not.toContain("fromJSON(toJSON(job)).workflow_");
     expect(readFileSync(LIVE_E2E, "utf8")).not.toContain("${{ github.workflow_sha }}");
     const artifactPackAndLoadSteps = Object.values(workflow.jobs ?? {}).flatMap((workflowJob) =>
-      (workflowJob.steps ?? []).filter((candidate) => candidate.env?.WORKFLOW_SHA !== undefined),
+      (workflowJob.steps ?? []).filter(
+        (candidate) => candidate.env?.WORKFLOW_SHA !== undefined && candidate !== binderRestore,
+      ),
     );
     expect(artifactPackAndLoadSteps).toHaveLength(8);
     for (const artifactStep of artifactPackAndLoadSteps) {

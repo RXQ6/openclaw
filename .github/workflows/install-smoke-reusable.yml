@@ -212,7 +212,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: openclaw/openclaw
-          ref: ${{ steps.workflow.outputs.sha }}
+          ref: ${{ github.sha }}
           path: .artifacts/build-warning-harness
           fetch-depth: 1
           persist-credentials: false
@@ -220,6 +220,50 @@ jobs:
           sparse-checkout: |
             scripts/relay-build-limit-warnings.mts
             scripts/lib/check-limits.mts
+
+      # The immutable caller checkout is a seed only. Execute no repository code until Q is restored.
+      - name: Restore exact trusted workflow revision
+        env:
+          WORKFLOW_REPOSITORY: ${{ steps.workflow.outputs.repository }}
+          WORKFLOW_SHA: ${{ steps.workflow.outputs.sha }}
+          HARNESS_PATH: .artifacts/build-warning-harness
+        shell: bash
+        run: &trusted_workflow_restore_run |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { execFileSync } from "node:child_process";
+          import { realpathSync } from "node:fs";
+          import { resolve } from "node:path";
+
+          const repository = process.env.WORKFLOW_REPOSITORY ?? "";
+          const workflowSha = process.env.WORKFLOW_SHA ?? "";
+          const harnessPath = process.env.HARNESS_PATH ?? "";
+          if (repository !== "openclaw/openclaw" || !/^[0-9a-f]{40}$/u.test(workflowSha)) {
+            throw new Error("authenticated workflow repository and full SHA are required");
+          }
+          if (![".release-harness", ".artifacts/build-warning-harness"].includes(harnessPath)) {
+            throw new Error("trusted harness path is invalid");
+          }
+          const directory = resolve(realpathSync(process.cwd()), harnessPath);
+          if (realpathSync(directory) !== directory) {
+            throw new Error("trusted harness path must not traverse symlinks");
+          }
+          const git = (...args) => execFileSync("git", ["-C", directory, ...args], {
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "inherit"],
+            timeout: 120_000,
+          }).trim();
+          if (git("remote", "get-url", "origin").replace(/\.git$/u, "") !== "https://github.com/" + repository) {
+            throw new Error("trusted harness remote does not match the workflow repository");
+          }
+          if (git("rev-parse", "HEAD") !== workflowSha) {
+            git("fetch", "--no-tags", "--no-recurse-submodules", "--depth=1", "origin", workflowSha);
+            git("checkout", "--detach", workflowSha);
+          }
+          if (git("rev-parse", "HEAD") !== workflowSha) {
+            throw new Error("trusted harness checkout did not resolve to the authenticated workflow SHA");
+          }
+          NODE
 
       - name: Set up Blacksmith Docker Builder
         uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2.2.0
@@ -378,16 +422,26 @@ jobs:
         shell: bash
         run: *trusted_workflow_identity_run
 
-      # Capture the executing reusable workflow before acquisition; never bootstrap from moving main.
+      # Bootstrap from an immutable caller seed, never moving main or a propagated ref.
+      # The next step restores authenticated callee Q before any repository code executes.
       - &trusted_workflow_subdir_checkout_step
         name: Checkout trusted release harness
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: openclaw/openclaw
-          ref: ${{ steps.workflow.outputs.sha }}
+          ref: ${{ github.sha }}
           path: .release-harness
           fetch-depth: 1
           persist-credentials: false
+
+      - &trusted_workflow_subdir_restore_step
+        name: Restore exact trusted workflow revision
+        env:
+          WORKFLOW_REPOSITORY: ${{ steps.workflow.outputs.repository }}
+          WORKFLOW_SHA: ${{ steps.workflow.outputs.sha }}
+          HARNESS_PATH: .release-harness
+        shell: bash
+        run: *trusted_workflow_restore_run
 
       - name: Set up Blacksmith Docker Builder
         uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2.2.0
@@ -517,6 +571,8 @@ jobs:
       - *trusted_workflow_subdir_identity_step
 
       - *trusted_workflow_subdir_checkout_step
+
+      - *trusted_workflow_subdir_restore_step
 
       - name: Prepare trusted selected-source Git owner
         uses: ./.release-harness/.github/actions/git-owner
@@ -719,6 +775,8 @@ jobs:
 
       - *trusted_workflow_subdir_checkout_step
 
+      - *trusted_workflow_subdir_restore_step
+
       - name: Require exact trusted installer harness
         env:
           EXPECTED_REPOSITORY: ${{ steps.workflow.outputs.repository }}
@@ -907,6 +965,8 @@ jobs:
 
       - *trusted_workflow_subdir_checkout_step
 
+      - *trusted_workflow_subdir_restore_step
+
       - name: Set up Blacksmith Docker Builder
         uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2.2.0
         with:
@@ -987,6 +1047,8 @@ jobs:
 
       - *trusted_workflow_subdir_checkout_step
 
+      - *trusted_workflow_subdir_restore_step
+
       - name: Set up Blacksmith Docker Builder
         uses: useblacksmith/setup-docker-builder@19215110ab936351210feebdfa5b440b4493e184 # v2.2.0
         with:
@@ -1058,6 +1120,8 @@ jobs:
       - *trusted_workflow_subdir_identity_step
 
       - *trusted_workflow_subdir_checkout_step
+
+      - *trusted_workflow_subdir_restore_step
 
       - &candidate_payload_binding_step
         name: Validate candidate payload artifact binding
@@ -1290,6 +1354,8 @@ jobs:
 
       - *trusted_workflow_subdir_checkout_step
 
+      - *trusted_workflow_subdir_restore_step
+
       - name: Validate candidate payload artifact binding
         env: *candidate_payload_binding_env
         run: |
@@ -1494,6 +1560,8 @@ jobs:
 
       - *trusted_workflow_subdir_checkout_step
 
+      - *trusted_workflow_subdir_restore_step
+
       - *candidate_payload_binding_step
 
       - *candidate_payload_download_step
@@ -1557,6 +1625,8 @@ jobs:
       - *trusted_workflow_subdir_identity_step
 
       - *trusted_workflow_subdir_checkout_step
+
+      - *trusted_workflow_subdir_restore_step
 
       - *candidate_payload_binding_step
 

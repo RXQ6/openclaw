@@ -9818,7 +9818,7 @@ describe("package artifact reuse", () => {
       {
         inputs: {
           repository: "openclaw/openclaw",
-          ref: "${{ steps.workflow.outputs.sha }}",
+          ref: "${{ github.sha }}",
           "fetch-depth": 1,
           path: ".release-harness",
           "persist-credentials": false,

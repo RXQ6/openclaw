@@ -177,7 +177,7 @@ describe("install smoke no-push root image transport", () => {
     expect(fastJob.needs).toContain("preflight");
     expect(warningRelay.with).toMatchObject({
       repository: "openclaw/openclaw",
-      ref: "${{ steps.workflow.outputs.sha }}",
+      ref: "${{ github.sha }}",
       path: ".artifacts/build-warning-harness",
       "fetch-depth": 1,
       "persist-credentials": false,
@@ -217,10 +217,17 @@ describe("install smoke no-push root image transport", () => {
       const checkoutIndex = workflowJob.steps!.indexOf(trustedCheckouts[0]!);
       const resolverIndex = workflowJob.steps!.indexOf(resolver);
       expect(resolverIndex, jobName).toBeLessThan(checkoutIndex);
+      const restore = step(workflowJob, "Restore exact trusted workflow revision");
+      expect(workflowJob.steps!.indexOf(restore), jobName).toBe(checkoutIndex + 1);
+      expect(restore.env, jobName).toMatchObject({
+        HARNESS_PATH: harnessPath,
+        WORKFLOW_REPOSITORY: "${{ steps.workflow.outputs.repository }}",
+        WORKFLOW_SHA: "${{ steps.workflow.outputs.sha }}",
+      });
       for (const checkout of trustedCheckouts) {
         expect(checkout.with, jobName).toMatchObject({
           repository: "openclaw/openclaw",
-          ref: "${{ steps.workflow.outputs.sha }}",
+          ref: "${{ github.sha }}",
           path: harnessPath,
           "fetch-depth": 1,
           "persist-credentials": false,
@@ -835,6 +842,7 @@ describe("install smoke no-push root image transport", () => {
       bunOnlyNode,
       step(bunOnlyConsumer, "Resolve exact trusted workflow identity"),
       step(bunOnlyConsumer, "Checkout trusted release harness"),
+      step(bunOnlyConsumer, "Restore exact trusted workflow revision"),
       bunBinding,
       bunOnlyDownload,
       bunVerify,
@@ -871,7 +879,7 @@ describe("install smoke no-push root image transport", () => {
     });
     expect(step(producer, "Checkout trusted release harness").with).toMatchObject({
       repository: "openclaw/openclaw",
-      ref: "${{ steps.workflow.outputs.sha }}",
+      ref: "${{ github.sha }}",
       "fetch-depth": 1,
       "persist-credentials": false,
     });

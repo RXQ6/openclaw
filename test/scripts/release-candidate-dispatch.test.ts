@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { runInNewContext } from "node:vm";
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { describe, expect, it, vi } from "vitest";
 import { stripNodeTypeScriptTypes } from "../helpers/node-toolchain.js";
 
@@ -50,7 +51,7 @@ describe("candidate checklist retained dispatch recovery", () => {
           publicationSelectionForChecklist: () => ({ route: "normal", npmDistTag: "latest" }),
           run,
           readJson: () => record,
-          isRecord: (value: unknown) => typeof value === "object" && value !== null,
+          isRecord,
         },
       ) as (options: object, candidate: string, publisher: string) => string;
       const flag = resumable ? "--resume-request" : "--reconcile-request";

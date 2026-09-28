@@ -251,18 +251,23 @@ function captureQualificationIdentity(
   runGh: RunGh,
 ): Array<[string, string | Uint8Array]> {
   const descriptor = params.qualificationAdmission;
-  const isRecord = (entry: unknown): entry is Record<string, unknown> =>
-    typeof entry === "object" && entry !== null && !Array.isArray(entry);
-  if (!isRecord(descriptor)) {
+  if (descriptor === null || typeof descriptor !== "object" || Array.isArray(descriptor)) {
     throw new Error("Invalid inventory admission descriptor");
   }
   const positiveId = (value: unknown): value is number =>
     typeof value === "number" && Number.isSafeInteger(value) && value > 0;
-  const { workflowSha, workflowFullRef, runId, runAttempt, artifactId } = descriptor;
+  // This capture precedes executable tooling admission. Snapshot JSON fields with
+  // built-ins; the verified child still owns full descriptor and authority validation.
+  const fields = new Map<string, unknown>(Object.entries(descriptor));
+  const workflowSha = fields.get("workflowSha"),
+    workflowFullRef = fields.get("workflowFullRef"),
+    runId = fields.get("runId"),
+    runAttempt = fields.get("runAttempt"),
+    artifactId = fields.get("artifactId");
   if (
     params.candidateSha !== params.toolingSha ||
     params.qualificationInputs === undefined ||
-    descriptor.repository !== REPOSITORY ||
+    fields.get("repository") !== REPOSITORY ||
     typeof workflowSha !== "string" ||
     !/^[a-f0-9]{40}$/u.test(workflowSha) ||
     typeof workflowFullRef !== "string" ||
@@ -333,18 +338,19 @@ function captureQualificationIdentity(
     const run: unknown = JSON.parse(
       String(api("actions/runs/" + runId + "/attempts/" + runAttempt)),
     );
-    if (!isRecord(run)) {
+    if (run === null || typeof run !== "object" || Array.isArray(run)) {
       throw new Error("Invalid admission run");
     }
-    for (const actor of [run.actor, run.triggering_actor]) {
-      if (
-        !isRecord(actor) ||
-        typeof actor.login !== "string" ||
-        !/^[A-Za-z0-9-]{1,39}$/u.test(actor.login)
-      ) {
+    const runFields = new Map<string, unknown>(Object.entries(run));
+    for (const actor of [runFields.get("actor"), runFields.get("triggering_actor")]) {
+      if (actor === null || typeof actor !== "object" || Array.isArray(actor)) {
         throw new Error("Invalid admission actor");
       }
-      api("collaborators/" + actor.login + "/permission");
+      const login = new Map<string, unknown>(Object.entries(actor)).get("login");
+      if (typeof login !== "string" || !/^[A-Za-z0-9-]{1,39}$/u.test(login)) {
+        throw new Error("Invalid admission actor");
+      }
+      api("collaborators/" + login + "/permission");
     }
   };
   api("contents/.github/workflows/openclaw-release-prepare.yml?ref=" + workflowSha);
