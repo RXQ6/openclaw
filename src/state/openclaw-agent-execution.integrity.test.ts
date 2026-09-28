@@ -181,7 +181,7 @@ it("retires every borrower when native open refusal retains admission cleanup fa
   const refusal = new Error("Original caller revoked before native agent open");
   const cleanupError = new Error("Original caller cleanup failed after granting open");
   let sourceCurrent = true;
-  let openRequests = 0;
+  let domainOpenRequests = 0;
   const source: AgentDatabaseRequestExecutionSource = {
     assertCurrent() {
       if (!sourceCurrent) {
@@ -193,13 +193,13 @@ it("retires every borrower when native open refusal retains admission cleanup fa
         nativeLocations: binding.nativeLocations,
         admission: createSqliteWorkerOperationAdmission((request, grant) => {
           if (request.stage === "open") {
-            openRequests += 1;
+            domainOpenRequests += 1;
           }
           binding.authorize(request);
           if (!grant()) {
             throw new Error("Cleanup refusal fixture lost its admission");
           }
-          if (request.stage === "open" && openRequests === 1) {
+          if (request.stage === "open" && domainOpenRequests === 1) {
             // The broker granted factory entry; the factory must still admit its native open.
             sourceCurrent = false;
             throw cleanupError;
@@ -215,7 +215,8 @@ it("retires every borrower when native open refusal retains admission cleanup fa
       cause: refusal,
       errors: [refusal, { errors: [cleanupError] }],
     });
-    expect(openRequests).toBe(2);
+    // The broker refuses the factory open before re-entering the domain callback.
+    expect(domainOpenRequests).toBe(1);
     sourceCurrent = true;
     expect(() => retained.assertCurrent()).toThrow("Agent database execution admission is closed");
     await expect(retained.runExisting(source, async () => "not admitted")).rejects.toThrow(

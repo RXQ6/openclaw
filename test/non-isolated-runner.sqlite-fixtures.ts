@@ -41,6 +41,7 @@ async function useReadPool() {
 `;
   return {
     ...scheduledCloseFixtureFiles(),
+    ...sharedStatePublisherFixtureFiles(),
     ...stateReadPoolFixtureFiles(),
     ...failedDrainFixtureFiles(readPoolFixture),
     "11-a-sqlite-owner.test.ts": `
@@ -207,6 +208,36 @@ it("retains installed-schema repair ownership through retired agent lease cleanu
   await useReadPool();
   await closeOpenClawStateDatabaseAsync();
   expect(readPool.close).toHaveBeenCalledOnce();
+});
+`,
+  };
+}
+
+function sharedStatePublisherFixtureFiles(): Record<string, string> {
+  const imports = `
+import { expect, it, vi } from "vitest";
+vi.mock(${JSON.stringify(import.meta.resolve("../src/state/openclaw-state-worker-store.ts"))}, () => {
+  throw new Error("Direct owner fixture unexpectedly evaluated the store facade");
+});
+import { getOpenClawStateWorkerOwner } from ${JSON.stringify(import.meta.resolve("../src/state/openclaw-state-worker-owner.ts"))};
+const generationKey = Symbol.for("fixture.sharedStatePublisherGeneration");
+`;
+  return {
+    "10-c-shared-owner-publisher.test.ts": `${imports}
+it("publishes the real shared-state owner without its store facade", () => {
+  expect(Reflect.has(globalThis, generationKey)).toBe(false);
+  Reflect.set(globalThis, generationKey, getOpenClawStateWorkerOwner());
+});
+`,
+    "10-d-shared-owner-generation.test.ts": `${imports}
+it("starts the next file with a new shared-state owner generation", () => {
+  const previous = Reflect.get(globalThis, generationKey);
+  expect(previous).toBeDefined();
+  try {
+    expect(getOpenClawStateWorkerOwner()).not.toBe(previous);
+  } finally {
+    Reflect.deleteProperty(globalThis, generationKey);
+  }
 });
 `,
   };
