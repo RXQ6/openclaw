@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { createSessionMembershipProjection } from "../../gateway/session-membership-projection.js";
+import * as logging from "../../logging/logger.js";
 import {
   onSessionIdentityMutation,
   type SessionIdentityMutation,
@@ -74,6 +75,7 @@ vi.mock("../../state/openclaw-agent-execution.js", async (importOriginal) => {
 });
 
 afterEach(() => {
+  vi.restoreAllMocks();
   delivery.afterResult = undefined;
   delivery.releaseFailure = undefined;
 });
@@ -153,6 +155,19 @@ it.each([
   "late writer",
 ] as const)("preserves replacement publication through %s", async (boundary) => {
   await withOpenClawTestState({ scenario: "minimal" }, async () => {
+    const cleanupWarnings: unknown[][] = [];
+    const getChildLogger = logging.getChildLogger;
+    vi.spyOn(logging, "getChildLogger").mockImplementation((...args) => {
+      const logger = getChildLogger(...args);
+      const warn = logger.warn.bind(logger);
+      vi.spyOn(logger, "warn").mockImplementation((...values) => {
+        if (values[0] === "Session mutation completed before executor cleanup failed") {
+          cleanupWarnings.push(values);
+        }
+        return warn(...values);
+      });
+      return logger;
+    });
     const database = openOpenClawAgentDatabase({ agentId: "main" });
     const options = { agentId: "main", path: database.path };
     const sessionKey = "agent:main:replacement-settlement";
@@ -262,12 +277,22 @@ it.each([
           };
         },
       });
-      if (boundary === "lost result" || boundary === "release failure") {
+      if (boundary === "lost result") {
         await expect(operation).rejects.toBe(failure);
       } else {
         await operation;
       }
       expect(executions).toBe(1);
+      expect(cleanupWarnings).toEqual(
+        boundary === "release failure"
+          ? [
+              [
+                "Session mutation completed before executor cleanup failed",
+                { errors: [failure.message] },
+              ],
+            ]
+          : [],
+      );
       if (boundary !== "late writer") {
         expect(whileWaiting).toBeUndefined();
       }
