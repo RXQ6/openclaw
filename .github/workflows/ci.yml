@@ -54,6 +54,11 @@ on:
         required: false
         default: ""
         type: string
+      qualification_baselines_json:
+        description: Captured exact upgrade and survivor baselines from the qualification request
+        required: false
+        default: ""
+        type: string
       dispatch_id:
         description: Optional parent workflow dispatch identifier
         required: false
@@ -742,7 +747,7 @@ jobs:
               node_setup_scripts = ("scripts/lib/pnpm-lockfile-documents.mjs",)
               evidence_scripts = ("scripts/ios-screenshot-evidence.mjs", "scripts/lib/direct-run.mjs", "scripts/ci-static-step.sh")
               platform_scripts = ("scripts/lib/swift-toolchain.sh",)
-              upgrade_scripts = ("scripts/lib/release-upgrade-baseline.mjs", "scripts/lib/release-version.mjs")
+              upgrade_scripts = ("scripts/lib/release-upgrade-baseline.mjs", "scripts/lib/release-version.mjs", "scripts/lib/canonical-json.mjs")
               npm_lock_scripts = (
                   "scripts/ci-npm-lock-admission.mjs",
                   "scripts/generate-npm-package-lock.mjs",
@@ -1110,6 +1115,9 @@ jobs:
         id: diff_base
         env:
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          DISPATCH_ID: ${{ inputs.dispatch_id }}
+          TARGET_CONTEXT_REF: ${{ inputs.target_context_ref }}
+          WORKFLOW_REVISION: ${{ github.workflow_sha }}
           EVENT_BASE_SHA: ${{ github.event_name == 'push' && github.event.before || github.event.pull_request.base.sha || '' }}
           GH_TOKEN: ${{ github.event_name == 'workflow_dispatch' && !inputs.release_gate && github.token || '' }}
           PULL_REQUEST_NUMBER: ${{ inputs.pull_request_number }}
@@ -1134,18 +1142,28 @@ jobs:
               --base "$base_sha" --head HEAD --prefer-first-parent)"
           fi
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$RELEASE_GATE" != "true" ]; then
-            encoded_ref="$(jq -rn --arg value "refs/heads/${DEFAULT_BRANCH}" '$value | @uri')"
-            default_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${encoded_ref}" --jq .sha)"
+            # Qualification compares frozen inputs, not main after it advances.
+            # Cross-revision diagnostics retain the immutable workflow/target merge base.
+            if [[ "${DISPATCH_ID:-}" == full-release-validation-* && -n "${TARGET_CONTEXT_REF:-}" ]]; then
+              default_sha="$WORKFLOW_REVISION"
+            else
+              encoded_ref="$(jq -rn --arg value "refs/heads/${DEFAULT_BRANCH}" '$value | @uri')"
+              default_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${encoded_ref}" --jq .sha)"
+            fi
             if [[ ! "$default_sha" =~ ^[0-9a-f]{40}$ ]]; then
               echo "Could not resolve the default branch head for the manual target." >&2
               exit 1
             fi
             echo "default_sha=$default_sha" >> "$GITHUB_OUTPUT"
-            base_sha="$(
-              gh api --method GET \
-                "repos/${GITHUB_REPOSITORY}/compare/${default_sha}...${head_sha}" \
-                --jq '.merge_base_commit.sha'
-            )"
+            if [[ "$default_sha" == "$head_sha" ]]; then
+              base_sha="$head_sha"
+            else
+              base_sha="$(
+                gh api --method GET \
+                  "repos/${GITHUB_REPOSITORY}/compare/${default_sha}...${head_sha}" \
+                  --jq '.merge_base_commit.sha'
+              )"
+            fi
           fi
           if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ] && [ "$RELEASE_GATE" = "true" ]; then
             merge_ref="refs/remotes/origin/release-gate-merge"
@@ -5670,6 +5688,11 @@ jobs:
           CHECKOUT_REPO: openclaw/clawhub
         run: *owned_checkout_run
 
+      - name: Record external documentation dependency
+        run: |
+          printf 'ClawHub documentation dependency: openclaw/clawhub@%s (external data, not qualification harness).\n' \
+            "$(git -C clawhub-source rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Check docs
         env:
           OPENCLAW_DOCS_SYNC_CLAWHUB_REPO: ${{ github.workspace }}/clawhub-source
@@ -7215,12 +7238,20 @@ jobs:
         if: contains(format(' {0} ', needs.preflight.outputs.docker_seed_lanes), ' published-upgrade-survivor ')
         env:
           TARGET_CONTEXT_REF: ${{ inputs.target_context_ref || github.base_ref || github.ref_name }}
+          QUALIFICATION_BASELINES_JSON: ${{ inputs.qualification_baselines_json }}
         run: |
           set -euo pipefail
           candidate_version="$(node -p "require('./package.json').version")"
-          baseline="$(node .ci-harness/scripts/lib/release-upgrade-baseline.mjs \
-            --candidate-version "$candidate_version" \
-            --target-context-ref "$TARGET_CONTEXT_REF")"
+          if [[ -n "$QUALIFICATION_BASELINES_JSON" ]]; then
+            captured="$(node .ci-harness/scripts/lib/release-upgrade-baseline.mjs \
+              --candidate-version "$candidate_version" --target-context-ref "$TARGET_CONTEXT_REF" \
+              --qualification-baselines-json "$QUALIFICATION_BASELINES_JSON")"
+            baseline="$(jq -er .upgradeBaseline <<< "$captured")"
+          else
+            baseline="$(node .ci-harness/scripts/lib/release-upgrade-baseline.mjs \
+              --candidate-version "$candidate_version" \
+              --target-context-ref "$TARGET_CONTEXT_REF")"
+          fi
           printf 'OPENCLAW_UPGRADE_SURVIVOR_BASELINE_SPEC=%s\n' "$baseline" >> "$GITHUB_ENV"
 
       # The update tripwire and release validation require complete SDK declarations.

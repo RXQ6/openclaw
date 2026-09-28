@@ -46,6 +46,9 @@ beforeAll(() => {
   for (const file of [
     "scripts/preflight-frozen-target-contracts.mjs",
     "scripts/lib/frozen-target-source.mjs",
+    "scripts/lib/frozen-target-workflow-request.mjs",
+    "scripts/lib/release-upgrade-baseline.mjs",
+    "scripts/lib/canonical-json.mjs",
     "scripts/lib/docker-e2e-plan.mts",
     "scripts/lib/docker-e2e-scenarios.mts",
     "scripts/lib/official-external-channel-catalog.json",
@@ -1436,9 +1439,15 @@ describe("release validation no-push transport", () => {
     );
     expect(binderCheckout?.candidate.with).toMatchObject({
       repository: "openclaw/openclaw",
-      ref: "main",
+      ref: "${{ steps.workflow.outputs.sha }}",
       "persist-credentials": false,
     });
+    const binder = job(workflow, "bind_full_release_candidate_evidence");
+    const binderIdentity = step(binder, "Resolve exact trusted workflow identity");
+    expect(binder.steps!.indexOf(binderIdentity)).toBeLessThan(
+      binder.steps!.indexOf(binderCheckout!.candidate),
+    );
+    expect(binderIdentity.run).not.toContain('"fetch"');
     const exactRevisionCheckouts = trustedCheckouts.filter(
       ({ jobName }) => jobName !== "bind_full_release_candidate_evidence",
     );
@@ -1991,6 +2000,9 @@ describe("release validation no-push transport", () => {
     expect(dockerCall.if).toContain("needs.verify_core_npm_registry.result == 'success'");
     expect(dockerCall.with).toEqual({
       runner_group: "${{ vars.OPENCLAW_RELEASE_RUNNER_GROUP }}",
+      full_release_validation_run_id: "${{ inputs.full_release_validation_run_id }}",
+      full_release_validation_run_attempt:
+        "${{ needs.resolve_release_target.outputs.full_release_validation_run_attempt }}",
       tag: "${{ inputs.tag }}",
       release_sha: "${{ needs.resolve_release_target.outputs.sha }}",
       prepared_run_id: "${{ needs.resolve_release_target.outputs.prepared_docker_run_id }}",
