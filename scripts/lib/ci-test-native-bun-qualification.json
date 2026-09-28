@@ -10,7 +10,7 @@
     "test/vitest/vitest.shared.config.ts": "644e0169dfd7d00d8d41a7dc599bcd38f7f31c1c12a9101a37a31691408dc5a2",
     "test/vitest/vitest.timeouts.ts": "82465558c77ce00d1e892a4ba06be6df5d4e449eecffb5383d1c45ce8ad7d073",
     "test/vitest/vitest.unit-fast.config.ts": "c375573bd6c01fc691c8890933356e37fd20a45561dbe772c140ed86c76dc4f6",
-    "tsconfig.json": "43c12b877186f0440e709a9c5e5f91355814cc747e126781e86373df2c23360d"
+    "tsconfig.json": "37ff1b9ebd37523754e0060f132e078f79ed07aaaf1ac201eff5e8696f7dcc50"
   },
   "tests": {
     "packages/markdown-core/src/chunk-text.test.ts": "07c00c11cfbfe30e1a9920571bfafabf1a7ea3f48ae37fd3e116aebd923c982b",
