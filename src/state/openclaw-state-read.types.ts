@@ -56,6 +56,7 @@ import type {
   WorkspaceJournalReadCommand,
   WorkspaceJournalReadResult,
 } from "../gateway/worker-environments/placement-workspace-journal.worker-contract.js";
+import type { PreparedPoolPresenceDemand } from "../gateway/worker-environments/prepared-pool-presence-store.js";
 import type {
   WorkerEnvironmentFacts,
   WorkerEnvironmentPrunePage,
@@ -235,6 +236,7 @@ export type OpenClawStateReadCommand =
   | { type: "fleet.get"; tenantId: string }
   | { type: "nodeHost.config" }
   | { type: "operator.channelPolicy" }
+  | { type: "preparedPoolPresence.read" }
   | {
       type: "sessionRepositoryWorkspaces.find";
       owners: readonly { agentId: string; sessionKey: string }[];
@@ -264,6 +266,7 @@ type ReadResult<Reply> = Reply extends { ok: true } ? Omit<Reply, "ok" | "source
 
 export type OpenClawStateReadResult =
   | { type: "doctor.gatewayOwnerLease.read"; lease: GatewayOwnerLeaseIdentity | undefined }
+  | { type: "preparedPoolPresence.read"; demand: PreparedPoolPresenceDemand | undefined }
   | {
       type: "tui.lastSession.read";
       row: Pick<Selectable<ConfigMachineState>, "value_json" | "updated_at_ms"> | undefined;
