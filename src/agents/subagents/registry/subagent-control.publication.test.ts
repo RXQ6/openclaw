@@ -15,6 +15,7 @@ import {
 import type { AgentWaitResult } from "../../run-wait.js";
 import * as killRuntime from "./subagent-control-kill-runtime.js";
 import { killSubagentRunAdmin } from "./subagent-control.js";
+import * as registryHelpers from "./subagent-registry-helpers.js";
 import { subagentRuns } from "./subagent-registry-memory.js";
 import { registerSubagentRun, replaceSubagentRunAfterSteerCore } from "./subagent-registry.js";
 import {
@@ -120,7 +121,21 @@ it.each([
 
     const successorCompleted = createDeferred();
     const originalCompleted = createDeferred();
+    const originalTimingCompleted = createDeferred();
     const originalSettled = createDeferred();
+    const persistTiming = registryHelpers.persistSubagentSessionTiming;
+    vi.spyOn(registryHelpers, "persistSubagentSessionTiming").mockImplementation(
+      async (entry, options) => {
+        const completingOriginal =
+          entry === b0 &&
+          entry.execution.status === "terminal" &&
+          entry.execution.outcome?.status === "ok";
+        await persistTiming(entry, options);
+        if (completingOriginal) {
+          originalTimingCompleted.resolve();
+        }
+      },
+    );
     fixture.persist.mockImplementation((...runIds) => {
       persistSubagentRunsToDiskOrThrow(...runIds);
       if (b0.execution.outcome) {
@@ -266,6 +281,8 @@ it.each([
           terminalReply: { disposition: "visible", text: "original completed during cancellation" },
         });
         await originalCompleted.promise;
+        // Completion timing clears the abort marker after the registry outcome is durable.
+        await originalTimingCompleted.promise;
         expect(b0.killReconciliation).toBeUndefined();
         childAdmission.release();
         if (replace) {
