@@ -21,6 +21,8 @@ const toolingClosure = [
   "scripts/lib/docker-e2e-plan.mts",
   "scripts/lib/docker-e2e-scenarios.mts",
   "scripts/lib/official-external-channel-catalog.json",
+  "scripts/lib/official-external-provider-catalog.json",
+  "scripts/lib/record-shared.mjs",
   "scripts/lib/update-compat-inventory.json",
   "scripts/lib/update-first-hop-lanes.mjs",
   "scripts/lib/upgrade-survivor-policy.mjs",
@@ -447,6 +449,7 @@ async function planWorkflowAdmission(input) {
   const codexSuites = [...new Set(selections.flatMap((selection) => selection.codexSuites))];
   const possibleLanes = [];
   let mobilePairingSelected = false;
+  let legacyOperatorSelected = false;
   for (const selection of docker) {
     const lanes =
       selection.lanes ??
@@ -458,6 +461,13 @@ async function planWorkflowAdmission(input) {
     const survivorLanes = lanes.filter((lane) =>
       /^(published-upgrade-survivor|update-migration)(-|$)/u.test(lane),
     );
+    if (
+      survivorLanes.length &&
+      (survivorLanes.some((lane) => lane.includes("legacy-operator-state")) ||
+        parseUpgradeSurvivorScenarios(selection.scenarios ?? "").includes("legacy-operator-state"))
+    ) {
+      legacyOperatorSelected = true;
+    }
     if (
       allow &&
       survivorLanes.length &&
@@ -541,6 +551,9 @@ async function planWorkflowAdmission(input) {
   }
   if (mobilePairingSelected) {
     sourcePaths.add("src/gateway/node-command-policy.ts");
+  }
+  if (legacyOperatorSelected) {
+    sourcePaths.add("scripts/lib/official-external-provider-catalog.json");
   }
   if (
     possibleLanes.some((lane) => /^(published-upgrade-survivor|update-migration)(-|$)/u.test(lane))

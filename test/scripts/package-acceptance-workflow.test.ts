@@ -217,6 +217,8 @@ const frozenAdmissionClosure = [
   "scripts/lib/docker-e2e-plan.mts",
   "scripts/lib/docker-e2e-scenarios.mts",
   "scripts/lib/official-external-channel-catalog.json",
+  "scripts/lib/official-external-provider-catalog.json",
+  "scripts/lib/record-shared.mjs",
   "scripts/lib/update-compat-inventory.json",
   "scripts/lib/update-first-hop-lanes.mjs",
   "scripts/lib/upgrade-survivor-policy.mjs",
@@ -1282,7 +1284,7 @@ describe("frozen admission workflow barriers", () => {
         "extensions/codex/package.json": readFileSync("extensions/codex/package.json", "utf8"),
       },
       {},
-      ["scripts/e2e/lib", "scripts/lib/record-shared.mjs"],
+      ["scripts/e2e/lib"],
     );
     f.selection();
     const result = f.admit();
@@ -1290,10 +1292,11 @@ describe("frozen admission workflow barriers", () => {
     const record = JSON.parse(readFileSync(join(f.root, "frozen-admission.json"), "utf8"));
     const children = reconstructAdmissionEvaluations(record);
     expect(children).toHaveLength(3);
-    const extra = "scripts/lib/record-shared.mjs";
+    const extra = "scripts/e2e/lib/codex-install-utils.mjs";
     for (const [index, child] of children.entries()) {
       const toolingPaths = child.sources.tooling.map(({ path }) => path);
       const selectedPaths = child.sources.selected.map(({ path }) => path);
+      expect(toolingPaths).toContain("scripts/lib/record-shared.mjs");
       if (index === 1) {
         expect(toolingPaths).toContain(extra);
         expect(selectedPaths).toContain("extensions/codex/package.json");
@@ -2225,6 +2228,52 @@ describe("frozen admission workflow barriers", () => {
       reconstructAdmissionEvaluations(record);
     },
   );
+
+  it("acquires the selected provider catalog before legacy-operator-state admission", () => {
+    const path = "scripts/lib/official-external-provider-catalog.json";
+    const fixture = frozenWorkflowFixture(
+      LIVE_E2E_WORKFLOW,
+      "validate_selected_ref",
+      {
+        docker_lanes: "published-upgrade-survivor",
+        include_release_path_suites: false,
+        include_live_suites: false,
+        allow_frozen_target_scenario_omissions: true,
+        published_upgrade_survivor_baseline: "openclaw@2026.9.1",
+        published_upgrade_survivor_baselines: "openclaw@2026.9.1",
+        published_upgrade_survivor_scenarios: "legacy-operator-state",
+      },
+      {
+        "package.json": '{"type":"module","version":"2026.9.2"}',
+        [path]: readFileSync(path, "utf8"),
+        ...currentSurvivorScenarioFiles(),
+      },
+      { ADMISSION_BASELINES_RESOLVED: "true" },
+    );
+    expect(fixture.selection().sourcePaths).toContain(path);
+    const origin = join(fixture.root, "origin.git");
+    fixture.git("clone", "--bare", "--no-hardlinks", fixture.target, origin);
+    fixture.git("-C", origin, "config", "uploadpack.allowFilter", "true");
+    fixture.git("remote", "add", "origin", pathToFileURL(origin).href);
+    fixture.git("config", "remote.origin.promisor", "true");
+    fixture.git("config", "remote.origin.partialclonefilter", "blob:none");
+    const oid = fixture.git("rev-parse", `${fixture.sha}:${path}`);
+    unlinkSync(join(fixture.target, ".git", "objects", oid.slice(0, 2), oid.slice(2)));
+    const unavailable = fixture.admit();
+    expect(unavailable.status).not.toBe(0);
+    expect(unavailable.stderr).toContain("unable to read selected source");
+    const acquired = fixture.run("Acquire selected contract objects");
+    expect(acquired.status, acquired.stderr).toBe(0);
+    expect(fixture.git("--no-lazy-fetch", "cat-file", "blob", oid)).toBe(
+      readFileSync(path, "utf8").trim(),
+    );
+    const admitted = fixture.admit();
+    expect(admitted.status, admitted.stderr).toBe(0);
+    const record = JSON.parse(readFileSync(join(fixture.root, "frozen-admission.json"), "utf8"));
+    expect(
+      reconstructAdmissionEvaluations(record).flatMap((entry) => entry.sources.selected),
+    ).toContainEqual({ path, oid });
+  });
 
   it.each(["published-upgrade-survivor", "update-migration"])(
     "acquires selected upgrade metadata before expanded %s admission",
