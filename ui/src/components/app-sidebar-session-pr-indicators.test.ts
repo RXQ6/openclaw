@@ -80,7 +80,7 @@ function mountLifecycleHost(
   return host;
 }
 
-function createGatewayHarness() {
+function createGatewayHarness(scopes = ["operator.read"]) {
   const request = vi.fn().mockResolvedValue({ subscribed: true });
   const eventListeners = new Set<GatewayEventListener>();
   const client = { request } as unknown as GatewayBrowserClient;
@@ -89,7 +89,10 @@ function createGatewayHarness() {
       client,
       phase: "connected",
       offlineStable: false,
-      hello: { features: { methods: [SESSION_PULL_REQUESTS_SUBSCRIBE_METHOD] } },
+      hello: {
+        auth: { role: "operator", scopes },
+        features: { methods: [SESSION_PULL_REQUESTS_SUBSCRIBE_METHOD] },
+      },
       canvasPluginSurfaceUrl: null,
       assistantAgentId: "main",
       sessionKey: "agent:main:main",
@@ -137,6 +140,20 @@ afterEach(() => {
 });
 
 describe("SessionPullRequestIndicatorsController", () => {
+  it("does not subscribe to PR status for session-only sidebar viewers", async () => {
+    vi.useFakeTimers();
+    const harness = createGatewayHarness(["operator.sessions.read", "operator.sessions.write"]);
+    const row = {
+      key: "agent:main:demo",
+      isChild: false,
+      worktreeId: "wt-demo",
+    } as SidebarRecentSession;
+    const host = mountLifecycleHost(harness.gateway, () => [row]);
+    await host.updateComplete;
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(harness.request).not.toHaveBeenCalled();
+    expect(host.controller.summary(row.key, row.worktreeId ?? "")).toBeUndefined();
+  });
   it("does not invalidate the host when no rows are eligible", async () => {
     vi.useFakeTimers();
     const harness = createGatewayHarness();
