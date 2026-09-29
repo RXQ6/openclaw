@@ -29,12 +29,11 @@ import type {
 } from "./session-accessor.sqlite-lifecycle-types.js";
 import { kickSessionEntryMaintenanceAfterWrite } from "./session-accessor.sqlite-maintenance-kick.js";
 import { observeSessionMaintenancePlanningWorker } from "./session-accessor.sqlite-maintenance.test-support.js";
+import { runSqliteSessionReclamation } from "./session-accessor.sqlite-reclamation-run.js";
+import * as reclamationRun from "./session-accessor.sqlite-reclamation-run.js";
 import { SqliteReclamationInputsChangedError } from "./session-accessor.sqlite-reclamation-worker-diagnostics.js";
 import * as reclamation from "./session-accessor.sqlite-reclamation.js";
-import {
-  createSessionEntryReclamationPlan,
-  runSqliteSessionReclamation,
-} from "./session-accessor.sqlite-reclamation.js";
+import { createSessionEntryReclamationPlan } from "./session-accessor.sqlite-reclamation.js";
 import { registerSessionMaintenancePreserveKeysProvider } from "./store-maintenance-preserve.js";
 import { resolveMaintenanceConfigFromInput } from "./store-maintenance.js";
 
@@ -444,8 +443,8 @@ test.each(["active key", "provider"] as const)(
         const runs: Promise<unknown>[] = [];
         const firstRun = createDeferredCore();
         let armed = false;
-        const run = reclamation.runSqliteSessionReclamation;
-        vi.spyOn(reclamation, "runSqliteSessionReclamation").mockImplementation((params) => {
+        const run = reclamationRun.runSqliteSessionReclamation;
+        vi.spyOn(reclamationRun, "runSqliteSessionReclamation").mockImplementation((params) => {
           armed =
             params.plan.kind === "maintenance-plan" && params.plan.input.preservation !== null;
           const operation = run(params);

@@ -33,6 +33,7 @@ import {
   observeSessionMaintenancePlanningWorker,
   registerSessionMaintenancePreparationTests,
 } from "./session-accessor.sqlite-maintenance.test-support.js";
+import * as reclamationRun from "./session-accessor.sqlite-reclamation-run.js";
 import * as reclamation from "./session-accessor.sqlite-reclamation.js";
 import { registerSessionMaintenancePreserveKeysProvider } from "./store-maintenance-preserve.js";
 import { resolveMaintenanceConfigFromInput } from "./store-maintenance.js";
@@ -241,8 +242,8 @@ it.runIf(process.platform !== "win32")(
           return current;
         },
       );
-      const reclaim = reclamation.runSqliteSessionReclamation;
-      vi.spyOn(reclamation, "runSqliteSessionReclamation").mockImplementation(async (params) => {
+      const reclaim = reclamationRun.runSqliteSessionReclamation;
+      vi.spyOn(reclamationRun, "runSqliteSessionReclamation").mockImplementation(async (params) => {
         const result = await reclaim(params);
         if (!injected && result.kind === "maintenance-plan") {
           injected = true;
@@ -473,14 +474,16 @@ it.each(
       const warm = boundary !== "missing-after-settlement";
       let warmWorkerThreadId: number | undefined;
       if (warm) {
-        const reclaim = reclamation.runSqliteSessionReclamation;
-        vi.spyOn(reclamation, "runSqliteSessionReclamation").mockImplementation(async (params) => {
-          const result = await reclaim(params);
-          if (result.kind === "maintenance-plan") {
-            warmWorkerThreadId = params.diagnostics?.workerThreadId;
-          }
-          return result;
-        });
+        const reclaim = reclamationRun.runSqliteSessionReclamation;
+        vi.spyOn(reclamationRun, "runSqliteSessionReclamation").mockImplementation(
+          async (params) => {
+            const result = await reclaim(params);
+            if (result.kind === "maintenance-plan") {
+              warmWorkerThreadId = params.diagnostics?.workerThreadId;
+            }
+            return result;
+          },
+        );
         const prepared = observeMaintenance();
         await patchSessionEntryCore(active, () => ({ label: "warm" }), {
           maintenanceConfig: policy,
@@ -519,8 +522,8 @@ it.each(
         },
       });
       const adoptedAfterMutation: Array<ageFacts.SessionEntryMaintenanceAgeFact | undefined> = [];
-      const reclaim = reclamation.runSqliteSessionReclamation;
-      vi.spyOn(reclamation, "runSqliteSessionReclamation").mockImplementation((params) =>
+      const reclaim = reclamationRun.runSqliteSessionReclamation;
+      vi.spyOn(reclamationRun, "runSqliteSessionReclamation").mockImplementation((params) =>
         reclaim({
           ...params,
           onWorkerResult: (result, committedDatabaseIdentity) => {
@@ -622,7 +625,7 @@ it("publishes exact archived keys without worktrees after Worker planning", asyn
     const unsubscribe = sessionChanges.subscribe((change) => published.push(change));
     const diagnostics = {};
     try {
-      const result = await reclamation.runSqliteSessionReclamation({
+      const result = await reclamationRun.runSqliteSessionReclamation({
         diagnostics,
         forceInProcess: false,
         plan: reclamation.createSessionMaintenancePlanningOperation({
@@ -687,7 +690,7 @@ it("publishes only committed removal keys after Worker finalization", async () =
     const unsubscribe = sessionChanges.subscribe((change) => published.push(change));
     const diagnostics = {};
     try {
-      const result = await reclamation.runSqliteSessionReclamation({
+      const result = await reclamationRun.runSqliteSessionReclamation({
         diagnostics,
         forceInProcess: false,
         plan,
@@ -756,7 +759,7 @@ it.each(["no-op", "preservation", "statistics", "empty-finalization"] as const)(
       const completed = vi.fn();
       const diagnostics = {};
       try {
-        const result = await reclamation.runSqliteSessionReclamation({
+        const result = await reclamationRun.runSqliteSessionReclamation({
           diagnostics,
           forceInProcess: false,
           onWorkerResult: completed,
@@ -812,7 +815,7 @@ it.each(["retired predicate", "parent reload failure"] as const)(
         execute(sql);
       });
       const first: SqliteSessionReclamationDiagnostics = {};
-      const result = await reclamation.runSqliteSessionReclamation({
+      const result = await reclamationRun.runSqliteSessionReclamation({
         assertCommitAllowed: () => {
           if (!current) {
             throw fault;
@@ -837,7 +840,7 @@ it.each(["retired predicate", "parent reload failure"] as const)(
       reload.mockRestore();
       const second: SqliteSessionReclamationDiagnostics = {};
       await expect(
-        reclamation.runSqliteSessionReclamation({
+        reclamationRun.runSqliteSessionReclamation({
           diagnostics: second,
           forceInProcess: false,
           plan: reclamation.createSessionMaintenanceStatisticsOperation(databaseOptions),
@@ -861,8 +864,8 @@ it("replans incognito preservation discovery after rollback without a Worker", a
     replaceSessionEntrySync(active, { sessionId: "active", updatedAt: Date.now() });
     replaceSessionEntrySync(victim, { sessionId: "victim", updatedAt: 1 });
     const results: Array<{ kind: string; workerThreadId: number | undefined }> = [];
-    const reclaim = reclamation.runSqliteSessionReclamation;
-    vi.spyOn(reclamation, "runSqliteSessionReclamation").mockImplementation(async (params) => {
+    const reclaim = reclamationRun.runSqliteSessionReclamation;
+    vi.spyOn(reclamationRun, "runSqliteSessionReclamation").mockImplementation(async (params) => {
       const result = await reclaim(params);
       results.push({ kind: result.kind, workerThreadId: params.diagnostics?.workerThreadId });
       return result;

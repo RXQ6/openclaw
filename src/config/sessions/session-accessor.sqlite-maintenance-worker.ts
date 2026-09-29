@@ -3,8 +3,7 @@ import { performance } from "node:perf_hooks";
 import { runWithSqliteBusyTimeout } from "../../infra/sqlite-busy-timeout.js";
 import { createSqliteWorkerOperationAdmission } from "../../infra/sqlite-worker-operation-admission.js";
 import { getChildLogger } from "../../logging/logger.js";
-import type { OpenClawAgentDatabaseClaim } from "../../state/openclaw-agent-db-identity.js";
-import type { OpenClawAgentReadOnlyDatabase } from "../../state/openclaw-agent-db-readonly.js";
+import { findOpenClawAgentDatabaseIdentity } from "../../state/openclaw-agent-db-identity.js";
 import { getOpenClawAgentDatabaseIfOpen } from "../../state/openclaw-agent-db.js";
 import type { AgentDatabaseRequestExecutionSource } from "../../state/openclaw-agent-execution-contract.js";
 import type { SqliteSessionReclamationDiagnostics } from "./session-accessor.sqlite-contract.js";
@@ -16,12 +15,12 @@ import type {
 } from "./session-accessor.sqlite-lifecycle-types.js";
 import { invalidateSessionEntryMaintenanceAgeFact } from "./session-accessor.sqlite-maintenance-age.js";
 import { logSqliteReclamationWorkerOutcome } from "./session-accessor.sqlite-reclamation-worker-diagnostics.js";
+import type { SqliteReclamationClaim } from "./session-accessor.sqlite-reclamation-worker.js";
 import { runSessionEntryWorkerMutation } from "./session-accessor.sqlite-replacement-worker.js";
 
 export function runSessionMaintenanceMetadataInWorker(params: {
   plan: SessionMaintenanceMetadataCommand & { databaseOptions: ReclamationDatabaseOptions };
-  database: OpenClawAgentReadOnlyDatabase;
-  claim: OpenClawAgentDatabaseClaim;
+  claim: SqliteReclamationClaim;
   assertCurrent: () => void;
   refreshMaintenanceProtection?: () => SessionMaintenanceLiveProtection;
   signal: AbortSignal;
@@ -31,7 +30,7 @@ export function runSessionMaintenanceMetadataInWorker(params: {
     databaseIdentity: string | symbol,
   ) => void;
 }): Promise<SessionMaintenanceMetadataResult> {
-  const { database, plan, claim } = params;
+  const { plan, claim } = params;
   params.assertCurrent();
   const identity = claim.identity;
   if (typeof identity !== "string") {
@@ -72,18 +71,22 @@ export function runSessionMaintenanceMetadataInWorker(params: {
       return result;
     },
     {
-      identityAgentId: database.agentId,
+      identityAgentId: plan.databaseOptions.agentId,
       onResult(result) {
+        const openDatabase = getOpenClawAgentDatabaseIfOpen(plan.databaseOptions);
+        const database =
+          openDatabase && findOpenClawAgentDatabaseIdentity(openDatabase)?.identity === identity
+            ? openDatabase
+            : undefined;
         if (!result) {
           // A commit receipt can invalidate rows without recovering the lost planning result.
-          invalidateSessionEntryMaintenanceAgeFact(database.db);
+          if (database) {
+            invalidateSessionEntryMaintenanceAgeFact(database.db);
+          }
           return;
         }
         params.onWorkerResult?.(result, identity);
-        if (
-          result.kind === "maintenance-statistics" &&
-          getOpenClawAgentDatabaseIfOpen(plan.databaseOptions)?.db === database.db
-        ) {
+        if (result.kind === "maintenance-statistics" && database) {
           try {
             params.assertCurrent();
             runWithSqliteBusyTimeout(database.db, 0, () => {

@@ -5,6 +5,7 @@ import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { expect, it, onTestFinished, vi } from "vitest";
 import { observeHostDataSql } from "../../../test/helpers/sqlite-statement-execution-counter.js";
 import { racePromiseWithAbortSignal } from "../../infra/abort-signal.js";
+import * as sqlite from "../../infra/node-sqlite.js";
 import type {
   SqliteWorkerOperations,
   SqliteWorkerStore,
@@ -16,6 +17,8 @@ import { sessionChanges } from "../../sessions/session-row-changes.js";
 import { createDeferredCore } from "../../shared/deferred.js";
 import {
   closeOpenClawAgentDatabaseByPathAsync,
+  closeOpenClawAgentDatabasesAsync,
+  closeOpenClawAgentDatabasesForTest,
   openOpenClawAgentDatabase,
 } from "../../state/openclaw-agent-db.js";
 import {
@@ -23,10 +26,12 @@ import {
   type OpenClawTestState,
 } from "../../test-utils/openclaw-test-state.js";
 import { loadSessionEntry, replaceSessionEntrySync } from "./session-accessor.js";
+import type { SqliteSessionReclamationDiagnostics } from "./session-accessor.sqlite-contract.js";
 import * as maintenance from "./session-accessor.sqlite-maintenance.js";
+import { runSqliteSessionReclamation } from "./session-accessor.sqlite-reclamation-run.js";
 import {
   createSessionMaintenancePlanningOperation,
-  runSqliteSessionReclamation,
+  createSessionMaintenanceStatisticsOperation,
 } from "./session-accessor.sqlite-reclamation.js";
 import { applySessionEntryExactReplacements } from "./session-accessor.sqlite-replacement-projection.js";
 import { resolveMaintenanceConfigFromInput } from "./store-maintenance.js";
@@ -185,6 +190,49 @@ function maintenancePreparationFixture(state: OpenClawTestState) {
 }
 
 export function registerSessionMaintenancePreparationTests() {
+  it.each(["maintenance-plan", "maintenance-statistics"] as const)(
+    "runs cold %s without opening or querying a host database",
+    async (kind) => {
+      await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
+        const fixture = maintenancePreparationFixture(state);
+        const plan =
+          kind === "maintenance-plan"
+            ? fixture.plan
+            : createSessionMaintenanceStatisticsOperation(fixture.plan.databaseOptions);
+        const opened = vi.spyOn(sqlite, "openNodeSqliteDatabase");
+        await closeOpenClawAgentDatabasesAsync();
+        closeOpenClawAgentDatabasesForTest();
+        opened.mockClear();
+        const sql = observeHostDataSql();
+        const diagnostics: SqliteSessionReclamationDiagnostics = {};
+        try {
+          const result = await runSqliteSessionReclamation({
+            plan,
+            forceInProcess: false,
+            diagnostics,
+          });
+          expect(result.kind).toBe(kind);
+          expect(diagnostics.workerThreadId).toBeGreaterThan(0);
+          expect(
+            opened.mock.calls.filter(([pathname]) => pathname === fixture.database.path),
+          ).toEqual([]);
+          expect(sql.queries).toEqual([]);
+          if (result.kind === "maintenance-plan") {
+            expect(result.value.entryRemovals.map((entry) => entry.sessionKey)).toEqual([
+              fixture.stale.sessionKey,
+            ]);
+          } else if (result.kind === "maintenance-statistics") {
+            expect(result.value).toBe(true);
+          }
+        } finally {
+          sql.restore();
+          opened.mockRestore();
+        }
+        expect(loadSessionEntry(fixture.active)?.sessionId).toBe("active");
+      });
+    },
+  );
+
   it("lets foreground changes to selected rows invalidate maintenance without caller-thread data SQL", async ({
     signal,
   }) => {
