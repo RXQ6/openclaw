@@ -71,69 +71,67 @@ export async function runPreparedSqliteSessionReclamation(
   };
   assertCommitAllowed();
   let publishCommitted: (() => void) | undefined;
-  const runAuthorized = () =>
-    withSqliteReclamationAuthorization(
-      commitGate,
-      database.db,
-      () => {
-        assertCommitAllowed();
-        // A blocked writer may authorize before the Worker's queued request.
-        publishCommitted = prepareReclamationPublication(plan, claim.identity);
-      },
-      (authorize) =>
-        worker.run({
-          claim,
-          validationOwner: { database, isCurrent: claim.isCurrent },
-          commitGate,
-          plan,
-          diagnostics: params.diagnostics,
-          onCommitRequest: authorize,
-          withWriteAdmission: async (run, reclamationAdmission) =>
-            await runExclusiveSqliteSessionWrite(
-              plan.databaseOptions,
-              async () => {
-                let refusal: { error: unknown } | undefined;
-                try {
-                  assertCommitAllowed();
-                } catch (error) {
-                  refusal = { error };
-                }
-                const completed = await run(refusal);
-                if (completed) {
-                  // Publish captured identities after transaction settlement, before releasing the writer.
-                  params.onWorkerResult?.(completed, claim.identity);
-                  withSqlitePostCommitPublications(database.db, () => {
-                    const publishRemoval =
-                      plan.kind === "maintenance-finalize"
-                        ? prepareReclamationPublication(plan, claim.identity, completed)
-                        : publishCommitted;
-                    if (publishRemoval) {
-                      deferSqlitePostCommitPublication(database.db, publishRemoval);
-                    }
-                    // Clear parent caches before identity observers, then notify row
-                    // listeners so a recreated key cannot precede its old deletion.
-                    for (const sessionKey of new Set(
-                      collectReclamationChangedSessionKeys(plan, completed),
-                    )) {
-                      publishSessionEntryCacheInvalidation(database, { sessionKey });
-                    }
-                  });
-                }
-              },
-              "session.reclamation.worker-commit",
-              { ...params.diagnostics, reclamationAdmission },
-              "worker",
-              owner.signal,
-            ).catch((error: unknown) => {
-              // Queue cancellation must retain the domain owner's more specific
-              // claim/authority refusal, just like an admitted callback does.
-              if (owner.signal.aborted) {
+  return await withSqliteReclamationAuthorization(
+    commitGate,
+    database.db,
+    () => {
+      assertCommitAllowed();
+      // A blocked writer may authorize before the Worker's queued request.
+      publishCommitted = prepareReclamationPublication(plan, claim.identity);
+    },
+    (authorize) =>
+      worker.run({
+        claim,
+        validationOwner: { database, isCurrent: claim.isCurrent },
+        commitGate,
+        plan,
+        diagnostics: params.diagnostics,
+        onCommitRequest: authorize,
+        withWriteAdmission: async (run, reclamationAdmission) =>
+          await runExclusiveSqliteSessionWrite(
+            plan.databaseOptions,
+            async () => {
+              let refusal: { error: unknown } | undefined;
+              try {
                 assertCommitAllowed();
+              } catch (error) {
+                refusal = { error };
               }
-              throw error;
-            }),
-          transferList: prepareReclamationWorkerTransferList(plan),
-        }),
-    );
-  return await runAuthorized();
+              const completed = await run(refusal);
+              if (completed) {
+                // Publish captured identities after transaction settlement, before releasing the writer.
+                params.onWorkerResult?.(completed, claim.identity);
+                withSqlitePostCommitPublications(database.db, () => {
+                  const publishRemoval =
+                    plan.kind === "maintenance-finalize"
+                      ? prepareReclamationPublication(plan, claim.identity, completed)
+                      : publishCommitted;
+                  if (publishRemoval) {
+                    deferSqlitePostCommitPublication(database.db, publishRemoval);
+                  }
+                  // Clear parent caches before identity observers, then notify row
+                  // listeners so a recreated key cannot precede its old deletion.
+                  for (const sessionKey of new Set(
+                    collectReclamationChangedSessionKeys(plan, completed),
+                  )) {
+                    publishSessionEntryCacheInvalidation(database, { sessionKey });
+                  }
+                });
+              }
+            },
+            "session.reclamation.worker-commit",
+            { ...params.diagnostics, reclamationAdmission },
+            "worker",
+            owner.signal,
+          ).catch((error: unknown) => {
+            // Queue cancellation must retain the domain owner's more specific
+            // claim/authority refusal, just like an admitted callback does.
+            if (owner.signal.aborted) {
+              assertCommitAllowed();
+            }
+            throw error;
+          }),
+        transferList: prepareReclamationWorkerTransferList(plan),
+      }),
+  );
 }
