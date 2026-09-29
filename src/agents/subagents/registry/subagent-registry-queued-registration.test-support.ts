@@ -7,11 +7,13 @@ import { createSubagentRunManager } from "./subagent-registry-run-manager.js";
 import type { SubagentManagerOptions } from "./subagent-registry-run-wait.js";
 import type { SubagentRegistrationScope, SubagentRunRecord } from "./subagent-registry.types.js";
 
-export function createQueuedRegistrationFixture(mocks: {
-  register: Mock<SubagentLaunchManager["registerSubagentRun"]>;
-  persisted: Set<() => void>;
-}) {
-  const runs = new Map<string, SubagentRunRecord>();
+export function createQueuedRegistrationFixture(
+  mocks: {
+    register: Mock<SubagentLaunchManager["registerSubagentRun"]>;
+    persisted: Set<() => void>;
+  },
+  runs = new Map<string, SubagentRunRecord>(),
+) {
   let syncRevision = 0;
   let acknowledgeAll = false;
   let acknowledgeControlWrite = false;
