@@ -153,13 +153,10 @@ export function hasSessionCatalogContext(
   );
 }
 
-// Read native ownership after profile projection; never cache this session overlay.
-export function projectSessionModelCatalog(
+function resolveRequiredWorkerInferenceProfileId(
   readParams: ChatMetadataReadParams,
-  models: ModelChoice[],
   config: OpenClawConfig,
-): ModelChoice[] {
-  const ownership = readSessionRuntimeOwnership({ ...readParams, config });
+): string | undefined {
   const required = config.cloudWorkers?.requiredProfile;
   const profile = required ? config.cloudWorkers?.profiles?.[required] : undefined;
   const runtime =
@@ -169,12 +166,22 @@ export function projectSessionModelCatalog(
   // This is send metadata, not admission or a claim that the node is ready: dispatch
   // still validates the actual placement, runtime, build, workspace and model grant.
   // Agent-wide/explicit-account picker reads keep their Gateway availability facts.
-  const requiredWorker = Boolean(
-    readParams.sessionKey &&
+  return readParams.sessionKey &&
     (isDefaultAgentRuntimeId(runtime) || runtime === "openclaw") &&
     profile &&
-    workerInferenceMetadata({ providerId: profile.provider, profileSnapshot: profile }).inference,
-  );
+    workerInferenceMetadata({ providerId: profile.provider, profileSnapshot: profile }).inference
+    ? required
+    : undefined;
+}
+
+// Read native ownership after profile projection; never cache this session overlay.
+export function projectSessionModelCatalog(
+  readParams: ChatMetadataReadParams,
+  models: ModelChoice[],
+  config: OpenClawConfig,
+): ModelChoice[] {
+  const ownership = readSessionRuntimeOwnership({ ...readParams, config });
+  const requiredWorker = resolveRequiredWorkerInferenceProfileId(readParams, config);
   if (ownership?.auth !== "native" && !requiredWorker) {
     return models;
   }
@@ -229,5 +236,6 @@ export function projectChatSessionMetadata(
   return {
     ...projected,
     runtimeSelectionLocked: resolveGatewaySessionRuntimeSelectionLocked(entry, acpMeta),
+    requiredWorkerInferenceProfileId: resolveRequiredWorkerInferenceProfileId(readParams, config),
   };
 }
