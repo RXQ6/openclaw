@@ -334,7 +334,11 @@ class SubagentRunMap extends Map<string, SubagentRunRecord> {
   }
 
   /** A committed successor remains superseding even if it retires before preparation finishes. */
-  captureRegistrationOwnership(childSessionKey: string, runId: string) {
+  captureRegistrationOwnership(
+    childSessionKey: string,
+    runId: string,
+    expectedEntry?: SubagentRunRecord,
+  ) {
     const scope: {
       childSessionKey: string;
       runId: string;
@@ -348,6 +352,7 @@ class SubagentRunMap extends Map<string, SubagentRunRecord> {
       current: true,
       superseded: false,
       sameRunSuperseded: false,
+      entry: expectedEntry,
     };
     this.registrationScopes.add(scope);
     return {
