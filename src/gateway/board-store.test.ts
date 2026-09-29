@@ -72,7 +72,7 @@ it("keeps global boards and progress under each owner's canonical row across reo
     const progress = await invoke("progressCard.put", {
       sessionKey: "global",
       agentId,
-      plan: [{ step: `${agentId} done`, status: "completed" }],
+      plan: [{ step: `${agentId} task`, status: agentId === "work" ? "in_progress" : "completed" }],
     });
     expect(progress).toHaveBeenCalledWith(
       true,
@@ -121,7 +121,9 @@ it("keeps global boards and progress under each owner's canonical row across reo
           card: expect.objectContaining({
             sessionKey: `agent:${agentId}:global`,
             revision: 1,
-            steps: [{ step: `${agentId} done`, status: "completed" }],
+            steps: [
+              { step: `${agentId} task`, status: agentId === "work" ? "in_progress" : "completed" },
+            ],
           }),
         },
         undefined,
