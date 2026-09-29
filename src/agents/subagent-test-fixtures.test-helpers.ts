@@ -70,6 +70,9 @@ export function createSubagentPersistenceMock(
       let committed = false;
       try {
         const snapshot = structuredClone(runs);
+        for (const runId of options.retireRunIds ?? []) {
+          snapshot.delete(runId);
+        }
         await Promise.resolve();
         options.assertCurrent?.();
         methods.persistSubagentRunsToDiskOrThrow(snapshot, ids);

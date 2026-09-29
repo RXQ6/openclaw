@@ -39,6 +39,7 @@ export function closeAgentDatabaseExecution({
           checkpoint = {
             health: observation.health,
             observedAtNs: observation.observedAtNs,
+            lastCompletedAtNs: observation.lastCompletedAtNs,
           };
         }
       });
