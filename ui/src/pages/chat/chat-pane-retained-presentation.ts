@@ -153,9 +153,11 @@ export abstract class ChatPaneRetainedPresentation extends ChatPaneBoard {
 
   private progressPresentationSessionKey: string | undefined;
   private progressPresentationReady = false;
-  private hiddenProgressCard:
-    | { gatewayScope: object; identity: string; lifetime: object | undefined; revision: number }
-    | undefined;
+  private hiddenProgressCardScope: object | undefined;
+  private readonly hiddenProgressCards = new Map<
+    string,
+    { lifetime: object | undefined; revision: number }
+  >();
   private retainedProgressCard:
     | {
         gatewayScope: object;
@@ -186,6 +188,10 @@ export abstract class ChatPaneRetainedPresentation extends ChatPaneBoard {
       return null;
     }
     const gatewayScope = gatewayPresentationScope(this.context.gateway);
+    if (this.hiddenProgressCardScope !== gatewayScope) {
+      this.hiddenProgressCardScope = gatewayScope;
+      this.hiddenProgressCards.clear();
+    }
     const agentId = resolveUiSelectedSessionAgentId(state);
     const previous = this.retainedProgressCard;
     if (
@@ -219,15 +225,22 @@ export abstract class ChatPaneRetainedPresentation extends ChatPaneBoard {
     // The X only hides this presentation. The Gateway card remains available to
     // other clients and read-only surfaces; a new card lifetime restores this view.
     const presented = this.retainedProgressCard;
-    const hidden = this.hiddenProgressCard;
-    return presented &&
-      hidden?.gatewayScope === gatewayScope &&
-      hidden.identity === presented.identity &&
-      (hidden.lifetime
+    if (!presented) {
+      return null;
+    }
+    const hidden = this.hiddenProgressCards.get(presented.identity);
+    if (!hidden) {
+      return presented;
+    }
+    if (
+      hidden.lifetime
         ? hidden.lifetime === presented.lifetime
-        : hidden.revision === presented.card.revision)
-      ? null
-      : (presented ?? null);
+        : hidden.revision === presented.card.revision
+    ) {
+      return null;
+    }
+    this.hiddenProgressCards.delete(presented.identity);
+    return presented;
   }
 
   protected readonly clearSavedProgressCard = (card: ProgressCard): void => {
@@ -241,12 +254,11 @@ export abstract class ChatPaneRetainedPresentation extends ChatPaneBoard {
     if (!presented || presented.card !== card) {
       return;
     }
-    this.hiddenProgressCard = {
-      gatewayScope: gatewayPresentationScope(this.context.gateway),
-      identity: presented.identity,
+    this.hiddenProgressCards.delete(presented.identity);
+    this.hiddenProgressCards.set(presented.identity, {
       lifetime: presented.lifetime,
       revision: card.revision,
-    };
+    });
     this.requestUpdate();
   }
 

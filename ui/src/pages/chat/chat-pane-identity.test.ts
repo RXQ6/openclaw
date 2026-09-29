@@ -695,6 +695,36 @@ describe("global chat pane feature ownership", () => {
     await vi.waitFor(() => expect(pane.chatProps?.progressCard).toEqual(card));
   });
 
+  it("keeps each hidden card hidden when the same pane switches agents", async () => {
+    const research = globalProgressCard("research");
+    const main = globalProgressCard("main");
+    const request = vi.fn(async (method: string, params?: unknown) => {
+      if (method !== "progressCard.get") {
+        throw new Error(`Unexpected progress-card write: ${method}`);
+      }
+      const agentId = (params as { agentId?: string } | undefined)?.agentId;
+      return { card: agentId === "main" ? main : research };
+    });
+    const { pane, select } = createGlobalFeaturePane(request, ["progressCard.get"]);
+    await vi.waitFor(() => expect(pane.chatProps?.progressCard).toEqual(research));
+    pane.chatProps!.onDismissProgressCard!(pane.chatProps!.progressCard!);
+    await vi.waitFor(() => expect(pane.chatProps?.progressCard).toBeNull());
+
+    select("main");
+    await pane.updateComplete;
+    await vi.waitFor(() => expect(pane.chatProps?.progressCard).toEqual(main));
+    pane.chatProps!.onDismissProgressCard!(pane.chatProps!.progressCard!);
+    await vi.waitFor(() => expect(pane.chatProps?.progressCard).toBeNull());
+
+    select("research");
+    await pane.updateComplete;
+    expect(pane.chatProps?.progressCard).toBeNull();
+    select("main");
+    await pane.updateComplete;
+    expect(pane.chatProps?.progressCard).toBeNull();
+    expect(request.mock.calls.every(([method]) => method === "progressCard.get")).toBe(true);
+  });
+
   it("keeps Main progress when an old Research response arrives for the same raw global key", async () => {
     const old = createDeferred<{ card: ProgressCard }>();
     const main = globalProgressCard("main");

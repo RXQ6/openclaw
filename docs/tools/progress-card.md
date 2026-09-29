@@ -117,7 +117,7 @@ An empty plan plus empty or whitespace-only Markdown also clears it. A successfu
 
 In the Control UI, **Dismiss progress card** (×) hides the card only in the chat pane where it was clicked, whether expanded or collapsed. Anyone who can view the card can hide it, including for unfinished, paused, completed, and note-only cards.
 
-The click does not write to the Gateway or change the saved card, other clients, dashboard widgets, the conversation, or the active run. Updates to the same card stay hidden in that pane; a newly created card appears again after the Gateway confirms the previous card was cleared. Reloading the page restores the saved card.
+The click does not write to the Gateway or change the saved card, other clients, dashboard widgets, the conversation, or the active run. Updates to the same card stay hidden in that pane, including when switching away and back between sessions. A newly created card appears again after the Gateway confirms the previous card was cleared. Reloading the page or changing Gateway connections restores the saved card.
 
 Users with write access can instead select **Clear saved progress for everyone** (trash) beside X. This retains the revision-checked shared clear: if a newer card revision has arrived, it is kept rather than erased. Agents can also clear saved progress with the `progress_card` tool and both fields empty.
 
