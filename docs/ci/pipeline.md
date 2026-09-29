@@ -131,6 +131,11 @@ ordinary and isolated unit-fast lanes partition their existing file inventories:
 failures or additional skips stay on Node, and the compatible remainder runs on
 Bun. Those Node files still execute; they are not excluded from CI.
 
+Bun test processes disable the Node-compatible bytecode cache because the pinned
+fork generates bytecode during Vitest teardown. Bun's transpiler cache and the
+Vitest transform cache remain available. Node orchestration, worker compilation,
+and Node test selections retain their existing cache settings.
+
 Audited synchronous ordinary unit-fast tests with no hooks use Bun's native test
 runner. The same runtime owner intersects their qualification data with the
 canonical inventory and each existing stripe's include patterns. The remaining

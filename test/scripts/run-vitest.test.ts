@@ -7,7 +7,7 @@ import { createInterface } from "node:readline";
 import { finished } from "node:stream/promises";
 import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseCLI } from "vitest/node";
 import {
   resolveVitestCliEntry,
@@ -44,10 +44,13 @@ import {
 } from "../../scripts/run-vitest.mts";
 import { parseTestProjectsArgs } from "../../scripts/test-projects.test-support.mts";
 import { forceKillVitestProcessGroup } from "../../scripts/vitest-process-group.mts";
+import { resolveTestNodeExecPath } from "../../src/test-utils/node-process.js";
 import { listGitTrackedFiles } from "../../src/test-utils/repo-files.js";
+import { useAutoCleanupTempDirTracker } from "../helpers/temp-dir.js";
 import { isGatewayServerTestFile } from "../vitest/vitest.gateway-server-paths.mjs";
 
 const posixIt = process.platform === "win32" ? it.skip : it;
+const tempDirs = useAutoCleanupTempDirTracker(afterEach);
 // These bounds only guard broken fixtures; readiness and exit are asserted via process signals.
 const LOAD_SENSITIVE_PROCESS_TIMEOUT_MS = process.env.CI ? 30_000 : 15_000;
 
@@ -117,7 +120,18 @@ describe("scripts/run-vitest", () => {
 
   it.each([undefined, "node", "bun"])(
     "selects the %s test runtime without changing the compiled bootstrap or test operands",
-    (runtime) => {
+    async (runtime) => {
+      const directory = tempDirs.make("oc-test-runtime-cache-");
+      const env = Object.freeze({
+        OPENCLAW_VITEST_RUNTIME: runtime,
+        NODE_COMPILE_CACHE: nodePath.join(directory, "node-cache"),
+        NODE_COMPILE_CACHE_PORTABLE: "1",
+        NODE_DISABLE_COMPILE_CACHE: "0",
+        TMPDIR: directory,
+        TMP: directory,
+        TEMP: directory,
+      });
+      const parentCacheDisabled = process.env.NODE_DISABLE_COMPILE_CACHE;
       const operands = [
         "scripts/lib/vitest-worker-bootstrap.mts",
         "/compiled/generation",
@@ -127,12 +141,9 @@ describe("scripts/run-vitest", () => {
         "--no-maglev",
       ];
       const flags = ["--no-maglev", "--no-concurrent-sparkplug"];
-      expect(
-        testRuntime.resolveVitestTestCommand([...flags, ...operands], {
-          OPENCLAW_VITEST_RUNTIME: runtime,
-        }),
-      ).toEqual({
+      expect(testRuntime.resolveVitestTestCommand([...flags, ...operands], env)).toEqual({
         command: runtime === "bun" ? "bun" : process.execPath,
+        ...(runtime === "bun" ? { envOverrides: { NODE_DISABLE_COMPILE_CACHE: "1" } } : {}),
         args:
           runtime === "bun"
             ? [
@@ -142,6 +153,40 @@ describe("scripts/run-vitest", () => {
               ]
             : [...flags, ...operands],
       });
+      if (runtime === undefined) {
+        return;
+      }
+      const resolveCommand = testRuntime.resolveVitestTestCommand;
+      // Keep the real runtime policy while an inert child observes the delivered environment.
+      const command = vi
+        .spyOn(testRuntime, "resolveVitestTestCommand")
+        .mockImplementation((...args) => ({
+          ...resolveCommand(...args),
+          command: resolveTestNodeExecPath(),
+          args: [
+            "-e",
+            [
+              'const assert = require("node:assert/strict");',
+              `assert.equal(process.env.NODE_DISABLE_COMPILE_CACHE, ${JSON.stringify(runtime === "bun" ? "1" : "0")});`,
+              `assert.equal(process.env.NODE_COMPILE_CACHE, ${JSON.stringify(env.NODE_COMPILE_CACHE)});`,
+              'assert.equal(process.env.NODE_COMPILE_CACHE_PORTABLE, "1");',
+              "process.exitCode = 7;",
+            ].join("\n"),
+          ],
+        }));
+      try {
+        const watched = spawnWatchedVitestProcess({
+          pnpmArgs: ["exec", "node", ...flags, ...operands],
+          spawnParams: { ...resolveVitestSpawnParams(env), stdio: ["ignore", "pipe", "pipe"] },
+          env,
+          homeMode: "hermetic",
+        });
+        expect((await watched.completion).code).toBe(7);
+        expect(env.NODE_DISABLE_COMPILE_CACHE).toBe("0");
+        expect(process.env.NODE_DISABLE_COMPILE_CACHE).toBe(parentCacheDisabled);
+      } finally {
+        command.mockRestore();
+      }
     },
   );
 
@@ -212,9 +257,20 @@ describe("scripts/run-vitest", () => {
     async () => {
       const files = ["./test/scripts/run-vitest.test.ts"];
       const repoRoot = fileURLToPath(new URL("../../", import.meta.url));
+      const directory = tempDirs.make("oc-native-bun-cache-");
+      const env = Object.freeze({
+        NODE_COMPILE_CACHE: nodePath.join(directory, "node-cache"),
+        NODE_COMPILE_CACHE_PORTABLE: "1",
+        NODE_DISABLE_COMPILE_CACHE: "0",
+        TMPDIR: directory,
+        TMP: directory,
+        TEMP: directory,
+      });
+      const parentCacheDisabled = process.env.NODE_DISABLE_COMPILE_CACHE;
       const expectedCommand = testRuntime.resolveNativeBunTestCommand(files);
       expect(expectedCommand).toEqual({
         command: "bun",
+        envOverrides: { NODE_DISABLE_COMPILE_CACHE: "1" },
         args: [
           "test",
           "--no-env-file",
@@ -228,14 +284,26 @@ describe("scripts/run-vitest", () => {
         ],
       });
       const command = vi.spyOn(testRuntime, "resolveNativeBunTestCommand").mockReturnValue({
-        command: process.execPath,
-        args: ["-e", "process.exitCode = 7"],
+        ...expectedCommand,
+        command: resolveTestNodeExecPath(),
+        args: [
+          "-e",
+          [
+            'const assert = require("node:assert/strict");',
+            'assert.equal(process.env.NODE_DISABLE_COMPILE_CACHE, "1");',
+            `assert.equal(process.env.NODE_COMPILE_CACHE, ${JSON.stringify(env.NODE_COMPILE_CACHE)});`,
+            'assert.equal(process.env.NODE_COMPILE_CACHE_PORTABLE, "1");',
+            "process.exitCode = 7;",
+          ].join("\n"),
+        ],
       });
       const exitCode = process.exitCode;
       try {
-        await runVitest(vi.fn(), ["--native-bun", ...files], {});
+        await runVitest(vi.fn(), ["--native-bun", ...files], env);
         expect(command).toHaveBeenCalledWith(files);
         expect(process.exitCode).toBe(7);
+        expect(env.NODE_DISABLE_COMPILE_CACHE).toBe("0");
+        expect(process.env.NODE_DISABLE_COMPILE_CACHE).toBe(parentCacheDisabled);
       } finally {
         process.exitCode = exitCode;
         command.mockRestore();
