@@ -827,7 +827,7 @@ it.each(["store", "inventory"] as const)(
     const storeRequest = {
       agentId: "main",
       storePath: foreign.path,
-      env: {},
+      env: { OPENCLAW_STATE_DIR: path.resolve("/synthetic/state") },
       registeredDatabases: [],
       candidates: [foreign],
     };
@@ -840,7 +840,7 @@ it.each(["store", "inventory"] as const)(
     const inventoryRequest = {
       config: {},
       agentIds: ["main"],
-      env: {},
+      env: { OPENCLAW_STATE_DIR: path.resolve("/synthetic/state") },
       paths,
       registeredDatabases: [],
       candidates: [foreign],
