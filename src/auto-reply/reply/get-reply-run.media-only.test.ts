@@ -564,7 +564,7 @@ describe("runPreparedReply media-only handling", () => {
     ]);
   });
 
-  it("loads configured and canonical workspace skills for managed-worktree sessions", async () => {
+  it("passes configured and admitted workspace roots to the skill snapshot owner", async () => {
     const params = baseParams({
       workspaceDir: "/tmp/agent-workspace",
       sessionEntry: {
@@ -593,7 +593,7 @@ describe("runPreparedReply media-only handling", () => {
       expect(ensureSkillSnapshot).toHaveBeenCalledWith(
         expect.objectContaining({
           workspaceDir: "/tmp/agent-workspace",
-          executionWorkspaceDir: "/tmp/project/packages/app",
+          executionWorkspaceDir: "/tmp/session-worktree",
         }),
       );
     } finally {
