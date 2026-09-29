@@ -586,6 +586,7 @@ describe("frozen admission bootstrap repairs", () => {
     entrypoint,
     "scripts/lib/official-external-channel-catalog.json",
     "scripts/lib/official-external-provider-catalog.json",
+    "scripts/lib/record-shared.mjs",
     "scripts/lib/upgrade-survivor-scenarios.json",
     `${recipeDirectory}/agents.json`,
     "package.json",
