@@ -66,7 +66,15 @@ export abstract class ChatPaneDiscussion extends ChatPaneSessionMenu {
     state: NonNullable<typeof this.state>,
     sessionKey: string,
   ): SessionDiscussionPanelConfig | null {
-    if (!state.connected || !state.client) {
+    if (
+      !state.connected ||
+      !state.client ||
+      !canCallGatewayMethod(
+        this.context.gateway.snapshot,
+        "session.discussion.info",
+        "operator.read",
+      )
+    ) {
       return null;
     }
     const canOpen = canCallGatewayMethod(
@@ -84,7 +92,17 @@ export abstract class ChatPaneDiscussion extends ChatPaneSessionMenu {
       method: "session.discussion.info" | "session.discussion.open",
       key: string,
     ) => {
-      if (!state.connected || !state.client) {
+      if (
+        contentGeneration !== this.connectionGeneration ||
+        !state.connected ||
+        !state.client ||
+        state.client !== this.context.gateway.snapshot.client ||
+        !canCallGatewayMethod(
+          this.context.gateway.snapshot,
+          method,
+          method === "session.discussion.info" ? "operator.read" : "operator.write",
+        )
+      ) {
         throw new Error(t("chat.sessionDiscussion.disconnected"));
       }
       return state.client.request<SessionDiscussionInfo>(method, {
