@@ -628,18 +628,15 @@ describe("global chat pane feature ownership", () => {
     expect(request.mock.calls.some(([method]) => method === "chat.send")).toBe(false);
   });
 
-  it("loads, refreshes and dismisses the selected agent's global progress card", async () => {
+  it("hides only this pane's selected agent progress without clearing its card", async () => {
     let card: ProgressCard | null = globalProgressCard("research");
     const request = vi.fn(async (method: string) => {
-      if (method === "progressCard.put") {
-        card = null;
+      if (method !== "progressCard.get") {
+        throw new Error(`Unexpected progress-card write: ${method}`);
       }
       return { card };
     });
-    const { pane, emit } = createGlobalFeaturePane(request, [
-      "progressCard.get",
-      "progressCard.put",
-    ]);
+    const { pane, emit } = createGlobalFeaturePane(request, ["progressCard.get"]);
     await pane.updateComplete;
     expect(request).toHaveBeenCalledWith("progressCard.get", {
       sessionKey: "global",
@@ -658,11 +655,27 @@ describe("global chat pane feature ownership", () => {
     }
     pane.chatProps!.onDismissProgressCard!(displayedCard);
     await vi.waitFor(() => expect(pane.chatProps?.progressCard).toBeNull());
-    expect(request).toHaveBeenLastCalledWith("progressCard.put", {
-      sessionKey: "global",
-      agentId: "research",
-      expectedRevision: 2,
-    });
+    expect(request.mock.calls.every(([method]) => method === "progressCard.get")).toBe(true);
+
+    card = globalProgressCard("research", 3);
+    emit({ sessionKey: card.sessionKey, revision: card.revision });
+    await vi.waitFor(() =>
+      expect(request.mock.calls.filter(([method]) => method === "progressCard.get")).toHaveLength(
+        3,
+      ),
+    );
+    expect(pane.chatProps?.progressCard).toBeNull();
+
+    card = null;
+    emit({ sessionKey: "agent:research:global", revision: null });
+    await vi.waitFor(() =>
+      expect(request.mock.calls.filter(([method]) => method === "progressCard.get")).toHaveLength(
+        4,
+      ),
+    );
+    card = globalProgressCard("research", 5);
+    emit({ sessionKey: card.sessionKey, revision: card.revision });
+    await vi.waitFor(() => expect(pane.chatProps?.progressCard).toEqual(card));
   });
 
   it("keeps Main progress when an old Research response arrives for the same raw global key", async () => {

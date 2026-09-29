@@ -10,7 +10,7 @@ export function createProgressCard(updatedAt: number) {
 export function createGateway(mainSessionKey?: string, mainKey = "main") {
   const request = vi.fn();
   const features = {
-    methods: ["progressCard.get", "progressCard.put"],
+    methods: ["progressCard.get"],
   };
   let onEvent: Parameters<ApplicationGateway["subscribeEvents"]>[0] | undefined;
   let onSnapshot: Parameters<ApplicationGateway["subscribe"]>[0] | undefined;

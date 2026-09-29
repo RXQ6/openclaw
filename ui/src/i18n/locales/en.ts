@@ -313,7 +313,6 @@ export const en: TranslationMap & {
     shortCount: "{completed} of {total}",
     noteLabel: "Progress note",
     dismiss: "Dismiss progress card",
-    dismissFailed: "Could not dismiss the progress card. Try again.",
     refresh: {
       label: "Refresh task progress",
       retry: "Retry progress refresh",

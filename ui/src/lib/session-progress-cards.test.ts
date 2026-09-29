@@ -417,14 +417,9 @@ describe("session progress card refresh", () => {
 });
 
 describe("session progress card Gateway response boundary", () => {
-  it.each([
-    { method: "progressCard.get", denied: true },
-    { method: "progressCard.get", denied: false },
-    { method: "progressCard.put", denied: true },
-    { method: "progressCard.put", denied: false },
-  ])(
-    "revalidates after $method failure while hiding only denied content (denied: $denied)",
-    async ({ method, denied }) => {
+  it.each([true, false])(
+    "revalidates after failed read while hiding only denied content (denied: %s)",
+    async (denied) => {
       const { gateway, request, emitChange, features } = createGateway();
       // Core methods are called directly; a missing advertisement is not a feature gate.
       features.methods = [];
@@ -442,10 +437,7 @@ describe("session progress card Gateway response boundary", () => {
       const owner = {};
       store.watch(owner, [target, sibling]);
       onTestFinished(() => store.unwatch(owner));
-      const [displayed] = await Promise.all([store.load(target), store.load(sibling)]);
-      if (!displayed) {
-        throw new Error("Expected the loaded progress card");
-      }
+      await Promise.all([store.load(target), store.load(sibling)]);
       const error = denied
         ? new GatewayRequestError({
             code: "INVALID_REQUEST",
@@ -454,13 +446,9 @@ describe("session progress card Gateway response boundary", () => {
           })
         : new Error("Temporary connection failure");
       request.mockRejectedValueOnce(error);
-      if (method === "progressCard.get") {
-        emitChange(sessionKey, 2);
-        await expect(store.load(target)).rejects.toBe(error);
-        expect(store.getError(target)).toBe(denied ? "access-denied" : "unavailable");
-      } else {
-        await expect(store.dismiss(target, displayed)).rejects.toBe(error);
-      }
+      emitChange(sessionKey, 2);
+      await expect(store.load(target)).rejects.toBe(error);
+      expect(store.getError(target)).toBe(denied ? "access-denied" : "unavailable");
       expect(store.get(target)).toEqual(denied ? null : card);
       expect(store.get(sibling)).toEqual(siblingCard);
       const restored = { ...card, revision: 2, markdown: "Refreshed progress" };
@@ -471,98 +459,7 @@ describe("session progress card Gateway response boundary", () => {
     },
   );
 
-  it.each([
-    { replacement: false, refreshBeforeReply: true, refreshFails: false },
-    { replacement: true, refreshBeforeReply: true, refreshFails: false },
-    { replacement: true, refreshBeforeReply: false, refreshFails: false },
-    { replacement: false, refreshBeforeReply: false, refreshFails: true },
-  ])(
-    "acknowledges a clear after its change event without losing newer progress ($replacement, $refreshBeforeReply, $refreshFails)",
-    async ({ replacement, refreshBeforeReply, refreshFails }) => {
-      const { gateway, request, emitChange } = createGateway();
-      const target = { sessionKey };
-      const card = {
-        ...createProgressCard(1),
-        steps: [{ step: "Done", status: "completed" as const }],
-      };
-      const nextCard = replacement ? { ...card, revision: 3, markdown: "New progress" } : null;
-      const put = createDeferred<{ card: null }>();
-      const refresh = createDeferred<{ card: typeof nextCard }>();
-      request
-        .mockResolvedValueOnce({ card })
-        .mockImplementation((method) =>
-          method === "progressCard.put" ? put.promise : refresh.promise,
-        );
-      const store = sessionProgressCardsForGateway(gateway);
-      const owner = {};
-      store.watch(owner, [target]);
-      onTestFinished(() => {
-        put.resolve({ card: null });
-        refresh.resolve({ card: nextCard });
-        store.unwatch(owner);
-      });
-      const displayed = await store.load(target);
-      if (!displayed) {
-        throw new Error("Expected the completed progress card");
-      }
-      const dismissal = store.dismiss(target, displayed);
-      // The Gateway publishes its committed clear before sending the put response.
-      emitChange(sessionKey, null);
-      expect(request).toHaveBeenNthCalledWith(3, "progressCard.get", target);
-      const refreshing = store.load(target);
-      if (refreshBeforeReply) {
-        refresh.resolve({ card: nextCard });
-        await vi.waitFor(() => expect(store.get(target)).toEqual(nextCard));
-      }
-      put.resolve({ card: null });
-      await expect(dismissal).resolves.toBe(true);
-      if (refreshFails) {
-        // The committed PUT replies before its event-triggered GET can fail.
-        const failure = new Error("Refresh temporarily unavailable");
-        const rejected = expect(refreshing).rejects.toBe(failure);
-        refresh.reject(failure);
-        await rejected;
-        expect(store.get(target)).toBeNull();
-      } else {
-        refresh.resolve({ card: nextCard });
-        await expect(refreshing).resolves.toEqual(nextCard);
-        expect(store.get(target)).toEqual(nextCard);
-      }
-    },
-  );
-
-  it("retires a transient error when a conditional clear returns newer progress", async () => {
-    const { gateway, request } = createGateway();
-    const target = { sessionKey };
-    const card = {
-      ...createProgressCard(1),
-      steps: [{ step: "Done", status: "completed" as const }],
-    };
-    const replacement = { ...card, revision: 2, markdown: "New progress" };
-    const failure = new Error("Put temporarily unavailable");
-    request
-      .mockResolvedValueOnce({ card })
-      .mockRejectedValueOnce(failure)
-      .mockResolvedValueOnce({ card: replacement });
-    const store = sessionProgressCardsForGateway(gateway);
-    const owner = {};
-    store.watch(owner, [target]);
-    onTestFinished(() => store.unwatch(owner));
-    const displayed = await store.load(target);
-    if (!displayed) {
-      throw new Error("Expected the completed progress card");
-    }
-    await expect(store.dismiss(target, displayed)).rejects.toBe(failure);
-    expect(store.getError(target)).toBe("unavailable");
-    // A revision mismatch returns the current card without a changed event.
-    await expect(store.dismiss(target, displayed)).resolves.toBe(false);
-    expect(store.get(target)).toEqual(replacement);
-    expect(store.getError(target)).toBeUndefined();
-    await expect(store.load(target)).resolves.toEqual(replacement);
-    expect(request).toHaveBeenCalledTimes(3);
-  });
-
-  it("retains bare target ownership for reads, events and dismissals", async () => {
+  it("retains bare target ownership for reads and events", async () => {
     const { gateway, request, emitChange } = createGateway("agent:main:main");
     const research = { sessionKey: "notes", agentId: "research" };
     const main = { sessionKey: "notes", agentId: "main" };
@@ -572,8 +469,8 @@ describe("session progress card Gateway response boundary", () => {
       [researchKey, { sessionKey: researchKey, revision: 1, updatedAt: 1, markdown: "Research" }],
       [mainKey, { sessionKey: mainKey, revision: 1, updatedAt: 1, markdown: "Main" }],
     ]);
-    request.mockImplementation(async (method, params) => ({
-      card: method === "progressCard.put" ? null : cards.get(params.sessionKey),
+    request.mockImplementation(async (_method, params) => ({
+      card: cards.get(params.sessionKey),
     }));
     const store = sessionProgressCardsForGateway(gateway);
     const owner = {};
@@ -595,17 +492,6 @@ describe("session progress card Gateway response boundary", () => {
       cards.set(researchKey, replacement);
       emitChange(researchKey, null);
       await vi.waitFor(() => expect(store.get(research)).toEqual(replacement));
-      expect(store.get(main)).toEqual(cards.get(mainKey));
-      const card = store.get(research);
-      if (!card) {
-        throw new Error("Expected the refreshed Research card");
-      }
-      await expect(store.dismiss(research, card)).resolves.toBe(true);
-      expect(request).toHaveBeenLastCalledWith("progressCard.put", {
-        sessionKey: researchKey,
-        expectedRevision: 2,
-      });
-      expect(store.get(research)).toBeNull();
       expect(store.get(main)).toEqual(cards.get(mainKey));
     } finally {
       store.unwatch(owner);
@@ -636,13 +522,8 @@ describe("session progress card Gateway response boundary", () => {
       markdown: "Global",
     };
     const ordinaryCard = { ...globalCard, markdown: "Ordinary" };
-    request.mockImplementation(async (method, params) => ({
-      card:
-        method === "progressCard.put"
-          ? null
-          : params.sessionKey === "global"
-            ? globalCard
-            : ordinaryCard,
+    request.mockImplementation(async (_method, params) => ({
+      card: params.sessionKey === "global" ? globalCard : ordinaryCard,
     }));
     const store = sessionProgressCardsForGateway(gateway);
     await expect(store.load({ sessionKey: "global" })).resolves.toEqual(globalCard);
@@ -652,16 +533,6 @@ describe("session progress card Gateway response boundary", () => {
     expect(store.getLifetime({ sessionKey: "global" })).not.toBe(
       store.getLifetime({ sessionKey: "agent:main:global" }),
     );
-    const capturedGlobal = store.get({ sessionKey: "global" });
-    if (!capturedGlobal) {
-      throw new Error("Expected the loaded global card");
-    }
-    request.mockClear();
-    await expect(store.dismiss({ sessionKey: "agent:main:global" }, capturedGlobal)).resolves.toBe(
-      false,
-    );
-    expect(request).not.toHaveBeenCalled();
-    expect(store.get({ sessionKey: "agent:main:global" })).toEqual(ordinaryCard);
   });
 
   it("refreshes an ordinary row instead of clearing it on an ambiguous null event", async () => {
@@ -693,7 +564,7 @@ describe("session progress card Gateway response boundary", () => {
       "agent:main:global",
     ],
   ])(
-    "keeps artifact snapshots owner-scoped through reads, events and clear with %s / %s routing and %s input",
+    "keeps artifact snapshots owner-scoped through reads and events with %s / %s routing and %s input",
     async (mainSessionKey, mainKey, researchInputKey, researchQueryKey, mainQueryKey) => {
       const { gateway, request, emitChange } = createGateway(mainSessionKey, mainKey);
       const researchKey = "agent:research:global";
@@ -746,20 +617,6 @@ describe("session progress card Gateway response boundary", () => {
       });
       expect(store.get(mainTarget)).toEqual(mainCard);
 
-      request.mockResolvedValueOnce({ card: null });
-      const displayedCard = store.get(researchTarget);
-      if (!displayedCard) {
-        throw new Error("Expected the displayed research card");
-      }
-      await expect(store.dismiss(researchTarget, displayedCard)).resolves.toBe(true);
-      expect(request).toHaveBeenLastCalledWith("progressCard.put", {
-        sessionKey: researchQueryKey,
-        ...(researchQueryKey === "global" ? { agentId: "research" } : {}),
-        expectedRevision: 2,
-      });
-      expect(store.get(canonicalResearch)).toBeNull();
-      expect(store.get(researchTarget)).toBeNull();
-      expect(store.get(mainTarget)).toEqual(mainCard);
       store.unwatch(owner);
     },
   );
@@ -819,9 +676,6 @@ describe("session progress card Gateway response boundary", () => {
     expect(replacementLifetime).toBeDefined();
     expect(replacement.request).toHaveBeenCalledTimes(1);
 
-    const staleDismiss = createDeferred<{ card: null }>();
-    replacement.request.mockReturnValueOnce(staleDismiss.promise);
-    const dismissal = store.dismiss(target, store.get(target)!);
     const interruptedRead = createDeferred<{ card: typeof nextCard }>();
     replacement.request.mockReturnValueOnce(interruptedRead.promise);
     replacement.opts.onEvent?.(
@@ -841,11 +695,9 @@ describe("session progress card Gateway response boundary", () => {
     await vi.waitFor(() => expect(store.get(target)).toEqual(refreshedCard));
     interruptedRead.resolve({ card: nextCard });
     await expect(reconnectRead).resolves.toBeNull();
-    staleDismiss.resolve({ card: null });
-    await expect(dismissal).resolves.toBe(false);
     expect(store.get(target)).toEqual(refreshedCard);
     expect(store.getLifetime(target)).toBe(replacementLifetime);
-    expect(replacement.request).toHaveBeenCalledTimes(4);
+    expect(replacement.request).toHaveBeenCalledTimes(3);
   });
 
   it.each([-MAX_DATE_TIMESTAMP_MS, MAX_DATE_TIMESTAMP_MS])(
@@ -872,27 +724,6 @@ describe("session progress card Gateway response boundary", () => {
       );
       expect(store.get({ sessionKey })).toBeUndefined();
       expect(store.getError({ sessionKey })).toBe("unavailable");
-    },
-  );
-
-  it.each([-MAX_DATE_TIMESTAMP_MS - 1, MAX_DATE_TIMESTAMP_MS + 1])(
-    "rejects an out-of-range timestamp from progressCard.put: %i",
-    async (updatedAt) => {
-      const { gateway, request } = createGateway();
-      const existingCard = createProgressCard(Date.now());
-      request
-        .mockResolvedValueOnce({ card: existingCard })
-        .mockResolvedValueOnce({ card: createProgressCard(updatedAt) });
-
-      const store = sessionProgressCardsForGateway(gateway);
-      const displayedCard = await store.load({ sessionKey });
-      if (!displayedCard) {
-        throw new Error("Expected the displayed progress card");
-      }
-      await expect(store.dismiss({ sessionKey }, displayedCard)).rejects.toThrow(
-        "Progress card response did not match the requested session",
-      );
-      expect(store.get({ sessionKey })?.updatedAt).toBe(existingCard.updatedAt);
     },
   );
 });

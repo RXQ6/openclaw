@@ -152,6 +152,9 @@ export abstract class ChatPaneRetainedPresentation extends ChatPaneBoard {
 
   private progressPresentationSessionKey: string | undefined;
   private progressPresentationReady = false;
+  private hiddenProgressCard:
+    | { gatewayScope: object; identity: string; lifetime: object | undefined; revision: number }
+    | undefined;
   private retainedProgressCard:
     | {
         gatewayScope: object;
@@ -212,8 +215,32 @@ export abstract class ChatPaneRetainedPresentation extends ChatPaneBoard {
     } else if (!this.progressCard.loading) {
       this.retainedProgressCard = undefined;
     }
-    // Reconnect retires read admission, not the mounted card's disclosure state.
-    return this.retainedProgressCard ?? null;
+    // The X only hides this presentation. The Gateway card remains available to
+    // other clients and read-only surfaces; a new card lifetime restores this view.
+    const presented = this.retainedProgressCard;
+    const hidden = this.hiddenProgressCard;
+    return presented &&
+      hidden?.gatewayScope === gatewayScope &&
+      hidden.identity === presented.identity &&
+      (hidden.lifetime
+        ? hidden.lifetime === presented.lifetime
+        : hidden.revision === presented.card.revision)
+      ? null
+      : (presented ?? null);
+  }
+
+  protected hideProgressCard(card: ProgressCard): void {
+    const presented = this.progressCardPresentation;
+    if (!presented || presented.card !== card) {
+      return;
+    }
+    this.hiddenProgressCard = {
+      gatewayScope: gatewayPresentationScope(this.context.gateway),
+      identity: presented.identity,
+      lifetime: presented.lifetime,
+      revision: card.revision,
+    };
+    this.requestUpdate();
   }
 
   protected override initialProgressCardTarget() {
