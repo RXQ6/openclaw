@@ -660,6 +660,55 @@ suite.define(() => {
     },
   );
 
+  it("keeps shared clearing as a separate authorized action", async () => {
+    const sessionKey = "agent:main:progress-clear";
+    const initialCard = {
+      revision: 3,
+      sessionKey,
+      steps: [{ step: "Verify the change", status: "in_progress" as const }],
+      updatedAt: Date.now(),
+    };
+    await suite.withPage(
+      {
+        colorScheme: "dark",
+        locale: "en-US",
+        serviceWorkers: "block",
+        viewport: { height: 900, width: 560 },
+      },
+      async ({ page }) => {
+        const gateway = await installMockGateway(page, {
+          featureMethods: ["chat.metadata", "chat.startup", "progressCard.get", "progressCard.put"],
+          methodResponses: {
+            "progressCard.get": { card: initialCard },
+            "progressCard.put": { card: null },
+            "sessions.list": chatSessionListResponse([
+              { key: sessionKey, kind: "direct", label: "Workspace review", updatedAt: 1 },
+            ]),
+          },
+          sessionKey,
+        });
+        await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
+        const card = page.locator('[data-progress-card-placement="composer"]');
+        await expect.poll(() => card.isVisible()).toBe(true);
+        const clear = card.getByRole("button", { name: "Clear saved progress for everyone" });
+        await expect.poll(() => clear.isVisible()).toBe(true);
+        await captureProof(page, "clear-separate-control-before.png");
+        await clear.click();
+        await expect.poll(() => gateway.getRequests("progressCard.put")).toHaveLength(1);
+        expect(
+          requireRecord((await gateway.getRequests("progressCard.put"))[0]!.params),
+        ).toMatchObject({
+          sessionKey,
+          expectedRevision: initialCard.revision,
+        });
+        await expect.poll(() => card.count()).toBe(0);
+        await gateway.setMethodResponse("progressCard.get", { card: null });
+        await page.reload();
+        await expect.poll(() => card.count()).toBe(0);
+      },
+    );
+  });
+
   it("lets a restricted viewer hide progress locally without a write grant", async () => {
     const sessionKey = "agent:main:progress-viewer";
     await suite.withPage(
@@ -698,6 +747,9 @@ suite.define(() => {
         await page.goto(controlUiSessionUrl(suite.server.baseUrl, sessionKey));
         const card = page.locator('[data-progress-card-placement="composer"]');
         await expect.poll(() => card.isVisible()).toBe(true);
+        expect(
+          await card.getByRole("button", { name: "Clear saved progress for everyone" }).count(),
+        ).toBe(0);
         await card.getByRole("button", { name: "Dismiss progress card" }).click();
         await expect.poll(() => card.count()).toBe(0);
         expect(await gateway.getRequests("progressCard.put")).toHaveLength(0);

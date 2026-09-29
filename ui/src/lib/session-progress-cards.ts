@@ -2,6 +2,7 @@ import type {
   ProgressCard,
   ProgressCardGetParams,
   ProgressCardGetResult,
+  ProgressCardPutResult,
   ProgressCardRefreshParams,
   ProgressCardRefreshResult,
   ProgressCardStep,
@@ -24,6 +25,7 @@ import {
 import { generateUUID } from "./uuid.ts";
 
 const PROGRESS_CARD_GET_METHOD = "progressCard.get";
+const PROGRESS_CARD_PUT_METHOD = "progressCard.put";
 const PROGRESS_CARD_CHANGED_EVENT = "progressCard.changed";
 const CACHE_LIMIT = 100;
 const REFRESH_TIMEOUT_MS = 120_000;
@@ -43,6 +45,8 @@ type ProgressCardEntry = {
   target: ProgressCardGetParams;
   wireKey: string;
   generation: number;
+  /** Invalidates conditional dismissals when newer numbered progress arrives. */
+  dismissalGeneration: number;
   dirty: boolean;
   /** Latest invalidation observed while a read is already in flight. */
   pendingRefreshRevision?: number | null;
@@ -67,6 +71,7 @@ export type SessionProgressCardStore = {
   ) => void;
   unwatch: (owner: object) => void;
   load: (target: ProgressCardGetParams) => Promise<ProgressCard | null>;
+  dismiss: (target: ProgressCardGetParams, card: ProgressCard) => Promise<boolean>;
   refresh: (target: ProgressCardGetParams, card: ProgressCard) => void;
   getRefreshState: (target: ProgressCardGetParams) => SessionProgressCardRefreshState | undefined;
   get: (target: ProgressCardGetParams) => ProgressCard | null | undefined;
@@ -287,6 +292,7 @@ function createStore(gateway: ApplicationGateway): SessionProgressCardStore {
       target: resolved.target,
       wireKey: resolved.wireKey,
       generation: 0,
+      dismissalGeneration: 0,
       dirty: true,
     };
     remember(resolved.key, entry);
@@ -464,6 +470,7 @@ function createStore(gateway: ApplicationGateway): SessionProgressCardStore {
       }
       entry.dirty = true;
       delete entry.error;
+      entry.dismissalGeneration += 1;
       if (entry.load) {
         queueRefresh(entry, revision);
         continue;
@@ -605,6 +612,67 @@ function createStore(gateway: ApplicationGateway): SessionProgressCardStore {
       }
     },
     getRefreshState: (target) => entries.get(resolveTarget(target).key)?.refresh?.state,
+    dismiss: async (target, card) => {
+      connection.transition(gateway.snapshot);
+      const scope = connection.capture();
+      if (!scope) {
+        return false;
+      }
+      const resolved = resolveTarget(target);
+      const entry = entries.get(resolved.key);
+      if (!entry || entry.card !== card) {
+        return false;
+      }
+      const generation = entry.generation;
+      const dismissalGeneration = entry.dismissalGeneration;
+      const current = () =>
+        entries.get(resolved.key) === entry &&
+        connection.isCurrent(scope) &&
+        gateway.snapshot.client === scope.client;
+      const result = await scope.client
+        .request<ProgressCardPutResult>(PROGRESS_CARD_PUT_METHOD, {
+          ...progressCardRequestTarget(entry.target),
+          expectedRevision: card.revision,
+        })
+        .catch((error: unknown) => {
+          if (
+            current() &&
+            entry.generation === generation &&
+            entry.dismissalGeneration === dismissalGeneration
+          ) {
+            recordRequestError(entry, error);
+          }
+          throw error;
+        });
+      const resultCard = parseProgressCard(result, entry.wireKey);
+      if (!current()) {
+        return false;
+      }
+      const dismissed = resultCard === null;
+      // Its own invalidation may precede the reply; a clear still owns the captured revision.
+      if (
+        resultCard
+          ? entry.generation === generation && entry.dismissalGeneration === dismissalGeneration
+          : entry.card?.revision === card.revision
+      ) {
+        // Reads in the captured write generation can predate its commit even if
+        // the event arrives later. Keep newer event-started reads unless overtaken.
+        const retireRead =
+          entry.load !== undefined &&
+          (entry.generation === generation || entry.pendingRefreshRevision !== undefined);
+        if (retireRead) {
+          entry.generation += 1;
+          queueRefresh(entry, null);
+        }
+        entry.card = resultCard;
+        acceptLifetime(resolved.key, entry.target, resultCard);
+        entry.dirty = retireRead;
+        delete entry.error;
+        remember(resolved.key, entry);
+        notify();
+      }
+      return dismissed;
+    },
     get: (target) => entries.get(resolveTarget(target).key)?.card,
     getLifetime: (target) => {
       syncLifetimeScope();

@@ -14,6 +14,7 @@ import {
   areUiSessionKeysEquivalent,
   resolveUiSelectedSessionAgentId,
 } from "../../lib/sessions/session-key.ts";
+import { showToast } from "../../lib/toast.ts";
 import { storeChatComposerMemoryFallback } from "./chat-composer-memory-fallback.ts";
 import { loadChatBranches, retireChatBranchRequests } from "./chat-history-branches.ts";
 import {
@@ -228,6 +229,12 @@ export abstract class ChatPaneRetainedPresentation extends ChatPaneBoard {
       ? null
       : (presented ?? null);
   }
+
+  protected readonly clearSavedProgressCard = (card: ProgressCard): void => {
+    void this.progressCard
+      .dismiss(card)
+      .catch(() => showToast({ message: t("sessionProgressCard.clearFailed") }));
+  };
 
   protected hideProgressCard(card: ProgressCard): void {
     const presented = this.progressCardPresentation;

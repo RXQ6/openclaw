@@ -422,6 +422,7 @@ export class ChatPane extends ChatPaneLayoutRender {
       onDismissProgressCard: progressPresentation
         ? (card) => this.hideProgressCard(card)
         : undefined,
+      onClearSavedProgressCard: canWriteProgressCard ? this.clearSavedProgressCard : undefined,
       gatewayQuestionPrompts,
       asyncQuestionStorage:
         !catalogKey && !suggestionViewer ? this.chatState.composerPersistence.durableScope : null,

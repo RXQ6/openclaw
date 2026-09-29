@@ -628,6 +628,23 @@ describe("global chat pane feature ownership", () => {
     expect(request.mock.calls.some(([method]) => method === "chat.send")).toBe(false);
   });
 
+  it("keeps revision-checked shared clearing behind a separate writer action", async () => {
+    const card = globalProgressCard("research");
+    const request = vi.fn(async (method: string) =>
+      method === "progressCard.put" ? { card: null } : { card },
+    );
+    const { pane } = createGlobalFeaturePane(request, ["progressCard.get", "progressCard.put"]);
+    await vi.waitFor(() => expect(pane.chatProps?.progressCard).toEqual(card));
+    expect(pane.chatProps?.onClearSavedProgressCard).toBeDefined();
+    pane.chatProps!.onClearSavedProgressCard!(pane.chatProps!.progressCard!);
+    await vi.waitFor(() => expect(pane.chatProps?.progressCard).toBeNull());
+    expect(request).toHaveBeenCalledWith("progressCard.put", {
+      sessionKey: "global",
+      agentId: "research",
+      expectedRevision: card.revision,
+    });
+  });
+
   it("hides only this pane's selected agent progress without clearing its card", async () => {
     let card: ProgressCard | null = globalProgressCard("research");
     const request = vi.fn(async (method: string) => {

@@ -336,6 +336,7 @@ export function renderChatComposerView(context: ChatComposerViewContext) {
             onManipulate: props.onProgressManipulate,
           },
           props.connected && props.canSend ? props.progressCardRefresh : undefined,
+          props.onClearSavedProgressCard,
         )}
       </div>`
     : props.progressCardInitialLoading
