@@ -6,7 +6,6 @@ import {
   getAgentEventLifecycleGeneration,
   isAgentEventLifecycleGenerationCurrent,
 } from "../../../infra/agent-events.js";
-import { createSubsystemLogger } from "../../../logging/subsystem.js";
 import {
   bindGatewayContextResolver,
   getGatewayContextResolver,
@@ -37,10 +36,9 @@ import { SubagentRecoveryManager } from "./subagent-registry-run-recovery.js";
 import type { RegisterSubagentRunOptions, SubagentRunRecord } from "./subagent-registry.types.js";
 import {
   compareSubagentRunGeneration,
+  latestSubagentRun,
   nextSubagentRunGeneration,
 } from "./subagent-run-generation.js";
-
-const log = createSubsystemLogger("agents/subagent-registry");
 
 function resolveSwarmWaitOwnerSessionKeys(
   getRunsForChildSession: (childSessionKey: string) => Iterable<SubagentRunRecord>,
@@ -52,12 +50,7 @@ function resolveSwarmWaitOwnerSessionKeys(
   while (currentSessionKey && !visited.has(currentSessionKey)) {
     visited.add(currentSessionKey);
     ownerSessionKeys.push(currentSessionKey);
-    let latestOwner: SubagentRunRecord | undefined;
-    for (const candidate of getRunsForChildSession(currentSessionKey)) {
-      if (!latestOwner || compareSubagentRunGeneration(candidate, latestOwner) > 0) {
-        latestOwner = candidate;
-      }
-    }
+    const latestOwner = latestSubagentRun(getRunsForChildSession(currentSessionKey));
     currentSessionKey =
       latestOwner?.controllerSessionKey?.trim() || latestOwner?.requesterSessionKey.trim() || "";
   }
@@ -499,27 +492,14 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
     }
     entry.swarmLaunchPending = false;
     entry.queuedLaunch = undefined;
-    let persistedRunning = false;
     try {
       this.options.persistOrThrow(previousRunId, nextRunId);
       if (terminalBeforeAcceptance) {
         bindGatewayContextResolver(entry, gatewayContextResolver);
         return true;
       }
-      persistedRunning = true;
     } catch (error) {
       restoreQueuedRun();
-      if (persistedRunning) {
-        try {
-          this.options.persistOrThrow(previousRunId, nextRunId);
-        } catch (rollbackError) {
-          // The failure callback terminalizes this in-memory queued row next.
-          log.warn("failed to persist collector start rollback", {
-            runId: previousRunId,
-            error: rollbackError,
-          });
-        }
-      }
       throw error;
     }
     bindGatewayContextResolver(entry, gatewayContextResolver);

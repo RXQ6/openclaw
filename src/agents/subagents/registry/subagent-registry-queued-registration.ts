@@ -145,6 +145,13 @@ export function registerRequiredQueuedSubagent(params: {
       throw new Error("Queued registration lost its original run owner");
     }
   };
+  const assertRegistrationCurrent = () => {
+    params.assertCurrent?.();
+    if (!gatewayCurrent()) {
+      throw new Error("Queued registration lost its original Gateway owner");
+    }
+    assertLaunchCurrent();
+  };
   const settlement = createQueuedRegistrationSettlement({
     entry,
     context,
@@ -302,8 +309,6 @@ export function registerRequiredQueuedSubagent(params: {
       message: error instanceof Error ? error.message : String(error),
     };
     const { endedAt, message, error: cause } = failureFact;
-    const terminalEndedAt = endedAt;
-    const terminalError = message;
     try {
       if (!(await clearDurableLaunchDescriptor())) {
         return;
@@ -314,16 +319,16 @@ export function registerRequiredQueuedSubagent(params: {
         terminal.execution = {
           ...terminal.execution,
           status: "terminal",
-          endedAt: terminalEndedAt,
-          outcome: { status: "error", error: terminalError, endedAt: terminalEndedAt },
+          endedAt,
+          outcome: { status: "error", error: message, endedAt },
           ...(!ownedSession ? { suppressSessionEffects: true } : {}),
         };
         terminal.queuedLaunch = undefined;
         terminal.collectorLaunchCleanupPending = true;
         terminal.completion = {
           required: false,
-          resultText: terminalError ?? null,
-          capturedAt: terminalEndedAt,
+          resultText: message,
+          capturedAt: endedAt,
         };
         updateSwarmCollectorCompletion(terminal, manager.getRuntimeConfig());
         return terminal;
@@ -375,13 +380,7 @@ export function registerRequiredQueuedSubagent(params: {
         await manager.persistAsyncOrThrow(
           context,
           {
-            assertCurrent: () => {
-              params.assertCurrent?.();
-              if (!gatewayCurrent()) {
-                throw new Error("Queued registration lost its original Gateway owner");
-              }
-              assertLaunchCurrent();
-            },
+            assertCurrent: assertRegistrationCurrent,
           },
           runId,
           ...Array.from(originals.keys(), (previous) => previous.runId),
@@ -449,13 +448,7 @@ export function registerRequiredQueuedSubagent(params: {
           publication = manager.persistAsyncOrThrow(
             context,
             {
-              assertCurrent: () => {
-                params.assertCurrent?.();
-                if (!gatewayCurrent()) {
-                  throw new Error("Queued registration lost its original Gateway owner");
-                }
-                assertLaunchCurrent();
-              },
+              assertCurrent: assertRegistrationCurrent,
               onCommitted: () => {
                 descriptorCommitted = true;
                 if (ownsQueuedIntent()) {
