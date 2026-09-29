@@ -8,10 +8,18 @@ import * as support from "./service.test-support.js";
 type WorkerEnvironmentServiceOptions = support.WorkerEnvironmentServiceOptions;
 
 export function registerWorkerNativeInferenceRpcTests(): void {
-  it.each(["worker", "runtime-local"])(
-    "denies Gateway inference for stored %s placement after exact binding",
-    async (inference) => {
-      const executeInference = vi.fn<WorkerEnvironmentServiceOptions["executeInference"]>();
+  it.each([
+    ...["worker", "runtime-local"].map((inference) => ({ providerId: "device", inference })),
+    ...[false, null, { mode: "remote" }, "worker"].map((inference) => ({
+      providerId: "custom-provider",
+      inference,
+    })),
+  ])(
+    "honors provider-owned inference grammar after exact RPC binding %j",
+    async ({ providerId, inference }) => {
+      const executeInference = vi.fn<WorkerEnvironmentServiceOptions["executeInference"]>(
+        async () => ({ type: "error", reason: "provider-error", message: "fixture completed" }),
+      );
       const { identity, placementStore, workerService } = await support.placementHarness(
         "worker-runtime-local-proxy-denial",
         "session-runtime-local-proxy-denial",
@@ -26,7 +34,7 @@ export function registerWorkerNativeInferenceRpcTests(): void {
             getNodeSqliteKysely<StateDatabase>(db)
               .updateTable("worker_environments")
               .set({
-                provider_id: "device",
+                provider_id: providerId,
                 node_device_id: "paired-inference-node",
                 shared_host: 1,
                 ssh_host: null,
@@ -43,7 +51,7 @@ export function registerWorkerNativeInferenceRpcTests(): void {
         { database: support.testState.stateDb },
       );
       expect(support.testState.store.get(identity.environmentId)).toMatchObject({
-        providerId: "device",
+        providerId,
         profileSnapshot: { settings: { inference } },
       });
       expect(workerService.validateWorkerConnection(identity)).toBeNull();
@@ -74,12 +82,18 @@ export function registerWorkerNativeInferenceRpcTests(): void {
         closeReason: "placement-mismatch",
       });
       placementStore.validateWorkerTurn.mockReturnValue(true);
-      expect(await workerService.startInference(identity, request, sink)).toEqual({
-        ok: false,
-        reason: "model-not-approved",
-      });
+      const started = await workerService.startInference(identity, request, sink);
       expect(executeInference).not.toHaveBeenCalled();
       expect(send).not.toHaveBeenCalled();
+      if (providerId === "device") {
+        expect(started).toEqual({ ok: false, reason: "model-not-approved" });
+      } else {
+        expect(started.ok).toBe(true);
+        if (!started.ok) throw new Error("opaque provider inference was refused");
+        started.launch();
+        await support.waitForFast(() => expect(send).toHaveBeenCalledOnce());
+        expect(executeInference).toHaveBeenCalledOnce();
+      }
     },
   );
 

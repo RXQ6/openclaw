@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { OpenClawSchema } from "../../config/zod-schema.js";
 import { workerInferencePlacement } from "./inference-placement.js";
 
 describe("recorded worker inference placement", () => {
@@ -26,23 +27,39 @@ describe("recorded worker inference placement", () => {
     },
   );
 
-  it.each(["worker", "runtime-local", "unknown", null, false, 1])(
-    "never turns invalid explicit %s into Gateway inference",
+  it.each(["unknown", "native", null, false, 1, { mode: "worker" }])(
+    "rejects invalid paired-device placement %j",
     (inference) => {
       expect(() =>
         workerInferencePlacement({
-          providerId: "static-ssh",
+          providerId: "device",
           profileSnapshot: { settings: { inference } },
         }),
       ).toThrow();
-      if (inference !== "worker" && inference !== "runtime-local") {
-        expect(() =>
-          workerInferencePlacement({
-            providerId: "device",
-            profileSnapshot: { settings: { inference } },
-          }),
-        ).toThrow();
-      }
     },
   );
+
+  it.each([
+    undefined,
+    "gateway",
+    "worker",
+    "runtime-local",
+    "native",
+    "vendor-mode",
+    false,
+    null,
+    1,
+    { mode: "remote" },
+  ])("preserves accepted provider-owned inference settings %j", (inference) => {
+    const profile = {
+      provider: "custom-provider",
+      settings: inference === undefined ? {} : { inference },
+    };
+    expect(
+      OpenClawSchema.safeParse({ cloudWorkers: { profiles: { custom: profile } } }).success,
+    ).toBe(true);
+    expect(
+      workerInferencePlacement({ providerId: profile.provider, profileSnapshot: profile }),
+    ).toBe("gateway");
+  });
 });
