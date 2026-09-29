@@ -352,6 +352,37 @@ describe("SessionPullRequestIndicatorsController", () => {
 });
 
 describe("SessionPullRequestIndicatorsController Lit lifecycle", () => {
+  it("hides the row's saved PR summary after a same-client read-scope revocation", async () => {
+    const harness = createGatewayHarness();
+    const row = {
+      key: "agent:main:demo",
+      isChild: false,
+      worktreeId: "wt-demo",
+      pullRequest: { numbers: [42], state: "open" },
+    } as SidebarRecentSession;
+    const host = mountLifecycleHost(harness.gateway, () => [row]);
+    await host.updateComplete;
+    expect(host.shadowRoot?.textContent).toContain("42");
+
+    const snapshot = harness.gateway.snapshot;
+    snapshot.hello = {
+      ...snapshot.hello!,
+      auth: { role: "operator", scopes: ["operator.sessions.read", "operator.sessions.write"] },
+    };
+    host.requestUpdate();
+    await host.updateComplete;
+    expect(host.shadowRoot?.textContent).not.toContain("42");
+    expect(host.controller.summary(row.key, row.worktreeId!, row.pullRequest)).toBeUndefined();
+
+    snapshot.hello = {
+      ...snapshot.hello,
+      auth: { role: "operator", scopes: ["operator.read"] },
+    };
+    host.requestUpdate();
+    await host.updateComplete;
+    expect(host.shadowRoot?.textContent).toContain("42");
+  });
+
   it("retains sidebar snapshots while only the viewed checkout drives subscriptions", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     const harness = createGatewayHarness();

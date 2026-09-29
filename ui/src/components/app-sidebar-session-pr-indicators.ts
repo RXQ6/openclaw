@@ -66,6 +66,17 @@ export class SessionPullRequestIndicatorsController implements ReactiveControlle
     worktreeId: string,
     initial?: SessionCatalogPullRequestSummary,
   ): SessionCatalogPullRequestSummary | undefined {
+    const gateway = this.options.getGateway();
+    if (
+      !gateway ||
+      !canCallGatewayMethod(
+        gateway.snapshot,
+        SESSION_PULL_REQUESTS_SUBSCRIBE_METHOD,
+        "operator.read",
+      )
+    ) {
+      return undefined;
+    }
     const entry = this.states.get(sessionKey);
     // A ready empty snapshot is authoritative; only seed a row before its first snapshot.
     return entry?.worktreeId === worktreeId ? entry.summary : initial;
