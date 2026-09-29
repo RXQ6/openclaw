@@ -509,6 +509,7 @@ async function attempt(
       storePath: "/fixture/sessions.json",
     },
     () => ({ ...(environment === undefined ? {} : { environment }), ...pluginConfig }),
+    new WeakMap(),
   );
   return { result, bind };
 }

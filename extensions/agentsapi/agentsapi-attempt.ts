@@ -49,6 +49,7 @@ export async function runAgentsApiAttempt(
   assertHarnessCurrent: () => void,
   target: ReturnType<typeof requireAgentsApiSessionTarget>,
   readPluginConfig: () => unknown,
+  promptHistories: AgentsApiPromptHistories,
 ): Promise<EmbeddedRunAttemptResult> {
   const startedAtMs = Date.now();
   const cancellationState = {
@@ -268,6 +269,20 @@ export async function runAgentsApiAttempt(
       params.userTurnTranscriptRecorder?.message ??
       (await params.userTurnTranscriptRecorder?.resolveMessage());
     assertCurrent();
+    const recorder = params.userTurnTranscriptRecorder;
+    const historyLimits = resolveAgentHarnessHistoryLimits(
+      params.contextWindowInfo?.tokens ?? params.contextTokenBudget,
+    );
+    const historyScope = JSON.stringify([
+      params.runId,
+      target.agentId,
+      target.sessionId,
+      target.sessionKey,
+      target.storePath,
+      params.workspaceDir,
+      historyLimits,
+    ]);
+    let preparedHistory: AgentsApiPromptHistory["messages"] | undefined;
     const promptBuild = await resolveAgentHarnessBeforePromptBuildResult({
       prompt: params.prompt,
       currentInboundContext: params.currentInboundContext,
@@ -276,16 +291,22 @@ export async function runAgentsApiAttempt(
       developerInstructions: instructions,
       messages: async () => {
         assertCurrent();
+        const retained = recorder && promptHistories.get(recorder);
+        if (retained?.scope === historyScope && retained.nativeSessionId === remoteSessionId) {
+          return retained.messages;
+        }
+        if (recorder) {
+          promptHistories.delete(recorder);
+        }
         const history = await SessionManager.openModelContextAsync(target, {
           cwd: params.workspaceDir,
-          admission: params.userTurnTranscriptRecorder?.getAdmissionReceipt(),
+          admission: recorder?.getAdmissionReceipt(),
           signal: controller.signal,
-          limits: resolveAgentHarnessHistoryLimits(
-            params.contextWindowInfo?.tokens ?? params.contextTokenBudget,
-          ),
+          limits: historyLimits,
         });
         assertCurrent();
-        return history.buildSessionContext().messages;
+        preparedHistory = history.buildSessionContext().messages;
+        return preparedHistory;
       },
       ctx: hookContext,
       bootstrapContextRunKind: params.bootstrapContextRunKind,
@@ -319,7 +340,16 @@ export async function runAgentsApiAttempt(
       await bind({ sessionId: remoteSessionId, authFingerprint: fingerprint });
     } else {
       await client.setReasoningEffort(remoteSessionId, reasoningEffort, controller.signal);
-      assertCurrent();
+    }
+    assertCurrent();
+    if (recorder && preparedHistory) {
+      // A retry keeps this run's already-validated, detached hook context. The
+      // hook runner isolates each dispatch; live authority is checked separately.
+      promptHistories.set(recorder, {
+        scope: historyScope,
+        nativeSessionId: remoteSessionId,
+        messages: preparedHistory,
+      });
     }
     if (!creatingSession && inputs.files.length) {
       await uploadInputs(client, remoteSessionId, inputs.files, assertCurrent, controller.signal);
@@ -639,3 +669,15 @@ export async function runAgentsApiAttempt(
   }
   return result;
 }
+
+type AgentsApiPromptHistory = {
+  scope: string;
+  nativeSessionId: string;
+  messages: ReturnType<SessionManager["buildSessionContext"]>["messages"];
+};
+
+/** One bounded snapshot per original recorder, owned by the harness lifetime. */
+export type AgentsApiPromptHistories = WeakMap<
+  NonNullable<AgentHarnessAttemptParamsV2["userTurnTranscriptRecorder"]>,
+  AgentsApiPromptHistory
+>;
