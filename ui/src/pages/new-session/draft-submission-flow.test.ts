@@ -792,6 +792,7 @@ describe("DraftSubmissionFlow", () => {
       recoveryScope: "principal-a",
       recoveryScopeReady: true,
       request: vi.fn(async (method: string) => {
+        if (method === "agents.list") return { sessionPlacement: {} };
         if (method === "models.list") {
           return { models: [] };
         }

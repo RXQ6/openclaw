@@ -1,6 +1,5 @@
 import type {
   SessionPlacement,
-  EnvironmentsListResult,
   SessionsDispatchResult,
 } from "../../../../packages/gateway-protocol/src/index.js";
 import {
@@ -20,6 +19,7 @@ import {
 import { formatTerminalChatSendAckError } from "../../pages/chat/chat-send-support.ts";
 import type { HumanMention } from "../chat/chat-types.ts";
 import type { SessionCapability } from "./session-capability.ts";
+import { readSessionPlacementPolicy } from "./session-placement-policy.ts";
 import type {
   SessionPlacementStartMode,
   SessionPlacementTarget,
@@ -387,14 +387,14 @@ export async function startSessionPlacementInitialTurn(
     // A recovered draft carries intent, not authority. Revalidate the policy before
     // observing placement or admitting a Retry through the ordinary run owner.
     try {
-      const catalog = await client.request<EnvironmentsListResult>("environments.list", {});
+      const policy = await readSessionPlacementPolicy(client);
       if (!isCurrent()) {
         return cancelSessionPlacement(client, params, cleanupOnCancellation);
       }
-      if (catalog.requiredProfile !== requiredTarget.profileId) {
+      if (policy.requiredProfile?.id !== requiredTarget.profileId) {
         return { status: "dispatch-rejected", error: t("newSession.requiredWorkerChanged") };
       }
-      if (!catalog.profiles?.some((profile) => profile.id === requiredTarget.profileId)) {
+      if (!policy.requiredProfile.providerId) {
         return { status: "dispatch-rejected", error: t("newSession.requiredWorkerUnavailable") };
       }
     } catch (error) {

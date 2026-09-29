@@ -40,9 +40,15 @@ optional per-session placement and Gateway-local execution.
 }
 ```
 
-The Gateway advertises the required profile through `environments.list`. Control
-UI shows the required destination without a placement, operating-system, or
-machine selector. Ordinary session creation uses the server-owned placement
+New Session and required first-turn recovery read the destination directive through
+`agents.list` with `includeSessionPlacement: true`. That projection is available to
+session-scoped writers and contains only the required profile's identity, inference
+placement, and supported required execution mode—not worker inventory, machine
+options, endpoint settings, or command grants. Ordinary `agents.list` replies are
+unchanged. Control UI shows the required destination without a placement,
+operating-system, or machine selector. Required placement uses the OpenClaw
+worker-turn runtime; a provider that supports only remote-exec cannot satisfy
+this policy. Ordinary session creation uses the server-owned placement
 flow; users do not need permission to choose or administer cloud workers. Manual
 placement administration retains its existing permissions.
 

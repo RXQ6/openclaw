@@ -8,7 +8,7 @@ import { isGatewayMethodAdvertised } from "../../lib/gateway-methods.ts";
 import { normalizeAgentId } from "../../lib/sessions/session-key.ts";
 import * as catalog from "./catalog-target.ts";
 import { CLOUD_PROFILE_RETRY_DELAYS_MS } from "./cloud-profile-discovery.ts";
-import { requestPlaceCatalog } from "./cloud-target.ts";
+import { requestPlaceCatalog, requestSessionPlacement } from "./cloud-target.ts";
 import type { DraftCloudProfile, DraftEnvironment } from "./discovery.ts";
 import {
   DraftPreferenceState,
@@ -67,6 +67,8 @@ type DraftGatewayCallbacks = DraftPreferenceOptions & {
 export class DraftGatewayState {
   private cloudProfilesValue: DraftCloudProfile[] = [];
   private requiredProfileValue: string | undefined;
+  private placementPolicyReadyValue = false;
+  private gatewayAuthorityValue = "";
   private environmentsValue: DraftEnvironment[] | null = null;
   private cloudProfilesReadyValue = false;
   private catalogRetryingValue = false;
@@ -84,6 +86,7 @@ export class DraftGatewayState {
   private catalogRetryTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
   private cloudProfileRetryAttempt = 0;
   private cloudProfileRefresh: Promise<void> | null = null;
+  private cloudProfileTaskHasClient = false;
   private cloudProfileRetryTimer: ReturnType<typeof globalThis.setTimeout> | undefined;
   private readonly preferences: DraftPreferenceState;
   private identityPreferences: PaletteIdentityPreferences | undefined;
@@ -136,21 +139,34 @@ export class DraftGatewayState {
           this.gatewayRecoveryScopeValue,
           this.read().runtimeId,
         ] as const,
-      task: async ([client, _connectionEpoch, _canWrite, isAdmin, _recoveryScope, runtimeId]) => {
+      task: async (
+        [client, _connectionEpoch, canWrite, isAdmin, _recoveryScope, runtimeId],
+        { signal },
+      ) => {
+        this.cloudProfileTaskHasClient = client !== null;
         if (!client) {
           return initialState;
         }
+        this.placementPolicyReadyValue = false;
+        const policy = await requestSessionPlacement(client);
+        signal.throwIfAborted();
+        this.requiredProfileValue = policy.requiredProfile;
+        this.placementPolicyReadyValue = true;
+        this.callbacks.requestUpdate();
+        if (policy.requiredProfile || !canWrite) {
+          return { profiles: policy.profiles, environments: [] };
+        }
+        // Local starts need the directive above, not optional inventory latency/availability.
         const result = await requestPlaceCatalog(client, runtimeId);
         return {
           ...result,
           profiles: isAdmin
             ? result.profiles
-            : result.profiles.filter((profile) => profile.id === result.requiredProfile),
+            : result.profiles.filter((profile) => profile.id === this.requiredProfileValue),
         };
       },
       onComplete: (placeCatalog) => {
         this.resetCloudProfileRetry();
-        this.requiredProfileValue = placeCatalog.requiredProfile;
         this.environmentsValue = placeCatalog.environments;
         this.applyCloudProfiles(placeCatalog.profiles);
         this.cloudProfilesReadyValue = true;
@@ -178,10 +194,7 @@ export class DraftGatewayState {
   }
 
   get placementPolicyReady(): boolean {
-    return (
-      this.cloudProfilesReadyValue &&
-      (!this.requiredProfileValue || this.cloudProfileTask.status === TaskStatus.COMPLETE)
-    );
+    return this.placementPolicyReadyValue;
   }
 
   get environments(): readonly DraftEnvironment[] | null {
@@ -247,7 +260,8 @@ export class DraftGatewayState {
   }
 
   refreshCloudProfiles(): Promise<void> {
-    if (this.cloudProfileTask.status === TaskStatus.PENDING) {
+    // A retirement run returns Lit's initialState, which does not settle taskComplete.
+    if (this.cloudProfileTask.status === TaskStatus.PENDING && this.cloudProfileTaskHasClient) {
       const queued =
         this.cloudProfileRefresh ??
         this.cloudProfileTask.taskComplete
@@ -282,8 +296,17 @@ export class DraftGatewayState {
       bootId !== this.gatewayBootIdValue;
     const gatewayUrlChanged = !firstBind && this.gatewayUrlValue !== gateway.connection.gatewayUrl;
     const gatewaySourceChanged = !firstBind && this.gatewaySource !== gateway;
+    const authority = connected
+      ? JSON.stringify([
+          snapshot.selfUser?.id,
+          snapshot.hello?.auth?.role,
+          snapshot.hello?.auth?.scopes?.toSorted(),
+        ])
+      : this.gatewayAuthorityValue;
+    const authorityChanged = !firstBind && this.gatewayAuthorityValue !== authority;
     const identityChanged =
-      !firstBind && (gatewaySourceChanged || this.gatewayClientValue !== snapshot.client);
+      !firstBind &&
+      (gatewaySourceChanged || this.gatewayClientValue !== snapshot.client || authorityChanged);
     const connectionChanged = !firstBind && this.gatewayConnectedValue !== connected;
     const becameConnected = connected && (identityChanged || !this.gatewayConnectedValue);
     const recoveryScopeBecameReady =
@@ -294,6 +317,7 @@ export class DraftGatewayState {
       ? (snapshot.hello?.auth?.recoveryScope ?? "")
       : this.gatewayRecoveryScopeValue;
     const recoveryScopeChanged = !firstBind && this.gatewayRecoveryScopeValue !== recoveryScope;
+    this.gatewayAuthorityValue = authority;
     this.gatewaySource = gateway;
     this.gatewayClientValue = snapshot.client;
     this.gatewayUrlValue = gateway.connection.gatewayUrl;
@@ -311,7 +335,8 @@ export class DraftGatewayState {
       connectionChanged ||
       recoveryScopeChanged
     ) {
-      const ownerChanged = gatewaySourceChanged || gatewayUrlChanged || recoveryScopeChanged;
+      const ownerChanged =
+        gatewaySourceChanged || gatewayUrlChanged || recoveryScopeChanged || authorityChanged;
       const gatewayIdentityChanged = gatewayUrlChanged || recoveryScopeChanged;
       this.invalidateDiscovery(
         ownerChanged,
@@ -359,6 +384,7 @@ export class DraftGatewayState {
     void this.cloudProfileTask.run([null, -1, false, false, ""]);
     this.cloudProfilesValue = [];
     this.requiredProfileValue = undefined;
+    this.placementPolicyReadyValue = false;
     this.cloudProfilesReadyValue = false;
     if (resetHostSelection) {
       this.environmentsValue = null;
@@ -534,10 +560,12 @@ export class DraftGatewayState {
     this.identityPreferences = undefined;
     this.cloudProfilesValue = [];
     this.requiredProfileValue = undefined;
+    this.placementPolicyReadyValue = false;
     this.cloudProfilesReadyValue = false;
     this.environmentsValue = null;
     this.cloudProfileRefresh = null;
     this.gatewaySource = null;
+    this.gatewayAuthorityValue = "";
     this.gatewayClientValue = null;
     this.gatewayConnectedValue = false;
     this.gatewayConnectionEpochValue = 0;

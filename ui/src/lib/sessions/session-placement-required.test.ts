@@ -11,9 +11,7 @@ import { advanceSessionPlacementDraft } from "./session-placement-submit.ts";
 
 const target = { kind: "profile", profileId: "dedicated", required: true } as const;
 const catalog = {
-  requiredProfile: target.profileId,
-  profiles: [{ id: target.profileId }],
-  environments: [],
+  sessionPlacement: { requiredProfile: { id: target.profileId, providerId: "device" } },
 };
 const params = {
   key: "agent:main:required",
@@ -23,8 +21,17 @@ const params = {
   messageId: "first-turn",
   mode: "dispatch" as const,
 };
-function clientWith(request: ReturnType<typeof vi.fn>): Pick<GatewayBrowserClient, "request"> {
-  return { request: request as GatewayBrowserClient["request"] };
+function clientWith(
+  request: ReturnType<typeof vi.fn>,
+): Parameters<typeof startSessionPlacementInitialTurn>[0] {
+  const client = { request: request as GatewayBrowserClient["request"] };
+  return {
+    client,
+    describe: (params, options) => {
+      expect(options?.client).toBe(client);
+      return client.request("sessions.describe", params);
+    },
+  };
 }
 afterEach(() => {
   vi.useRealTimers();
@@ -35,7 +42,7 @@ it("waits for server-started placement and sends exactly once without dispatch",
   vi.useFakeTimers();
   let state = "provisioning";
   const request = vi.fn(async (method: string) =>
-    method === "environments.list"
+    method === "agents.list"
       ? catalog
       : method === "sessions.describe"
         ? { session: { placement: { state } } }
@@ -44,14 +51,14 @@ it("waits for server-started placement and sends exactly once without dispatch",
   const pending = startSessionPlacementInitialTurn(clientWith(request), params, () => true);
   await vi.advanceTimersByTimeAsync(0);
   expect(request.mock.calls.map(([method]) => method)).toEqual([
-    "environments.list",
+    "agents.list",
     "sessions.describe",
   ]);
   state = "active";
   await vi.advanceTimersByTimeAsync(250);
   expect(await pending).toEqual({ status: "started", messageId: "first-turn" });
   expect(request.mock.calls.map(([method]) => method)).toEqual([
-    "environments.list",
+    "agents.list",
     "sessions.describe",
     "sessions.describe",
     "sessions.send",
@@ -62,7 +69,7 @@ it.each(["failed", "reclaimed", "local"])(
   "admits explicit Retry from %s through the server run owner, not admin dispatch",
   async (state) => {
     const request = vi.fn(async (method: string) =>
-      method === "environments.list"
+      method === "agents.list"
         ? catalog
         : method === "sessions.describe"
           ? { session: { placement: { state } } }
@@ -76,7 +83,7 @@ it.each(["failed", "reclaimed", "local"])(
       ),
     ).toEqual({ status: "started", messageId: "first-turn" });
     expect(request.mock.calls.map(([method]) => method)).toEqual([
-      "environments.list",
+      "agents.list",
       "sessions.describe",
       "sessions.send",
     ]);
@@ -86,7 +93,13 @@ it.each(["failed", "reclaimed", "local"])(
 it.each([undefined, "replacement"])(
   "does not send or dispatch when the required policy changes to %s",
   async (requiredProfile) => {
-    const request = vi.fn(async () => ({ ...catalog, requiredProfile }));
+    const request = vi.fn(async () => ({
+      sessionPlacement: {
+        requiredProfile: requiredProfile
+          ? { id: requiredProfile, providerId: "device" }
+          : undefined,
+      },
+    }));
     expect(
       await startSessionPlacementInitialTurn(clientWith(request), params, () => true),
     ).toMatchObject({ status: "dispatch-rejected" });
@@ -99,7 +112,7 @@ it("Stop fences a late active placement reply and retains the existing reclaim o
   const read = createDeferred();
   let current = true;
   const request = vi.fn(async (method: string) => {
-    if (method === "environments.list") {
+    if (method === "agents.list") {
       return catalog;
     }
     if (method === "sessions.describe") {
@@ -114,7 +127,7 @@ it("Stop fences a late active placement reply and retains the existing reclaim o
   active.resolve({ session: { placement: { state: "active" } } });
   expect(await pending).toEqual({ status: "cancelled" });
   expect(request.mock.calls.map(([method]) => method)).toEqual([
-    "environments.list",
+    "agents.list",
     "sessions.describe",
     "sessions.reclaim",
   ]);
@@ -140,7 +153,7 @@ it("restores a required target and reconciles uncertain delivery without a dupli
   expect(restored.target).toEqual(target);
   const request = vi.fn(async (_method: string) => ({ messages: [] }));
   const result = await advanceSessionPlacementDraft({
-    client: clientWith(request),
+    ...clientWith(request),
     recovery: restored,
     mode: "recover",
     isLifecycleCurrent: () => true,

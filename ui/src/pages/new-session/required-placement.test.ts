@@ -61,6 +61,22 @@ function fixture(
         ],
       };
     },
+    placementPolicy: async () => {
+      const value = (await request("agents.list")) as {
+        requiredProfile?: string;
+        profiles?: Array<typeof profile>;
+      };
+      return {
+        sessionPlacement: value.requiredProfile
+          ? {
+              requiredProfile: {
+                id: value.requiredProfile,
+                ...value.profiles?.find((profile) => profile.id === value.requiredProfile),
+              },
+            }
+          : {},
+      };
+    },
     request,
   });
 }
@@ -293,4 +309,111 @@ it("keeps a cold required-worker draft on configured defaults across asynchronou
   expect(f.place.modelControl.modelForSubmission()).toBe("");
   expect(f.place.modelControl.agentRuntime).toBeUndefined();
   expect(f.flow.canSubmit()).toBe(true);
+});
+
+it.each([false, true])(
+  "allows a session-only writer without inventory (required=%s)",
+  async (required) => {
+    const f = createDraftFixture({
+      methods: ["agents.list", "environments.list", "sessions.create", "sessions.send"],
+      scopes: ["operator.sessions.write"],
+      placementPolicy: async () => ({
+        sessionPlacement: required ? { requiredProfile: profile } : {},
+      }),
+      request: async (method) => {
+        if (method === "environments.list") throw new Error("missing scope: operator.write");
+        return {};
+      },
+    });
+    try {
+      await f.gateway.refreshCloudProfiles();
+      f.flow.setMessage("Start my own session");
+      expect(f.gateway.placementPolicyReady).toBe(true);
+      expect(f.place.requiredPlacement).toBe(required);
+      expect(f.flow.submitBlock()).toBeUndefined();
+      expect(f.flow.canSubmit()).toBe(true);
+      expect(f.request.mock.calls.some(([method]) => method === "environments.list")).toBe(false);
+    } finally {
+      f.gateway.disconnect();
+    }
+  },
+);
+
+it("does not hold an ordinary local start behind unrelated pending inventory", async () => {
+  const inventory = createDeferred<unknown>();
+  const entered = createDeferred();
+  const f = createDraftFixture({
+    methods: ["agents.list", "environments.list", "sessions.create"],
+    request: async (method) => {
+      if (method === "agents.list") return { sessionPlacement: {} };
+      if (method === "environments.list") {
+        entered.resolve();
+        return inventory.promise;
+      }
+      return {};
+    },
+  });
+  const refresh = f.gateway.refreshCloudProfiles();
+  try {
+    await entered.promise;
+    f.flow.setMessage("Run locally now");
+    expect(f.gateway.placementPolicyReady).toBe(true);
+    expect(f.flow.canSubmit()).toBe(true);
+  } finally {
+    inventory.resolve({ profiles: [], environments: [] });
+    await refresh;
+    f.gateway.disconnect();
+  }
+});
+
+it.each(["grant", "gateway"] as const)(
+  "fences an old policy after a %s change with identical agent/profile labels",
+  async (change) => {
+    const held = createDeferred<unknown>();
+    let current = held.promise;
+    const f = createDraftFixture({
+      methods: ["agents.list", "environments.list", "sessions.create", "sessions.send"],
+      selfUser: { id: "same-profile" },
+      placementPolicy: () => current,
+      request: async () => ({ profiles: [], environments: [] }),
+    });
+    const pending = f.gateway.refreshCloudProfiles();
+    try {
+      current = Promise.resolve({ sessionPlacement: {} });
+      if (change === "grant") {
+        f.context.gateway.snapshot.hello!.auth!.scopes = ["operator.sessions.write"];
+      } else {
+        f.context.gateway.connection.gatewayUrl = "ws://second.example";
+        const server = f.context.gateway.snapshot.hello?.server;
+        if (!server) throw new Error("Fixture Gateway hello is missing its server identity");
+        server.bootId = "second-boot";
+      }
+      f.gateway.synchronize(f.context.gateway);
+      await f.gateway.refreshCloudProfiles();
+      held.resolve({ sessionPlacement: { requiredProfile: profile } });
+      await pending;
+      f.flow.setMessage("Use the current Gateway and grant");
+      expect(f.gateway.requiredProfile).toBeUndefined();
+      expect(f.gateway.placementPolicyReady).toBe(true);
+      expect(f.flow.canSubmit()).toBe(true);
+      if (change === "grant")
+        expect(f.request.mock.calls.some(([method]) => method === "environments.list")).toBe(false);
+    } finally {
+      held.resolve({ sessionPlacement: {} });
+      f.gateway.disconnect();
+    }
+  },
+);
+
+it("does not invent worker-turn support for the required provider", async () => {
+  const f = fixture(async () => ({ ...catalog, profiles: [{ ...profile, executionModes: [] }] }));
+  try {
+    await ready(f);
+    expect(f.gateway.requiredProfile).toBe(profile.id);
+    expect(f.flow.canSubmit()).toBe(false);
+    await f.flow.submit();
+    expect(f.context.sessions.createResult).not.toHaveBeenCalled();
+  } finally {
+    f.gateway.disconnect();
+  }
 });

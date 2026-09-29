@@ -89,7 +89,8 @@ export function readNewSessionSubmissionAccess(options: {
       params: createParams,
       sessionScope: true,
     });
-    if (!createAccess.allowed || !target) {
+    // Creation assigns ownership before its required first-turn handoff has a row.
+    if (!createAccess.allowed || !target || (target.kind === "profile" && target.required)) {
       return createAccess;
     }
   }
