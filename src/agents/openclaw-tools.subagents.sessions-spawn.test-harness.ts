@@ -4,7 +4,6 @@ import path from "node:path";
 import { vi, type Mock } from "vitest";
 import type { SessionRunStatus } from "../../packages/gateway-protocol/src/schema/sessions-row.js";
 import type { SubagentLifecycleHookRunner } from "../plugins/hooks.js";
-import { createSubagentPersistenceMock } from "./subagent-test-fixtures.test-helpers.js";
 import { resolveRequesterStoreKey } from "./subagents/announce/subagent-requester-store-key.js";
 import { supportedSpawnModelChoice } from "./subagents/spawn/subagent-spawn.test-helpers.js";
 
@@ -243,9 +242,6 @@ export async function getSessionsSpawnTool(opts: CreateOpenClawToolsOpts) {
   vi.mocked(persistence.persistSubagentRunsToDisk).mockImplementation(hoisted.notifyEventWaiters);
   vi.mocked(persistence.persistSubagentRunsToDiskOrThrow).mockImplementation(
     hoisted.notifyEventWaiters,
-  );
-  vi.mocked(persistence.persistSubagentRunsToDiskAsyncOrThrow).mockImplementation(
-    createSubagentPersistenceMock(persistence).persistSubagentRunsToDiskAsyncOrThrow,
   );
   vi.mocked(persistence.restoreSubagentRunsFromDisk).mockReturnValue(0);
   const persistenceMock = createSubagentPersistenceMock(persistence);
