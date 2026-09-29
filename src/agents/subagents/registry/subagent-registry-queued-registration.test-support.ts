@@ -1,20 +1,20 @@
 import { vi, type Mock } from "vitest";
 import { createDeferred } from "../../../../test/helpers/promise.js";
+import { withSubagentRegistryWriteAuthority } from "./subagent-registry-persistence.js";
 import type { RegisterSubagentRunParams } from "./subagent-registry-run-launch-record.js";
 import type { SubagentLaunchManager } from "./subagent-registry-run-launch.js";
 import { createSubagentRunManager } from "./subagent-registry-run-manager.js";
 import type { SubagentManagerOptions } from "./subagent-registry-run-wait.js";
 import type { SubagentRegistrationScope, SubagentRunRecord } from "./subagent-registry.types.js";
 
-export function createQueuedRegistrationFixture(
-  mocks: {
-    register: Mock<SubagentLaunchManager["registerSubagentRun"]>;
-    persisted: Set<() => void>;
-  },
-  runs = new Map<string, SubagentRunRecord>(),
-) {
+export function createQueuedRegistrationFixture(mocks: {
+  register: Mock<SubagentLaunchManager["registerSubagentRun"]>;
+  persisted: Set<() => void>;
+}) {
+  const runs = new Map<string, SubagentRunRecord>();
   let syncRevision = 0;
   let acknowledgeAll = false;
+  let acknowledgeControlWrite = false;
   const writes: Array<{
     gate: ReturnType<typeof createDeferred<void>>;
     snapshot: Map<string, SubagentRunRecord>;
@@ -23,7 +23,23 @@ export function createQueuedRegistrationFixture(
   }> = [];
   let nextWrite = createDeferred<(typeof writes)[number]>();
   const persist = vi.fn<SubagentManagerOptions["persistAsyncOrThrow"]>(
-    (_context, callbacks, ...runIds) => {
+    (context, callbacks, ...runIds) => {
+      if (acknowledgeControlWrite) {
+        // Claims use this same transport, but these cases hold registration writes only.
+        return withSubagentRegistryWriteAuthority(
+          runIds,
+          { context, ...callbacks },
+          async (authority) => {
+            await Promise.resolve();
+            authority.assertCurrent();
+            syncRevision += 1;
+            callbacks.onCommitted?.(authority.currentRunIds());
+            for (const listener of mocks.persisted) {
+              listener();
+            }
+          },
+        );
+      }
       const gate = createDeferred();
       const admittedRevision = syncRevision;
       const write: (typeof writes)[number] = {
@@ -63,6 +79,7 @@ export function createQueuedRegistrationFixture(
       }
     }),
     persistAsyncOrThrow: persist,
+    acquireTerminalCompletionLock: async () => () => {},
     callGateway: async () => {
       throw new Error("Unexpected Gateway call");
     },
@@ -82,6 +99,14 @@ export function createQueuedRegistrationFixture(
     completeSubagentRun: async () => {},
   } satisfies SubagentManagerOptions;
   const manager = createSubagentRunManager(options);
+  const commitControl = <T>(operation: () => Promise<T>): Promise<T> => {
+    acknowledgeControlWrite = true;
+    try {
+      return operation();
+    } finally {
+      acknowledgeControlWrite = false;
+    }
+  };
   mocks.register.mockImplementation(manager.registerSubagentRun);
   const registration: RegisterSubagentRunParams = {
     runId: "queued-original",
@@ -108,6 +133,11 @@ export function createQueuedRegistrationFixture(
     },
     options,
     manager,
+    claimSubagentRunKill: (input: Parameters<typeof manager.claimSubagentRunKill>[0]) =>
+      commitControl(() => manager.claimSubagentRunKill(input)),
+    releaseSubagentRunKillClaim: (
+      input: Parameters<typeof manager.releaseSubagentRunKillClaim>[0],
+    ) => commitControl(() => manager.releaseSubagentRunKillClaim(input)),
     get persistenceObservers() {
       return mocks.persisted;
     },

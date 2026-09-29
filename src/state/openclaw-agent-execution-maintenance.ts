@@ -89,6 +89,9 @@ export function createAgentDatabaseMaintenanceOwner(context: {
                 "Session maintenance preparation",
               )
             : undefined;
+        if (preparation && command.input.kind === "maintenance-plan") {
+          Object.assign(preparation.plan.input, command.input.protection);
+        }
         const plan = preparation
           ? { kind: "maintenance-plan" as const, input: preparation.plan.input }
           : { kind: "maintenance-statistics" as const };

@@ -24,7 +24,10 @@ import {
 import { bindSwarmRunReservation, ownsSwarmRunReservation } from "../swarm/swarm-scheduler.js";
 import { SUBAGENT_ENDED_REASON_ERROR } from "./subagent-lifecycle-events.js";
 import { subagentRuns, waitForSubagentRetirementPublication } from "./subagent-registry-memory.js";
-import { SubagentRegistryWriteError } from "./subagent-registry-persistence.js";
+import {
+  SubagentRegistryWriteError,
+  waitForPendingSubagentKillClaim,
+} from "./subagent-registry-persistence.js";
 import { registerRequiredQueuedSubagent } from "./subagent-registry-queued-registration.js";
 import {
   createSubagentRegistrationRecord,
@@ -444,6 +447,7 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
     if (
       !entry ||
       entry.killIntent ||
+      waitForPendingSubagentKillClaim(entry, captureOpenClawStateWorkerContext().admission) ||
       entry.killReconciliation ||
       (!terminalBeforeAcceptance && entry.execution.status !== "queued" && !lifecycleStarted)
     ) {

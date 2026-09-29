@@ -10,6 +10,7 @@ import type { AgentDatabaseRequestExecutionSource } from "../../state/openclaw-a
 import type { SqliteSessionReclamationDiagnostics } from "./session-accessor.sqlite-contract.js";
 import type {
   ReclamationDatabaseOptions,
+  SessionMaintenanceLiveProtection,
   SessionMaintenanceMetadataCommand,
   SessionMaintenanceMetadataResult,
 } from "./session-accessor.sqlite-lifecycle-types.js";
@@ -22,6 +23,7 @@ export function runSessionMaintenanceMetadataInWorker(params: {
   database: OpenClawAgentReadOnlyDatabase;
   claim: OpenClawAgentDatabaseClaim;
   assertCurrent: () => void;
+  refreshMaintenanceProtection?: () => SessionMaintenanceLiveProtection;
   signal: AbortSignal;
   diagnostics?: SqliteSessionReclamationDiagnostics;
   onWorkerResult?: (
@@ -36,8 +38,6 @@ export function runSessionMaintenanceMetadataInWorker(params: {
     throw new Error("Session maintenance requires its captured file database");
   }
   const preparationId = randomUUID();
-  const input =
-    plan.kind === "maintenance-plan" ? { kind: plan.kind, preparationId } : { kind: plan.kind };
   const startedAt = performance.now();
   let workerThreadId: number | undefined;
   const observeCompletion = (outcome: "resolved" | "rejected", failure?: unknown) =>
@@ -53,6 +53,17 @@ export function runSessionMaintenanceMetadataInWorker(params: {
     identity,
     params.assertCurrent,
     async (worker) => {
+      const input =
+        plan.kind === "maintenance-plan"
+          ? {
+              kind: plan.kind,
+              preparationId,
+              protection: {
+                activeSessionKeys: plan.input.activeSessionKeys,
+                preservation: plan.input.preservation,
+              },
+            }
+          : { kind: plan.kind };
       const result = await worker.execute({ type: "session.maintenance.metadata", input });
       workerThreadId = result.workerThreadId;
       if (params.diagnostics) {
@@ -118,6 +129,10 @@ export function runSessionMaintenanceMetadataInWorker(params: {
                 },
               };
               return {
+                beforeWrite() {
+                  Object.assign(plan.input, params.refreshMaintenanceProtection?.());
+                  params.assertCurrent();
+                },
                 async prepare() {
                   attempted = true;
                   const prepared = await execution.runExisting(source, async (worker) => {

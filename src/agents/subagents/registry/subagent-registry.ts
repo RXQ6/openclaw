@@ -40,6 +40,7 @@ import {
   getSubagentRunsForCollectorGroup,
   subagentRuns,
 } from "./subagent-registry-memory.js";
+import type { SubagentRegistryWriteOptions } from "./subagent-registry-persistence.js";
 import { createSubagentRegistryPublicApi } from "./subagent-registry-public-api.js";
 import {
   countPendingDescendantRuns,
@@ -87,9 +88,8 @@ function persistSubagentRuns(...runIds: string[]) {
 
 function persistSubagentRunsAsyncOrThrow(
   context: OpenClawStateWorkerContext,
-  callbacks: {
+  callbacks: Omit<SubagentRegistryWriteOptions, "context"> & {
     assertCurrent: () => void;
-    onCommitted?: (runIds: readonly string[]) => void;
     snapshot?: Map<string, SubagentRunRecord>;
   },
   ...runIds: string[]
@@ -138,6 +138,9 @@ const clearPendingLifecycleTimeout = pendingLifecycle.clearTimeout;
 
 const contextCleanup = createSubagentRegistryContextCleanup({
   persist: persistSubagentRuns,
+  persistAsyncOrThrow: persistSubagentRunsAsyncOrThrow,
+  isEndedHookOwnerCurrent: (runId, entry): boolean =>
+    subagentLifecycleController.isEndedHookOwnerCurrent(runId, entry),
   warn: (message, meta) => log.warn(message, meta),
 });
 
@@ -148,6 +151,7 @@ const subagentLifecycleController = new SubagentLifecycleController({
   getRuntimeConfig,
   persist: persistSubagentRuns,
   persistOrThrow: persistSubagentRunsOrThrow,
+  persistAsyncOrThrow: persistSubagentRunsAsyncOrThrow,
   clearPendingLifecycleError,
   // Lifecycle wiring precedes publicApi construction; inject this read query
   // as a late-bound callback instead of threading a partially built API object.
@@ -512,6 +516,8 @@ const subagentListener = createSubagentRegistryListener({
 
 const subagentRunManager = createSubagentRunManager({
   persistAsyncOrThrow: persistSubagentRunsAsyncOrThrow,
+  acquireTerminalCompletionLock: (runId) =>
+    subagentLifecycleController.acquireTerminalCompletionLock(runId),
   runs: subagentRuns,
   getRunsForChildSession: getSubagentRunsForChildSession,
   resumedRuns,

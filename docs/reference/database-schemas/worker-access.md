@@ -49,13 +49,15 @@ retain immediate fresh ownership verification, including their transaction and
 commit grants. Schemas, retained data, and update behavior are unchanged.
 
 Legacy session-entry patches yield while waiting for a competing SQLite writer.
-Each native attempt uses a zero busy timeout through commit; only a failed
-`BEGIN IMMEDIATE` can retry, within the connection's existing admission budget.
+Each `BEGIN IMMEDIATE` attempt uses a zero busy timeout and can retry within the
+connection's existing admission budget. Once admitted, the synchronous callback
+and commit retain the connection's original busy timeout: rollback-journal
+readers can temporarily block commit even after writer admission succeeds.
 The session writer queue retains FIFO order, the captured connection stays
 retained, and each attempt rechecks its owner. The admitted transaction revalidates
 the prepared rows and caller authority before mutation. Its callback and committed
 publications never replay. Entry reads and transaction bodies still execute on
-the calling thread; this bounded cutover removes native lock waits without
+the calling thread; this bounded cutover removes native writer-admission waits without
 changing schemas, durability, or update behavior.
 
 Channel setup awaits a fresh policy read after the agent-selection prompt.
@@ -308,8 +310,9 @@ executor. These metadata commands carry no transcript buffers and do not reserve
 the archive queue while waiting for their database's writer. After cold native
 admission, planning releases that writer and prepares a selection in a read
 transaction. Its reader remains retained until commit or cleanup. Commit takes
-the writer again and checks current authority, selected rows, transcript versions,
-and protection dependencies. Conflicting selections return
+the writer again, refreshes live protection, and checks current authority, selected
+rows, transcript versions, and active ancestry. Only changed or newly protected
+candidates invalidate the retained selection. Conflicting selections return
 for fresh planning; unrelated writes invalidate age hints without cancelling the
 plan. Each actor retains at most two preparations, allowing a revoked
 predecessor to finish cleanup alongside the coalesced planner. Cleanup of the exact

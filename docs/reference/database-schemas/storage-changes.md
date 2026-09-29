@@ -1577,10 +1577,13 @@ queues. Only a pass with retention candidates requests protected session identit
 after rolling back candidate discovery and before
 a fresh planning transaction. The parent captures those identities under the
 writer. Protection includes runtime providers, active work, and active lifecycle
-mutations; the parent rechecks these owners and the write generation before planning commits.
-The worker rechecks selected rows and their transcript and protection dependencies.
-Conflicts roll back that planning pass before a fresh pass begins; unrelated writes
-discard stale age hints without cancelling an unchanged selection. Bounded
+mutations. At write admission, the parent refreshes active keys and live protection
+without discarding the prepared candidates. The write transaction rereads selected
+rows, transcript versions, and active ancestry, then rejects only candidates that
+changed or became protected. The parent still rejects policy or protection changes
+after admission and before commit. Unrelated activity during planning can therefore
+commit without another planning pass; unrelated writes invalidate stale age hints.
+Changed candidates roll back that planning pass before a fresh pass begins. Bounded
 finalization preserves changed entries and publishes removals only for committed
 entries. Transcript sizing and empty-transcript validation run on archive workers;
 planner statistics retain the existing deletion threshold and bounded analysis.

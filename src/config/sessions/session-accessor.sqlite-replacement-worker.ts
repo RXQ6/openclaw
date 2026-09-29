@@ -43,6 +43,7 @@ type SessionEntryWorkerPreparation = (
   source: AgentDatabaseRequestExecutionSource,
 ) => {
   prepare: () => Promise<void>;
+  beforeWrite: () => void;
   release: () => Promise<void>;
 };
 
@@ -162,7 +163,10 @@ export async function withSessionEntryWorker<T>(
     }
     const value = await runOpenClawAgentWorkerWrite(
       options,
-      () => run(execution, source, context),
+      () => {
+        preparation?.beforeWrite();
+        return run(execution, source, context);
+      },
       undefined,
       signal,
     );

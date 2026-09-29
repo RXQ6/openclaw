@@ -13,6 +13,7 @@ import type {
 } from "../config/sessions/session-accessor.sqlite-entry-cache.types.js";
 import type {
   SessionEntryMaintenanceInput,
+  SessionMaintenanceLiveProtection,
   SessionMaintenanceMetadataResult,
 } from "../config/sessions/session-accessor.sqlite-lifecycle-types.js";
 import type {
@@ -108,7 +109,13 @@ export type AgentDatabaseOperations = AgentDatabaseDomainOperations & {
   };
   "session.maintenance.release": { input: { id: string }; output: void };
   "session.maintenance.metadata": {
-    input: { kind: "maintenance-statistics" } | { kind: "maintenance-plan"; preparationId: string };
+    input:
+      | { kind: "maintenance-statistics" }
+      | {
+          kind: "maintenance-plan";
+          preparationId: string;
+          protection: SessionMaintenanceLiveProtection;
+        };
     output:
       | {
           kind: "committed";
