@@ -7,6 +7,7 @@ import { pathToFileURL } from "node:url";
 import { isMainThread } from "node:worker_threads";
 import { ensureSqliteLibrarySelected } from "./bun-sqlite-library.js";
 import { formatErrorMessage } from "./errors.js";
+import { registerNodeSqliteDisposeCallback } from "./kysely-sync-cache-state.js";
 import { compareValidSemver } from "./semver.js";
 import { registerSqliteReaderConnection } from "./sqlite-reader-lifecycle.js";
 import { isSqliteWalResetSafeVersion } from "./sqlite-runtime-version.js";
@@ -18,6 +19,8 @@ let validatedSqliteModule: typeof import("node:sqlite") | undefined;
 let extensionLoadingSupported = false;
 let jsonbSupported = false;
 let closeFinalizationProbe: ReturnType<typeof probeSqliteCloseFinalization> | undefined;
+// Shared-state native closes retain Bun worker-exit custody.
+export let bunSqliteNativeCleanupPending = false;
 
 type NodeSqliteDatabaseOptions = ConstructorParameters<
   typeof import("node:sqlite").DatabaseSync
@@ -163,11 +166,14 @@ export function openNodeSqliteDatabase(
   // Callers may pass file: URIs or already-namespaced paths from specialized
   // resolvers; location normalization must remain idempotent for those forms.
   const resolvedLocation = resolveNodeSqliteLocation(location);
-  const database =
-    options === undefined
-      ? new sqlite.DatabaseSync(resolvedLocation)
-      : new sqlite.DatabaseSync(resolvedLocation, options);
+  const database = new sqlite.DatabaseSync(resolvedLocation, options ?? {});
+  // Schema tracking must precede the statement-cache authorizer wrapper.
   trackSqliteSchema(database, sqlite);
+  if (process.versions.bun) {
+    registerNodeSqliteDisposeCallback(database, () => {
+      bunSqliteNativeCleanupPending = true;
+    });
+  }
   registerSqliteReaderConnection(database);
   return database;
 }

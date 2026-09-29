@@ -9,11 +9,6 @@ const mock = vi.hoisted(() => ({
   admit: vi.fn<() => void>(),
   query: vi.fn<() => []>(),
   settle: vi.fn<(operation: (source: { db: object }) => unknown) => unknown>(),
-  closeFinalizesStatements: vi.fn(() => false),
-}));
-vi.mock("../infra/node-sqlite.js", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../infra/node-sqlite.js")>()),
-  supportsNodeSqliteCloseFinalization: mock.closeFinalizesStatements,
 }));
 vi.mock("../infra/worker-task-server.js", () => ({
   serveOwnedWorkerTasks: (handler: (input: unknown) => OpenClawStateReadReply) => {

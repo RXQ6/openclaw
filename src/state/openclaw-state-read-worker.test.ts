@@ -137,9 +137,7 @@ it("reads externally created state after an absent read without allocating a wor
   task.result.resolve(emptyReply);
   expect(await executeExistingOpenClawStateRead(options, command)).toEqual(emptyReply);
   expect(mock.selectSqlite).toHaveBeenCalledOnce();
-  expect(task.close).toHaveBeenCalledExactlyOnceWith(
-    process.versions.bun ? { retire: true } : undefined,
-  );
+  expect(task.close).toHaveBeenCalledExactlyOnceWith(undefined);
   expect(mock.closePool).not.toHaveBeenCalled();
 });
 
@@ -185,7 +183,7 @@ it.each(["query failed", "native reader close failed"])(
 );
 
 it.each(["cleanup-fact", "bun"] as const)(
-  "preserves a successful read only after required retirement (%s)",
+  "settles successful reads with retirement only for native cleanup (%s)",
   async (reason) => {
     const { options } = source();
     const task = queueTask();
@@ -216,16 +214,14 @@ it.each(["cleanup-fact", "bun"] as const)(
       await task.captured;
       task.result.resolve(
         reason === "cleanup-fact"
-          ? {
-              ...emptyReply,
-              sqliteCloseFinalizesStatements: true,
-              nativeCleanupFailure: { error: undefined },
-            }
+          ? { ...emptyReply, nativeCleanupFailure: { error: undefined } }
           : emptyReply,
       );
       try {
         await stopping.promise;
-        expect(task.close).toHaveBeenCalledExactlyOnceWith({ retire: true });
+        expect(task.close).toHaveBeenCalledExactlyOnceWith(
+          reason === "cleanup-fact" ? { retire: true } : undefined,
+        );
         expect(mock.selectSqlite).toHaveBeenCalledOnce();
         expect(mock.selectSqlite.mock.invocationCallOrder[0]).toBeLessThan(
           mock.create.mock.invocationCallOrder[0]!,
@@ -324,9 +320,7 @@ it("releases one completed read without closing the shared pool or aborting anot
   const siblingOptions = await sibling.submitted;
   first.result.resolve(emptyReply);
   expect(await firstRead).toEqual(emptyReply);
-  expect(first.close).toHaveBeenCalledExactlyOnceWith(
-    process.versions.bun ? { retire: true } : undefined,
-  );
+  expect(first.close).toHaveBeenCalledExactlyOnceWith(undefined);
   expect(sibling.close).not.toHaveBeenCalled();
   expect(siblingOptions.signal?.aborted).toBe(false);
   expect(mock.closePool).not.toHaveBeenCalled();
@@ -334,9 +328,7 @@ it("releases one completed read without closing the shared pool or aborting anot
 
   sibling.result.resolve(emptyReply);
   expect(await siblingRead).toEqual(emptyReply);
-  expect(sibling.close).toHaveBeenCalledExactlyOnceWith(
-    process.versions.bun ? { retire: true } : undefined,
-  );
+  expect(sibling.close).toHaveBeenCalledExactlyOnceWith(undefined);
   await closeOpenClawStateDatabaseAsync();
   expect(mock.closePool).toHaveBeenCalledOnce();
 });
