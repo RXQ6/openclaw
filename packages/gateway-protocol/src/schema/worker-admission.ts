@@ -55,8 +55,10 @@ export const WORKER_NATIVE_PROCESS_OWNER_PROTOCOL_FEATURE = "worker-native-proce
 export const NODE_WORKER_IDLE_RETENTION_PROTOCOL_FEATURE = "node-worker-idle-retention-v1";
 export const WORKER_SESSION_TOOLS_PROTOCOL_FEATURE = "worker-session-tools-v1";
 export const WORKER_PORTAL_PROTOCOL_FEATURE = "worker-portal-v1";
+export const WORKER_LOCAL_INFERENCE_PROTOCOL_FEATURE = "worker-local-inference-v1";
 export const WORKER_PRESENCE_PROTOCOL_FEATURE = "worker-presence-v1";
 export const WORKER_PROTOCOL_FEATURES = [
+  WORKER_LOCAL_INFERENCE_PROTOCOL_FEATURE,
   "skill-resources-v1",
   "worker-skill-workshop-v1",
   "worker-heartbeat-v1",

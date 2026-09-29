@@ -19,6 +19,7 @@ import {
   type WorkerConnectionIdentity,
 } from "./admission.js";
 import type { WorkerInstallationArtifact } from "./bundle.js";
+import { workerInferencePlacement } from "./inference-placement.js";
 import { createWorkerInferenceManager, type WorkerInferenceSink } from "./inference.js";
 import type {
   WorkerInferenceCancelApplicationResult,
@@ -546,6 +547,10 @@ export function createWorkerTurnRpc(options: WorkerTurnRpcOptions) {
     const binding = validateInferenceRequest(identity, request);
     if (!binding.ok) {
       return binding;
+    }
+    const environment = options.store.get(identity.environmentId);
+    if (!environment || workerInferencePlacement(environment) !== "gateway") {
+      return { ok: false, reason: "model-not-approved" };
     }
     const source = sourceFor(identity);
     if (!source) {

@@ -11,6 +11,10 @@ import { createBoundedLineFramer } from "../process/bounded-line-framer.js";
 import type { WorkerBrowserRuntime } from "./browser-runtime.js";
 import { parseWorkerLaunchDescriptor, type WorkerLaunchDescriptor } from "./launch-descriptor.js";
 import {
+  takeNativeInferenceStartup,
+  type NativeInferenceStartup,
+} from "./native-inference-startup.js";
+import {
   parseWorkerProcessRequest,
   type WorkerProcessMessage,
   type WorkerProcessResult,
@@ -23,6 +27,7 @@ type RunWorkerCommandOptions = {
   output: Writable;
   browserRuntime?: WorkerBrowserRuntime;
   managed?: boolean;
+  nativeInference?: NativeInferenceStartup;
 };
 
 export type WorkerCommandLifetime = {
@@ -126,6 +131,7 @@ async function runManagedWorkerCommand(
             sessionId: descriptor.admission.sessionId,
             ownerEpoch: descriptor.admission.ownerEpoch,
             agentId: descriptor.assignment.agentId,
+            inference: descriptor.assignment.inference,
             permissionMode: descriptor.assignment.permissionMode,
             workspaceDir,
             workerContainmentRoot,
@@ -152,6 +158,7 @@ async function runManagedWorkerCommand(
             },
             {
               environmentStateDir: environment.stateDir,
+              nativeInference: options.nativeInference,
               signal: current.controller.signal,
               ...(options.lifetime
                 ? { onConnectionFailure: options.lifetime.reportConnectionFailure }
@@ -286,7 +293,9 @@ async function readLaunchDescriptor(input: Readable): Promise<WorkerLaunchDescri
 }
 
 /** Process shell for `openclaw worker`: stdin descriptor in, JSON result out, signals abort the run. */
-export async function runWorkerCommand(options: RunWorkerCommandOptions): Promise<void> {
+export async function runWorkerCommand(input: RunWorkerCommandOptions): Promise<void> {
+  const startup = takeNativeInferenceStartup();
+  const options = { ...input, nativeInference: input.nativeInference ?? startup };
   const abortController = new AbortController();
   const stop = () => abortController.abort(new Error("worker interrupted"));
   let lifetimeEnded = false;
@@ -319,6 +328,7 @@ export async function runWorkerCommand(options: RunWorkerCommandOptions): Promis
       return;
     }
     const result = await runWorkerDescriptor(descriptor, {
+      nativeInference: options.nativeInference,
       signal: abortController.signal,
       ...(options.lifetime
         ? { onConnectionFailure: options.lifetime.reportConnectionFailure }

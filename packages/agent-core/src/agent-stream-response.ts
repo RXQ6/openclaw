@@ -61,7 +61,7 @@ type AssistantMessageUpdateEvent = Extract<
   }
 >;
 
-function appendTextDeltaToAssistantMessage(
+export function appendTextDeltaToAssistantMessage(
   message: AssistantMessage,
   contentIndex: number,
   delta: string,

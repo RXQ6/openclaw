@@ -22,6 +22,7 @@ import { LEGACY_CONFIG_MIGRATIONS_RUNTIME_TOOL_NAMES } from "./legacy-config-mig
 import { LEGACY_CONFIG_MIGRATIONS_RUNTIME_TOOL_POLICY_CONFLICTS } from "./legacy-config-migrations.runtime.tool-policy-conflicts.js";
 import { LEGACY_CONFIG_MIGRATION_RUNTIME_TOOL_SEARCH } from "./legacy-config-migrations.runtime.tool-search.js";
 import { LEGACY_CONFIG_MIGRATIONS_RUNTIME_TTS } from "./legacy-config-migrations.runtime.tts.js";
+import { LEGACY_CONFIG_MIGRATION_RUNTIME_WORKER_INFERENCE } from "./legacy-config-migrations.runtime.worker-inference.js";
 
 /** Ordered runtime legacy config migrations applied by doctor. */
 export const LEGACY_CONFIG_MIGRATIONS_RUNTIME: LegacyConfigMigrationSpec[] = [
@@ -48,4 +49,5 @@ export const LEGACY_CONFIG_MIGRATIONS_RUNTIME: LegacyConfigMigrationSpec[] = [
   ...LEGACY_CONFIG_MIGRATIONS_RUNTIME_TOOL_POLICY_CONFLICTS,
   ...LEGACY_CONFIG_MIGRATIONS_RUNTIME_ENTRIES,
   ...LEGACY_CONFIG_MIGRATIONS_RUNTIME_SYSTEM_AGENT,
+  LEGACY_CONFIG_MIGRATION_RUNTIME_WORKER_INFERENCE,
 ];
