@@ -81,6 +81,100 @@ function deferred() {
 }
 
 describe("runtime-owned transport host", () => {
+  it.each([false, true])("accepts frozen provider streams (scoped=%s)", async (scoped) => {
+    const observations: string[] = [];
+    const observe = (operation: string) =>
+      observations.push(getAiTransportHost().resolveSecretSentinel(operation));
+    const final = message("immutable producer");
+    const source: AssistantMessageEventStreamContract = Object.freeze({
+      push() {
+        expect(this).toBe(source);
+        observe("push");
+      },
+      end() {
+        expect(this).toBe(source);
+        observe("end");
+      },
+      async result() {
+        expect(this).toBe(source);
+        observe("result");
+        return final;
+      },
+      [Symbol.asyncIterator]() {
+        expect(this).toBe(source);
+        observe("iterator");
+        return {
+          async next() {
+            observe("next");
+            return {
+              done: false as const,
+              value: { type: "done" as const, reason: "stop" as const, message: final },
+            };
+          },
+          async return() {
+            observe("return");
+            return { done: true as const, value: undefined };
+          },
+          async throw(error: unknown) {
+            observe("throw");
+            throw error;
+          },
+        };
+      },
+    });
+    const registry = createApiRegistry();
+    registry.registerApiProvider({
+      api: model.api,
+      stream: () => source,
+      streamSimple: () => source,
+    });
+    configureAiTransportHost({ resolveSecretSentinel: (value) => "gateway:" + value });
+    const runtime = scoped
+      ? createLlmRuntime(registry, {
+          transportHost: { resolveSecretSentinel: (value) => "scoped:" + value },
+        })
+      : createLlmRuntime(registry);
+    for (const method of ["stream", "streamSimple"] as const) {
+      const stream = runtime[method](model, { messages: [] });
+      stream.push({ type: "done", reason: "stop", message: final });
+      stream.end(final);
+      expect(await stream.result()).toBe(final);
+      const iterator = stream[Symbol.asyncIterator]();
+      expect((await iterator.next()).value).toEqual({
+        type: "done",
+        reason: "stop",
+        message: final,
+      });
+      expect(await iterator.return!()).toEqual({ done: true, value: undefined });
+      const error = new Error("iterator consumer stopped");
+      await expect(iterator.throw!(error)).rejects.toBe(error);
+    }
+    expect(await runtime.complete(model, { messages: [] })).toBe(final);
+    expect(await runtime.completeSimple(model, { messages: [] })).toBe(final);
+    expect(observations).toEqual(
+      [
+        "push",
+        "end",
+        "result",
+        "iterator",
+        "next",
+        "return",
+        "throw",
+        "push",
+        "end",
+        "result",
+        "iterator",
+        "next",
+        "return",
+        "throw",
+        "result",
+        "result",
+      ].map((value) => (scoped ? "scoped:" : "gateway:") + value),
+    );
+    expect(getAiTransportHost().resolveSecretSentinel("caller")).toBe("gateway:caller");
+    expect(Object.isFrozen(source)).toBe(true);
+  });
+
   it.each(["stream", "streamSimple"] as const)(
     "preserves native producer completion through %s without invoking result decorators",
     async (method) => {
@@ -97,9 +191,18 @@ describe("runtime-owned transport host", () => {
         stream: () => source,
         streamSimple: () => source,
       });
+      Object.defineProperty(source, "result", { value: source.result, writable: false });
+      const originalMethods = [
+        source.push,
+        source.end,
+        source.result,
+        source[Symbol.asyncIterator],
+      ];
       const runtime = createLlmRuntime(registry, { transportHost: {} });
       const scoped = runtime[method](model, { messages: [] });
-      expect(scoped).toBe(source);
+      expect([source.push, source.end, source.result, source[Symbol.asyncIterator]]).toEqual(
+        originalMethods,
+      );
       const completion = getEventStreamCompletion(scoped);
       expect(completion).toBe(getEventStreamCompletion(source));
       expect(resultCalls).toBe(0);
