@@ -31,13 +31,13 @@ vi.mock("../../state/openclaw-agent-canonical-validation-receipt.js", () => ({})
 vi.mock("../../state/openclaw-agent-db-readonly-open.js", () => ({}));
 vi.mock("../../state/openclaw-state-db-cache.js", () => ({}));
 vi.mock("../../state/openclaw-agent-db-identity.js", () => ({
-  createOpenClawAgentDatabaseClaim: () => ({ assertCurrent() {}, release() {} }),
   readOpenClawAgentDatabaseIdentity: () => ({
-    identity: "fixture-identity",
-    birthtime: undefined,
+    identity: "1:2",
+    birthtime: "1",
     incarnation: "fixture-incarnation",
     filename: "/fixture/agent.sqlite",
   }),
+  createOpenClawAgentDatabaseClaim: () => ({ assertCurrent() {}, release() {} }),
 }));
 vi.mock("../../state/openclaw-agent-db-lease.js", () => ({
   assertOpenClawAgentDatabaseLease: () => {},
@@ -77,9 +77,6 @@ vi.mock("./session-accessor.sqlite-reclamation.js", () => ({
     kind: "maintenance-finalize",
     value: { archivedTranscripts: [], changedEntries: [], committedEntries: [] },
   }),
-}));
-vi.mock("./session-accessor.sqlite-reclamation-commit.js", () => ({
-  markSqliteReclamationSettled: () => {},
 }));
 
 it("keeps idle collection after buffered admission replies and cancels it for the next request", async () => {
