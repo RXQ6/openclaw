@@ -475,6 +475,7 @@ export function captureSubagentRunPostimagePublication(params: {
   assertCurrent: () => void;
   onPublished?: () => void;
   fromWorker?: { deliveryReceipt: "retain-unchanged" | "replace" };
+  requireMutationOwnerIdentity?: true;
 }) {
   const originals = new Map(params.previous);
   // Findings and cleanup retain these identities independently of staged field snapshots.
@@ -504,15 +505,16 @@ export function captureSubagentRunPostimagePublication(params: {
     params.assertCurrent();
     if (
       !matchesSubagentRunPreimages(params.runs, snapshots, retired) ||
-      (params.fromWorker &&
+      ((params.fromWorker || params.requireMutationOwnerIdentity) &&
         [...runtimeOwners].some(
           ([entry, owner]) =>
             entry.execution !== owner.execution ||
             entry.killIntent !== owner.killIntent ||
             entry.killReconciliation !== owner.killReconciliation ||
             entry.requesterSettleWake !== owner.requesterSettleWake ||
-            entry.completion?.terminalReply !== owner.terminalReply ||
-            entry.delivery !== owner.delivery,
+            (params.fromWorker &&
+              (entry.completion?.terminalReply !== owner.terminalReply ||
+                entry.delivery !== owner.delivery)),
         ))
     ) {
       throw new SubagentRegistryPreimageChangedError(
