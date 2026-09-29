@@ -56,9 +56,9 @@ vi.mock("../../infra/worker-task-pool.js", async (importOriginal) => ({
     });
     return {
       async run(prepare: () => unknown, options: WorkerTaskOptions<unknown>) {
-        const input = prepare();
+        const preparedInput = prepare();
         worker ??= poolOptions.prepareWorker?.();
-        const reply = await observed.run(input, options);
+        const reply = await observed.run(preparedInput, options);
         poolOptions.validateResult?.(reply);
         return reply;
       },
@@ -69,7 +69,7 @@ vi.mock("../../infra/worker-task-pool.js", async (importOriginal) => ({
           await observed.rotate();
           await previous?.releaseResources?.();
         } catch (error) {
-          poolOptions.onRetirementFailure?.(error);
+          void Promise.resolve(poolOptions.onRetirementFailure?.(error)).catch(() => undefined);
           throw error;
         }
       },

@@ -93,7 +93,7 @@ vi.mock("../../infra/worker-task-pool.js", async (importOriginal) => {
             await observed.rotate();
             await previous?.releaseResources?.();
           } catch (error) {
-            poolOptions.onRetirementFailure?.(error);
+            void Promise.resolve(poolOptions.onRetirementFailure?.(error)).catch(() => undefined);
             throw error;
           }
         },
