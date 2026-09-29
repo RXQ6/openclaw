@@ -38,10 +38,7 @@ import {
   resolveConversationCapabilityProfile,
   type ResolvedConversationCapabilityProfile,
 } from "../agents/conversation-capability-profile.js";
-import {
-  applyEmbeddedAttemptToolsAllow,
-  resolveEmbeddedAttemptToolConstructionPlan,
-} from "../agents/embedded-agent-runner/run/attempt-tool-construction-plan.js";
+import { resolveEmbeddedAttemptToolConstructionPlan } from "../agents/embedded-agent-runner/run/attempt-tool-construction-plan.js";
 import { runAgentCleanupStep } from "../agents/run-cleanup-timeout.js";
 import { loadAgentRuntimePluginRegistryHandle } from "../agents/runtime-plugins.js";
 import { resolveSandboxContext } from "../agents/sandbox.js";
@@ -73,7 +70,6 @@ import {
   bindGatewayContextResolver,
   withPluginRuntimeRegistryScope,
 } from "../plugins/runtime/gateway-request-scope.js";
-import { getPluginToolMeta } from "../plugins/tool-metadata.js";
 import { normalizeAgentId } from "../routing/session-key.js";
 import {
   resolveCronActiveRuntimeConfig,
@@ -95,11 +91,7 @@ import {
   scriptFailure,
   type CronScriptPayloadExecutionResult,
 } from "./trigger-script-result.js";
-import type {
-  CronToolsAllowExecTarget,
-  CronTriggerEvaluationResult,
-  CronTriggerFailureCode,
-} from "./types.js";
+import type { CronTriggerEvaluationResult, CronTriggerFailureCode } from "./types.js";
 
 const MAX_CONCURRENT_TRIGGER_EVALS = 3;
 const MAX_CACHED_TRIGGER_RUNTIMES = 128;
@@ -123,7 +115,7 @@ void assertTriggerCodesCoverHeadless;
 
 type PreparedTriggerRuntime = {
   createTools: (admitted: AdmittedRunContext, signal: AbortSignal) => AnyAgentTool[];
-  /** Starts this evaluation's own MCP runtime for servers its toolsAllow names by prefix. */
+  /** Starts this evaluation's own MCP runtime using the current agent capability profile. */
   acquireMcpTools?: (
     admitted: AdmittedRunContext,
     reservedToolNames: readonly string[],
@@ -138,9 +130,7 @@ type PrepareTriggerRuntime = (params: {
   runtimeConfig: OpenClawConfig;
   jobId: string;
   agentId?: string;
-  toolsAllow?: string[];
   scheduledToolPolicy?: ScheduledToolPolicyContext;
-  execTarget?: CronToolsAllowExecTarget;
   signal?: AbortSignal;
 }) => Promise<PreparedTriggerRuntime>;
 
@@ -162,7 +152,7 @@ type TriggerRuntimeCacheEntry = {
   promise: Promise<CachedTriggerRuntime>;
   configEpoch: OpenClawConfig;
   agentId: string;
-  toolsAllowKey: string;
+  scheduledToolPolicyKey: string;
 };
 
 type CachedTriggerRuntime = PreparedTriggerRuntime & {
@@ -227,12 +217,9 @@ async function prepareTriggerRuntime(
       sandbox?.enabled && sandbox.workspaceAccess !== "rw" ? sandbox.workspaceDir : workspaceDir;
     const toolPlan = resolveEmbeddedAttemptToolConstructionPlan({
       toolsEnabled: true,
-      toolsAllow: params.toolsAllow,
     });
     const scheduledToolPolicy = resolveScheduledToolPolicyContext({
-      toolsAllow: params.toolsAllow,
       scheduledToolPolicy: params.scheduledToolPolicy,
-      execTarget: params.execTarget,
     });
     // Core and MCP tools of one evaluation share one policy owner, like embedded runs.
     const capabilityProfiles = new WeakMap<
@@ -287,9 +274,7 @@ async function prepareTriggerRuntime(
             toolConstructionPlan: toolPlan.codingToolConstructionPlan,
           })
         : [];
-      return applyEmbeddedAttemptToolsAllow(allTools, params.toolsAllow, {
-        toolMeta: (tool) => getPluginToolMeta(tool),
-      });
+      return allTools;
     };
     const context = {
       agentId,
@@ -311,7 +296,6 @@ async function prepareTriggerRuntime(
         config,
         workspaceDir: effectiveWorkspace,
         agentDir,
-        toolsAllow: params.toolsAllow,
         capabilityProfile: resolveCapabilityProfile(admitted),
         reservedToolNames,
         hookContext: { ...context, runId, trigger: "cron" },
@@ -357,17 +341,13 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
     scope: ReturnType<typeof createHeadlessDeadlineScope>,
   ): Promise<CachedTriggerRuntime> => {
     const agentId = resolveTriggerAgentId(request.runtimeConfig, request.agentId);
-    const toolsAllowKey = JSON.stringify([
-      request.toolsAllow ?? null,
-      request.scheduledToolPolicy ?? null,
-      request.execTarget ?? null,
-    ]);
+    const scheduledToolPolicyKey = JSON.stringify(request.scheduledToolPolicy ?? null);
     const cached = runtimeCache.get(request.jobId);
     if (
       cached &&
       cached.configEpoch === request.runtimeConfig &&
       cached.agentId === agentId &&
-      cached.toolsAllowKey === toolsAllowKey
+      cached.scheduledToolPolicyKey === scheduledToolPolicyKey
     ) {
       runtimeCache.delete(request.jobId);
       runtimeCache.set(request.jobId, cached);
@@ -405,7 +385,7 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
       promise,
       configEpoch: request.runtimeConfig,
       agentId,
-      toolsAllowKey,
+      scheduledToolPolicyKey,
     };
     runtimeCache.delete(request.jobId);
     runtimeCache.set(request.jobId, entry);
@@ -444,13 +424,10 @@ function createCronCodeModeRunner(deps: CronTriggerEvaluatorDeps) {
         runtimeConfig: resolveCronActiveRuntimeConfig(deps.config),
         jobId: params.job.id,
         agentId: params.job.agentId,
-        toolsAllow: params.job.payload.toolsAllow,
         scheduledToolPolicy: resolveCronScheduledToolPolicy({
-          toolsAllow: params.job.payload.toolsAllow,
           scheduledToolPolicy: params.job.scheduledToolPolicy,
           owner: params.job.owner,
         }),
-        execTarget: params.job.toolsAllowExecTarget,
       };
       let runtime: CachedTriggerRuntime | undefined;
       let tools: AnyAgentTool[];
