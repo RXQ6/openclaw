@@ -567,6 +567,30 @@ describe("full-release-validation-at-sha", () => {
     }
   });
 
+  it("keeps waiting while the exact run is queued before its witness upload", () => {
+    const queued = { conclusion: null, status: "queued" };
+    const fixture = createDispatchFixture({
+      dispatchReturnsRunUrl: false,
+      parentRunStates: [
+        ...Array.from({ length: 6 }, () => queued),
+        { conclusion: "success", status: "completed" },
+      ],
+      witnessMissingReads: 6,
+    });
+    try {
+      const result = fixture.run(["--workflow-sha", fixture.workflowSha]);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stderr).toContain("dispatch=pending-witness: run 123 (queued)");
+      expect(fixture.readWaits()).toEqual([30_000, 60_000, 120_000, 120_000, 120_000, 120_000]);
+      expect(JSON.parse(readFileSync(fixture.requestPath(), "utf8"))).toMatchObject({
+        phase: "observed",
+        run: { id: 123, attempt: 1 },
+      });
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
   it("keeps dispatch inputs out of the selected GitHub CLI argv", () => {
     const fixture = createDispatchFixture();
     const marker = "synthetic-private-dispatch-value";

@@ -180,6 +180,34 @@ describe("candidate-owned full release dispatch entry point", () => {
     }
   });
 
+  it("waits for the candidate witness without redispatch or baseline resolution", () => {
+    const queued = { conclusion: null, status: "queued" };
+    const f = createDispatchFixture({
+      candidateOwned: true,
+      dispatchReturnsRunUrl: false,
+      parentRunStates: [
+        ...Array.from({ length: 6 }, () => queued),
+        { conclusion: "success", status: "completed" },
+      ],
+      witnessMissingReads: 6,
+    });
+    try {
+      const result = f.run();
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stderr).toContain("dispatch=pending-witness: run 123 (queued)");
+      expect(f.readWaits()).toEqual([30_000, 60_000, 120_000, 120_000, 120_000, 120_000]);
+      expect(dispatches(f)).toEqual([P, Q]);
+      expect(f.readCalls(f.npmCallsPath)).toEqual([npmVersionsArgs]);
+      expect(readRequestRecord(f)).toMatchObject({
+        phase: "observed",
+        request: { targetSha: f.targetSha, workflowSha: f.targetSha },
+        run: { id: 123, attempt: 1 },
+      });
+    } finally {
+      f.cleanup();
+    }
+  });
+
   it.each(["admission", "qualification"] as const)(
     "reconciles an accepted uncertain %s response without another POST",
     (stage) => {

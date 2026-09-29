@@ -53,6 +53,7 @@ export function createDispatchFixture(
     witnessOverrides?: Record<string, unknown>;
     witnessInputs?: Record<string, unknown>;
     witnessMissing?: boolean;
+    witnessMissingReads?: number;
     witnessDuplicate?: boolean;
     ghRoute?: "path" | "explicit";
     tokenPresent?: boolean;
@@ -99,6 +100,7 @@ export function createDispatchFixture(
   const pathGhCallsPath = join(root, "path-gh-calls.jsonl");
   const parentRunIndexPath = join(root, "parent-run-index.txt");
   const runDiscoveryIndexPath = join(root, "run-discovery-index.txt");
+  const witnessReadIndexPath = join(root, "witness-read-index.txt");
   const acceptedRunPath = join(root, "accepted-run.json");
   const artifactFixturePath = join(root, "artifact-fixture.cjs");
   const admissionCapturePath = join(root, "admission-payload.json");
@@ -559,7 +561,11 @@ if (${JSON.stringify(options.candidateOwned ?? false)} && args[0] === "api" && a
   });
 } else if (args[0] === "api" && endpoint.endsWith("/artifacts") && (fields.get("name") || "").startsWith("full-release-dispatch-inputs-")) {
   require(${JSON.stringify(artifactFixturePath)})().then(({ metadata }) => {
-    const artifacts = ${JSON.stringify(options.witnessMissing ?? false)} ? []
+    const witnessReads = fs.existsSync(${JSON.stringify(witnessReadIndexPath)})
+      ? Number(fs.readFileSync(${JSON.stringify(witnessReadIndexPath)}, "utf8")) : 0;
+    fs.writeFileSync(${JSON.stringify(witnessReadIndexPath)}, String(witnessReads + 1));
+    const artifacts = ${JSON.stringify(options.witnessMissing ?? false)} ||
+      witnessReads < ${JSON.stringify(options.witnessMissingReads ?? 0)} ? []
       : ${JSON.stringify(options.witnessDuplicate ?? false)} ? [metadata, metadata] : [metadata];
     console.log(JSON.stringify({ total_count: artifacts.length, artifacts }));
   });

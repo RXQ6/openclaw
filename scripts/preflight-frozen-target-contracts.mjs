@@ -449,7 +449,6 @@ async function planWorkflowAdmission(input) {
   const codexSuites = [...new Set(selections.flatMap((selection) => selection.codexSuites))];
   const possibleLanes = [];
   let mobilePairingSelected = false;
-  let legacyOperatorSelected = false;
   for (const selection of docker) {
     const lanes =
       selection.lanes ??
@@ -461,13 +460,6 @@ async function planWorkflowAdmission(input) {
     const survivorLanes = lanes.filter((lane) =>
       /^(published-upgrade-survivor|update-migration)(-|$)/u.test(lane),
     );
-    if (
-      survivorLanes.length &&
-      (survivorLanes.some((lane) => lane.includes("legacy-operator-state")) ||
-        parseUpgradeSurvivorScenarios(selection.scenarios ?? "").includes("legacy-operator-state"))
-    ) {
-      legacyOperatorSelected = true;
-    }
     if (
       allow &&
       survivorLanes.length &&
@@ -552,14 +544,13 @@ async function planWorkflowAdmission(input) {
   if (mobilePairingSelected) {
     sourcePaths.add("src/gateway/node-command-policy.ts");
   }
-  if (legacyOperatorSelected) {
-    sourcePaths.add("scripts/lib/official-external-provider-catalog.json");
-  }
   if (
     possibleLanes.some((lane) => /^(published-upgrade-survivor|update-migration)(-|$)/u.test(lane))
   ) {
     sourcePaths.add("scripts/lib/upgrade-survivor-scenarios.json");
     sourcePaths.add("scripts/e2e/lib/upgrade-survivor/assertions.mjs");
+    // Legacy-operator planning stages the candidate's official providers for prepublish.
+    sourcePaths.add("scripts/lib/official-external-provider-catalog.json");
   }
   if (docker.length > 256) {
     throw new Error("too many selected Docker groups");
@@ -1091,11 +1082,6 @@ async function preflightFrozenTargetContracts(input, workflow = false, verifiedT
     }
     for (const path of supportFiles[consumer] ?? []) {
       required(sources.tooling, `scripts/e2e/lib/${path}`);
-    }
-    if (
-      ["npm-onboard-channel-agent", "codex-on-demand", "update-corrupt-plugin"].includes(consumer)
-    ) {
-      required(sources.tooling, "scripts/lib/record-shared.mjs");
     }
     if (consumer === "update-corrupt-plugin") {
       required(sources.tooling, "scripts/lib/update-compat-contract.mjs");

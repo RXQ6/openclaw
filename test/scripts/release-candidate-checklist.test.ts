@@ -2344,6 +2344,7 @@ describe("release candidate checklist", () => {
     expect(command).toContain("'plugin_publish_scope=all-publishable'");
     expect(command).toContain(`'--ref' '${publishWorkflowRef}'`);
     expect(command).not.toContain("windows_node_tag=");
+    expect(command).not.toContain("finalize_release_before_docker");
 
     const workflow = parse(
       readFileSync(".github/workflows/openclaw-release-publish.yml", "utf8"),
@@ -2419,6 +2420,7 @@ describe("release candidate checklist", () => {
       release_evidence_mode: "full-release-validation",
       wait_for_clawhub: "true",
     });
+    expect(preparedInputs).not.toHaveProperty("finalize_release_before_docker");
   });
 
   it("validates Plugin SDK acknowledgement digests", () => {
@@ -2447,6 +2449,7 @@ describe("release candidate checklist", () => {
     expect(command).toContain("'tag=v2026.5.14'");
     expect(command).toContain("'npm_dist_tag=latest'");
     expect(command).toContain("'publish_openclaw_npm=true'");
+    expect(command).toContain("'finalize_release_before_docker=true'");
     expect(command).not.toContain("windows_node_");
   });
 
