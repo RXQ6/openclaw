@@ -76,7 +76,7 @@ const bunCompatibleAgentSupportFiles = ["src/agents/worktrees/service.removal-re
 const nativeCompilerTestFiles = [
   "src/agents/agent-bundle-mcp-requester-connect.import-boundary.test.ts",
   "src/agents/agent-model-discovery.imports.test.ts",
-  "src/agents/code-mode.action-output.test.ts",
+  "src/agents/code-mode.auto-results.test.ts",
   "src/agents/harness/native-hook-relay.imports.test.ts",
   "src/cli/program/register.database.import-boundary.test.ts",
   "src/plugin-sdk/provider-tools.test.ts",
@@ -121,7 +121,7 @@ const runtimePartitions = new Map<
         "src/cli/cli-process-diagnostics.test.ts",
         // Native heap accounting, GC, and Worker limits require V8.
         "src/infra/worker-task-pool.memory.test.ts",
-        // The f8ce/34c fork failed retirement GC assertions; keep every case on Node.
+        // Retained plugin-registry GC proof still requires Node.
         "src/plugins/runtime.retention.test.ts",
         "src/process/spawn-broker/callback-context.test.ts",
         "src/process/spawn-broker/cleanup.test.ts",
@@ -153,9 +153,9 @@ const runtimePartitions = new Map<
           .toSorted(),
       // Bun GC can retain released chat and overview payloads; keep their retention proof on Node.
       nodeRequired: new Set([
-        "ui/src/pages/chat/chat-pane-retained-presentation.test.ts",
-        "ui/src/pages/chat/chat-thread.test.ts",
-        "ui/src/pages/usage/usage-page-details.test.ts",
+        "ui/src/pages/chat/chat-pane-retention.test.ts",
+        "ui/src/pages/chat/chat-thread-retention.test.ts",
+        "ui/src/pages/usage/usage-page-retention.test.ts",
       ]),
       includeAfterShard: true,
     },

@@ -162,12 +162,12 @@ compiler assertions in mixed runtime suites; their cases remain enabled.
 The Code Mode executor and Markdown chunking suites run with Vitest on Bun using
 the fork's diagnostics-channel and `Intl.Segmenter` fixes.
 Plugin runtime retention tests remain on Node after earlier fork builds failed
-retirement GC assertions in a complete stripe and focused replay. All nine
+retirement GC assertions in a complete stripe and focused replay. Their
 cases retain their original assertions and deadlines; this suite has not been
 qualified for Bun.
 The complete fake-timer lane also supports Bun. Control UI keeps its GC-sensitive
-retention proofs (`chat-pane-retained-presentation.test.ts`, `chat-thread.test.ts`,
-and `usage-page-details.test.ts`) on Node and runs the remaining files on Bun.
+retention proofs (`chat-pane-retention.test.ts`, `chat-thread-retention.test.ts`,
+and `usage-page-retention.test.ts`) on Node and runs the remaining files on Bun.
 The missing-Docker test also runs on Bun, using an empty executable directory
 instead of an empty `PATH`, which Bun resolves through its default search path.
 Other families retain Node until they pass on the pinned fork within their
@@ -524,9 +524,20 @@ required status closed.
 
 If the PR head changes before or during evaluation, the obsolete run stops
 successfully without publishing approval for the replacement commit. The new
-head's automatic event owns its evaluation. Changes to approval-relevant metadata
-on the same head and real evaluation errors still fail; supersession does not hide
-an earlier guard error. During long read sequences, the review checks the live
+head's automatic event owns its evaluation. Closing an unmerged PR, making it a
+draft, or changing its target also stops the obsolete evaluation successfully.
+Identity and permission changes and real evaluation errors still fail; a lifecycle
+change does not hide an earlier guard error.
+
+A merge of the scheduled revision lets the security evaluation finish, including
+when enforcement starts after the merge. Both guards retain their findings in
+statuses, comments, and workflow summaries so a force-merge does not discard that
+evidence. Automatic lockfile cleanup still requires an open PR immediately before
+its write. The resolver selects only open PRs, so this does not schedule new
+post-merge reviews. If ordinary CI is still running, the combined status can remain
+pending after merge; the CI workflow retains its own final result.
+
+During long read sequences, the review checks the live
 PR again before admitting another read after 30 seconds. Non-quota recovery waits
 check every 30 seconds too, so superseded work stops without finishing pagination
 or waiting out diff recovery. In-flight requests retain their 30-second deadline;

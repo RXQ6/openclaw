@@ -216,7 +216,11 @@ it.each(["cleanup-fact", "bun"] as const)(
       await task.captured;
       task.result.resolve(
         reason === "cleanup-fact"
-          ? { ...emptyReply, nativeCleanupFailure: { error: undefined } }
+          ? {
+              ...emptyReply,
+              sqliteCloseFinalizesStatements: true,
+              nativeCleanupFailure: { error: undefined },
+            }
           : emptyReply,
       );
       try {

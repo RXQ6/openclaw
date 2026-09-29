@@ -183,6 +183,15 @@ function captureCommand(command: OpenClawStateReadCommand): OpenClawStateReadCom
   if (command.type === "updateRuns.list") {
     return { ...command, input: { ...command.input } };
   }
+  if (command.type === "updateRuns.reconciliationCandidates") {
+    return {
+      ...command,
+      input: {
+        ...command.input,
+        ...(command.input.runIds ? { runIds: [...command.input.runIds] } : {}),
+      },
+    };
+  }
   if (
     command.type === "skills.library.descriptions" ||
     command.type === "skills.library.manifests"
@@ -378,8 +387,14 @@ function commandBytes(command: OpenClawStateReadRequest["command"]): number {
       Buffer.byteLength(command.scopeKey, "utf8")
     );
   }
-  if (command.type === "updateRuns.get") {
+  if (command.type === "updateRuns.get" || command.type === "updateRuns.reconciliationCandidate") {
     return bytes + Buffer.byteLength(command.runId, "utf8");
+  }
+  if (command.type === "updateRuns.reconciliationCandidates") {
+    return (command.input.runIds ?? []).reduce(
+      (total, runId) => total + Buffer.byteLength(runId, "utf8"),
+      bytes + 3 + (command.input.repairHistorySinceMs === undefined ? 0 : 8),
+    );
   }
   if (command.type === "updateRuns.list") {
     return (
@@ -497,7 +512,8 @@ function requestBytes(request: OpenClawStateReadRequest): number {
 
 function decodeTaskReply(reply: OpenClawStateReadReply): OpenClawStateReadOutcome {
   if (reply.ok) {
-    return { value: reply };
+    const { sqliteCloseFinalizesStatements: _cleanup, ...value } = reply;
+    return { value };
   }
   const error = new Error(reply.message);
   retainOpenClawStateWorkerErrorPayload(error, reply.error);
@@ -566,8 +582,10 @@ export function createOpenClawStateReadTransport(command: OpenClawStateReadComma
     const cleanup: { retire: boolean; error?: Error } = { retire: true };
     tasks.set(task, cleanup);
     let outcome: OpenClawStateReadOutcome;
+    let closeFinalizesStatements = !process.versions.bun;
     try {
       const reply = await task.result;
+      closeFinalizesStatements ||= reply.sqliteCloseFinalizesStatements === true;
       if (reply.nativeCleanupFailure) {
         const error = new Error("Quarantine reader native cleanup was not confirmed");
         retainOpenClawStateWorkerErrorPayload(error, reply.nativeCleanupFailure.error);
@@ -578,9 +596,8 @@ export function createOpenClawStateReadTransport(command: OpenClawStateReadComma
       outcome = { error };
     }
     // Best-effort quarantine failures can require retirement even when the domain read succeeds.
-    // Bun retains native statements after close; thread exit remains its disposal boundary.
-    cleanup.retire =
-      Boolean(process.versions.bun) || "error" in outcome || cleanup.error !== undefined;
+    // Older Bun needs thread exit; only this worker's observed close capability permits reuse.
+    cleanup.retire = !closeFinalizesStatements || "error" in outcome || cleanup.error !== undefined;
     return { task, outcome };
   };
   return {

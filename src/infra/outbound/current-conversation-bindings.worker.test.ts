@@ -1,5 +1,7 @@
+import { channel } from "node:diagnostics_channel";
 import fs from "node:fs/promises";
-import { afterEach, expect, it, vi } from "vitest";
+import { Worker } from "node:worker_threads";
+import { afterEach, beforeAll, expect, it, vi } from "vitest";
 import { observeHostDataSql } from "../../../test/helpers/sqlite-statement-execution-counter.js";
 import {
   captureActivePluginRegistrySnapshot,
@@ -15,6 +17,7 @@ import { resolveOpenClawStateSqlitePath } from "../../state/openclaw-state-db.pa
 import { createTestRegistry } from "../../test-utils/channel-plugins.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../../utils/message-channel-constants.js";
+import { ensureSqliteLibrarySelected } from "../bun-sqlite-library.js";
 import * as admission from "../sqlite-worker-operation-admission.js";
 import { createAccountScopedConversationBindingManager } from "./account-scoped-conversation-bindings.js";
 import { createBoundDeliveryRouter } from "./bound-delivery-router.js";
@@ -35,6 +38,55 @@ import {
 import type { SessionBindingRecord } from "./session-binding.types.js";
 
 afterEach(() => vi.restoreAllMocks());
+
+let nativeCloseReleasesStatements: boolean;
+beforeAll(async () => {
+  await withOpenClawTestState({ label: "binding-close-oracle" }, async (state) => {
+    ensureSqliteLibrarySelected();
+    const worker = new Worker(
+      `
+      const assert = require("node:assert/strict");
+      const { existsSync } = require("node:fs");
+      const { DatabaseSync } = require("node:sqlite");
+      const { parentPort, workerData } = require("node:worker_threads");
+      const database = new DatabaseSync(workerData);
+      database.exec("PRAGMA journal_mode=WAL; CREATE TABLE t(n INTEGER); INSERT INTO t VALUES(1),(2)");
+      const unused = database.prepare("SELECT n FROM t");
+      const statement = database.prepare("SELECT n FROM t ORDER BY n");
+      const iterator = statement.iterate();
+      assert.equal(iterator.next().value.n, 1);
+      assert.ok(existsSync(workerData + "-wal"));
+      assert.ok(existsSync(workerData + "-shm"));
+      database.close();
+      globalThis.retainedCloseOracle = { database, unused, statement, iterator };
+      const released = !existsSync(workerData + "-wal") && !existsSync(workerData + "-shm");
+      parentPort.on("message", () => {});
+      parentPort.postMessage(released);
+      `,
+      { eval: true, execArgv: [], workerData: state.path("close-oracle.sqlite") },
+    );
+    const exited = new Promise<void>((resolve) => {
+      worker.once("exit", () => resolve());
+    });
+    try {
+      nativeCloseReleasesStatements = await new Promise<boolean>((resolve, reject) => {
+        worker.once("message", (value: unknown) => {
+          if (typeof value !== "boolean") {
+            reject(new Error("SQLite close oracle did not return its observed result"));
+          } else {
+            resolve(value);
+          }
+        });
+        worker.once("error", reject);
+        worker.once("messageerror", reject);
+        worker.once("exit", () => reject(new Error("SQLite close oracle exited before reporting")));
+      });
+    } finally {
+      await worker.terminate();
+      await exited;
+    }
+  });
+});
 
 function record(conversationId: string, accountId = "default"): SessionBindingRecord {
   return {
@@ -178,6 +230,22 @@ it("refuses pending selection publication when its database lifecycle retires", 
 });
 
 it("keeps inspection noncreating and performs durable read, expiry, and scoped touch without host data SQL", async () => {
+  const creations: number[] = [];
+  const diagnostics = channel("openclaw.worker.task");
+  const observe = (value: unknown) => {
+    if (
+      value &&
+      typeof value === "object" &&
+      "worker" in value &&
+      typeof value.worker === "string" &&
+      value.worker.startsWith("openclaw-state-read.worker.") &&
+      "workersCreated" in value &&
+      typeof value.workersCreated === "number"
+    ) {
+      creations.push(value.workersCreated);
+    }
+  };
+  diagnostics.subscribe(observe);
   await withOpenClawTestState({ label: "binding-worker" }, async () => {
     let current = record("conversation");
     expect(await inspectCurrentConversationBindingRecordAsync(current.conversation)).toBeNull();
@@ -251,7 +319,13 @@ it("keeps inspection noncreating and performs durable read, expiry, and scoped t
     expect(await inspectCurrentConversationBindingRecordAsync(sibling.conversation)).toEqual(
       sibling,
     );
-  });
+    expect(creations.length).toBeGreaterThan(1);
+    if (nativeCloseReleasesStatements) {
+      expect(new Set(creations)).toEqual(new Set([creations[0]]));
+    } else {
+      expect(creations.at(-1)).toBeGreaterThan(creations[0]!);
+    }
+  }).finally(() => diagnostics.unsubscribe(observe));
 });
 
 it.each(["transaction", "commit"] as const)(

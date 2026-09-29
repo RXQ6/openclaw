@@ -48,7 +48,8 @@ import type {
 
 const workerUrl = resolveRuntimeWorkerUrl(runtimeProcessEntrypoints.sessionTranscript);
 function createHistoryPool() {
-  return createOwnedWorkerTaskPool<
+  let generation: { closeFinalizesStatements: boolean } | undefined;
+  const pool = createOwnedWorkerTaskPool<
     SessionHistoryWorkerInput,
     SessionTranscriptWorkerReply<SessionHistoryWorkerInput["kind"]>
   >({
@@ -57,10 +58,38 @@ function createHistoryPool() {
     maxWorkers: 1,
     idleTimeoutMs: 0,
     prepareWorker: () => {
+      const current = { closeFinalizesStatements: false };
+      generation = current;
       ensureSqliteLibrarySelected();
-      return { options: {} };
+      return {
+        options: {},
+        async releaseResources() {
+          if (generation === current) {
+            generation = undefined;
+          }
+        },
+      };
+    },
+    validateResult(reply) {
+      // This single-worker pool observes replies before dispatch can create a successor.
+      if (generation) {
+        generation.closeFinalizesStatements =
+          reply.ok && reply.sqliteCloseFinalizesStatements === true;
+      }
+    },
+    onRetirementFailure() {
+      generation = undefined;
     },
   });
+  return {
+    ...pool,
+    canCloseNativeResources: () =>
+      !process.versions.bun || generation?.closeFinalizesStatements === true,
+    rotate() {
+      generation = undefined;
+      return pool.rotate();
+    },
+  };
 }
 
 const historyPages = createHistoryPool();
@@ -294,9 +323,9 @@ async function closeDatabaseWorkerResource(
   idle: boolean,
 ): Promise<void> {
   const pool = historyWorkerLanes.find((candidate) => candidate === lane)?.pool;
-  // Active reads and Bun retain native-exit custody. Idle Node readers can
-  // release the exact database while retaining the worker's loaded code.
-  if (!idle || process.versions.bun || !pool) {
+  // Active or unqualified readers keep native-exit custody. Proven idle readers
+  // release the exact database while retaining this worker's loaded code.
+  if (!idle || !pool?.canCloseNativeResources()) {
     await rotateDatabaseWorkers(lane);
     return;
   }
@@ -440,8 +469,8 @@ export async function withSessionHistoryWorkerReadCandidates<T>(
       return closing;
     };
     const settleCandidates = async () => {
-      // Bun and failed discovery can retain native handles outside candidate custody.
-      if (discoveryFailed || process.versions.bun) {
+      // Failed discovery can retain handles outside candidate custody even on a proven worker.
+      if (discoveryFailed || !lane.pool.canCloseNativeResources()) {
         await retire();
         return;
       }

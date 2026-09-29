@@ -266,7 +266,7 @@ describe("scripts/ci-run-node-test-shard.mts", () => {
     async (policy) => {
       vi.spyOn(groupOwner, "shouldUseDetachedVitestProcessGroup").mockReturnValue(true);
       const bunFile = "ui/src/pages/chat/chat-pane-history.test.ts";
-      const nodeFile = "ui/src/pages/usage/usage-page-details.test.ts";
+      const nodeFile = "ui/src/pages/usage/usage-page-retention.test.ts";
       const includePatterns = [bunFile, nodeFile];
       const seen: Array<{ runtime: string | undefined; membership?: string[] }> = [];
       await expect(
@@ -885,7 +885,7 @@ describe("scripts/ci-run-node-test-shard.mts", () => {
     "keeps isolated Node-dependent coverage without losing other files under %s",
     (policy) => {
       const config = "test/vitest/vitest.unit-fast-isolated.config.ts";
-      const nodeFiles = ["src/agents/code-mode.action-output.test.ts"];
+      const nodeFiles = ["src/agents/code-mode.auto-results.test.ts"];
       const files = getUnitFastIsolatedTestFiles();
       const selection = { configs: [config] };
       const selected = resolveCiTestRuntimeSelections(selection, policy);
@@ -1130,7 +1130,7 @@ describe("scripts/ci-run-node-test-shard.mts", () => {
       vi.spyOn(groupOwner, "shouldUseDetachedVitestProcessGroup").mockReturnValue(true);
       const seen: string[] = [];
       let receiptFile: string | undefined;
-      const nodeFile = "ui/src/pages/usage/usage-page-details.test.ts";
+      const nodeFile = "ui/src/pages/usage/usage-page-retention.test.ts";
       const bunFile = "ui/src/pages/chat/chat-pane-history.test.ts";
       await expect(
         runShardPlans([{ kind: "group", name: "ui", plan: { configs: ["ui/vitest.config.ts"] } }], {
@@ -1143,8 +1143,8 @@ describe("scripts/ci-run-node-test-shard.mts", () => {
                 readFileSync(env.OPENCLAW_VITEST_POST_SHARD_INCLUDE_FILE!, "utf8"),
               );
               expect(included).toEqual([
-                "ui/src/pages/chat/chat-pane-retained-presentation.test.ts",
-                "ui/src/pages/chat/chat-thread.test.ts",
+                "ui/src/pages/chat/chat-pane-retention.test.ts",
+                "ui/src/pages/chat/chat-thread-retention.test.ts",
                 nodeFile,
               ]);
               return 0;

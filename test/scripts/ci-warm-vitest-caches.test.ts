@@ -22,6 +22,7 @@ vi.mock(import("../../scripts/lib/ci-node-test-plan.mts"), async (importOriginal
       // The planner suite owns the production inventory; this proves partitioning.
       const tooling = {
         ...hosted[0]!,
+        configs: ["test/vitest/vitest.unit-fast.config.ts", "test/vitest/vitest.tooling.config.ts"],
         includePatterns: [
           "packages/media-core/src/mime.test.ts",
           "src/infra/worker-task-pool.memory.test.ts",
