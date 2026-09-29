@@ -1,7 +1,6 @@
 import type { SessionDiscussionInfo } from "../../../../packages/gateway-protocol/src/index.js";
-import { hasOperatorWriteAccess } from "../../app/operator-access.ts";
 import { t } from "../../i18n/index.ts";
-import { isGatewayMethodAdvertised } from "../../lib/gateway-methods.ts";
+import { canCallGatewayMethod } from "../../lib/gateway-methods.ts";
 import { ChatPaneSessionMenu } from "./chat-pane-session-menu.ts";
 import { resolveChatAgentId } from "./chat-state-route.ts";
 import type { SessionDiscussionPanelConfig } from "./components/session-discussion-panel.ts";
@@ -25,7 +24,11 @@ export abstract class ChatPaneDiscussion extends ChatPaneSessionMenu {
       // One in-flight probe per key: a rapid A→B→A switch must not start a
       // second probe whose slower twin could later overwrite the fresh result.
       this.sessionDiscussionProbes.has(sessionKey) ||
-      isGatewayMethodAdvertised(this.context.gateway.snapshot, "session.discussion.info") !== true
+      !canCallGatewayMethod(
+        this.context.gateway.snapshot,
+        "session.discussion.info",
+        "operator.read",
+      )
     ) {
       return;
     }
@@ -66,9 +69,11 @@ export abstract class ChatPaneDiscussion extends ChatPaneSessionMenu {
     if (!state.connected || !state.client) {
       return null;
     }
-    const canOpen =
-      hasOperatorWriteAccess(this.context.gateway.snapshot.hello?.auth ?? null) &&
-      isGatewayMethodAdvertised(this.context.gateway.snapshot, "session.discussion.open") === true;
+    const canOpen = canCallGatewayMethod(
+      this.context.gateway.snapshot,
+      "session.discussion.open",
+      "operator.write",
+    );
     const contentGeneration = this.connectionGeneration;
     const cached = this.sessionDiscussionPanels.get(sessionKey);
     if (cached?.generation === contentGeneration && cached.canOpen === canOpen) {
@@ -159,7 +164,11 @@ export abstract class ChatPaneDiscussion extends ChatPaneSessionMenu {
       !sessionKey ||
       known === undefined ||
       known === "none" ||
-      isGatewayMethodAdvertised(this.context.gateway.snapshot, "session.discussion.info") !== true
+      !canCallGatewayMethod(
+        this.context.gateway.snapshot,
+        "session.discussion.info",
+        "operator.read",
+      )
     ) {
       return null;
     }

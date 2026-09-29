@@ -32,6 +32,7 @@ const SESSION_KEY = "agent:main:current";
 function createDiscussionPane(params: {
   info: SessionDiscussionInfo | Promise<SessionDiscussionInfo>;
   detailOpen?: boolean;
+  scopes?: string[];
 }) {
   const request = vi.fn().mockImplementation(async (method: string) => {
     if (method === "session.discussion.info") {
@@ -44,6 +45,7 @@ function createDiscussionPane(params: {
   const pane = created.pane as DiscussionTestPane;
   const state = created.state;
   (pane.context.gateway.snapshot as { hello: unknown }).hello = {
+    auth: { role: "operator", scopes: params.scopes ?? ["operator.read", "operator.write"] },
     features: { methods: ["session.discussion.info", "session.discussion.open"] },
   };
   state.sidebarLayout = params.detailOpen ? openSlot({ columns: [] }, "detail") : { columns: [] };
@@ -55,6 +57,15 @@ function createDiscussionPane(params: {
 }
 
 describe("chat pane session discussion", () => {
+  it("does not probe an advertised discussion method without its read scope", async () => {
+    const { pane, request } = createDiscussionPane({
+      info: { state: "open", embedUrl: "https://clack.example/embed/c1" },
+      scopes: ["operator.sessions.read", "operator.sessions.write"],
+    });
+    await pane.probeSessionDiscussion(SESSION_KEY);
+    expect(request).not.toHaveBeenCalled();
+    expect(pane.resolveSessionDiscussionAction()).toBeNull();
+  });
   it("does not auto-show an open discussion", async () => {
     const { pane, updateSidebarLayout } = createDiscussionPane({
       info: { state: "open", embedUrl: "https://clack.example/embed/c1" },
