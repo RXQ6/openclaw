@@ -15,7 +15,7 @@ import type {
 } from "./session-accessor.sqlite-lifecycle-types.js";
 import { invalidateSessionEntryMaintenanceAgeFact } from "./session-accessor.sqlite-maintenance-age.js";
 import { logSqliteReclamationWorkerOutcome } from "./session-accessor.sqlite-reclamation-worker-diagnostics.js";
-import type { SqliteReclamationClaim } from "./session-accessor.sqlite-reclamation-worker.js";
+import type { SqliteReclamationClaim } from "./session-accessor.sqlite-reclamation-worker.types.js";
 import { runSessionEntryWorkerMutation } from "./session-accessor.sqlite-replacement-worker.js";
 
 export function runSessionMaintenanceMetadataInWorker(params: {

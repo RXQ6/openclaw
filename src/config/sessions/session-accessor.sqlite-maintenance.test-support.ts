@@ -26,6 +26,7 @@ import {
   type OpenClawTestState,
 } from "../../test-utils/openclaw-test-state.js";
 import { loadSessionEntry, replaceSessionEntrySync } from "./session-accessor.js";
+import { runExclusiveSqliteTranscriptArchiveWorker } from "./session-accessor.sqlite-archive.js";
 import type { SqliteSessionReclamationDiagnostics } from "./session-accessor.sqlite-contract.js";
 import * as maintenance from "./session-accessor.sqlite-maintenance.js";
 import { runSqliteSessionReclamation } from "./session-accessor.sqlite-reclamation-run.js";
@@ -192,7 +193,7 @@ function maintenancePreparationFixture(state: OpenClawTestState) {
 export function registerSessionMaintenancePreparationTests() {
   it.each(["maintenance-plan", "maintenance-statistics"] as const)(
     "runs cold %s without opening or querying a host database",
-    async (kind) => {
+    async (kind, { signal }) => {
       await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
         const fixture = maintenancePreparationFixture(state);
         const plan =
@@ -205,17 +206,34 @@ export function registerSessionMaintenancePreparationTests() {
         opened.mockClear();
         const sql = observeHostDataSql();
         const diagnostics: SqliteSessionReclamationDiagnostics = {};
+        const archiveEntered = createDeferredCore();
+        const releaseArchive = createDeferredCore();
+        let archiveSettled = false;
+        const heldArchive = runExclusiveSqliteTranscriptArchiveWorker(async () => {
+          archiveEntered.resolve();
+          await releaseArchive.promise;
+        });
+        void heldArchive.then(
+          () => {
+            archiveSettled = true;
+          },
+          () => {
+            archiveSettled = true;
+          },
+        );
+        let pending: ReturnType<typeof runSqliteSessionReclamation> | undefined;
         try {
-          const result = await runSqliteSessionReclamation({
+          await racePromiseWithAbortSignal(archiveEntered.promise, signal);
+          pending = runSqliteSessionReclamation({
             plan,
             forceInProcess: false,
             diagnostics,
           });
+          const result = await racePromiseWithAbortSignal(pending, signal);
+          expect(archiveSettled).toBe(false);
           expect(result.kind).toBe(kind);
           expect(diagnostics.workerThreadId).toBeGreaterThan(0);
-          expect(
-            opened.mock.calls.filter(([pathname]) => pathname === fixture.database.path),
-          ).toEqual([]);
+          expect(opened.mock.calls).toEqual([]);
           expect(sql.queries).toEqual([]);
           if (result.kind === "maintenance-plan") {
             expect(result.value.entryRemovals.map((entry) => entry.sessionKey)).toEqual([
@@ -225,8 +243,13 @@ export function registerSessionMaintenancePreparationTests() {
             expect(result.value).toBe(true);
           }
         } finally {
+          releaseArchive.resolve();
+          const [archive] = await Promise.allSettled([heldArchive, pending] as const);
           sql.restore();
           opened.mockRestore();
+          if (archive.status === "rejected") {
+            throw archive.reason;
+          }
         }
         expect(loadSessionEntry(fixture.active)?.sessionId).toBe("active");
       });
