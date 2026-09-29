@@ -11,6 +11,10 @@ type WorkerInferenceProfile = {
 export function workerInferencePlacement(
   environment: WorkerInferenceProfile,
 ): "gateway" | "worker" {
+  // Other providers own their settings grammar, including an inference key.
+  if (environment.providerId !== DEVICE_WORKER_PROVIDER_ID) {
+    return "gateway";
+  }
   const settings = environment.profileSnapshot.settings;
   const placement = isRecord(settings) ? settings.inference : undefined;
   if (placement === undefined || placement === "gateway") {
@@ -19,10 +23,7 @@ export function workerInferencePlacement(
   // Preserve opt-in snapshots from pre-release builds until their environments retire.
   // This spelling was not a released contract. Doctor normalizes authored config; reading
   // an existing snapshot must not rewrite it or silently change inference placement.
-  if (
-    (placement !== "worker" && placement !== "runtime-local") ||
-    environment.providerId !== DEVICE_WORKER_PROVIDER_ID
-  ) {
+  if (placement !== "worker" && placement !== "runtime-local") {
     throw new WorkerProviderError(
       "Worker inference requires an explicitly configured paired-device worker profile; use gateway or worker",
     );

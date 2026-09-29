@@ -8,6 +8,7 @@ import type {
   SimpleStreamOptions,
   StreamOptions,
 } from "@openclaw/llm-core";
+import { bindAssistantMessageEventStream } from "@openclaw/llm-core/event-stream";
 import { createApiRegistry, type ApiRegistry } from "./api-registry.js";
 import {
   createAiTransportHost,
@@ -32,30 +33,7 @@ export function createLlmRuntime(
     // another runtime's callback. Do not capture the default during construction.
     const host = explicitHost ?? getDefaultAiTransportHost();
     const run = <T>(operation: () => T): T => runWithAiTransportHost(host, operation);
-    const source = run(start);
-    return run(() => {
-      const push = source.push.bind(source);
-      const end = source.end.bind(source);
-      const result = source.result.bind(source);
-      const iterate = source[Symbol.asyncIterator].bind(source);
-      // Decorate the provider-owned mutable stream without replacing its identity.
-      // Native producer completion lives outside its mutable result() surface and
-      // must survive even when a process runtime outlives a provider module copy.
-      source.push = (event) => run(() => push(event));
-      source.end = (message) => run(() => end(message));
-      source.result = () => run(result);
-      source[Symbol.asyncIterator] = () => {
-        const iterator = run(iterate);
-        const finish = iterator.return?.bind(iterator);
-        const fail = iterator.throw?.bind(iterator);
-        return {
-          next: (...args) => run(() => iterator.next(...args)),
-          ...(finish ? { return: (value?: unknown) => run(() => finish(value)) } : {}),
-          ...(fail ? { throw: (error?: unknown) => run(() => fail(error)) } : {}),
-        };
-      };
-      return source;
-    });
+    return run(() => bindAssistantMessageEventStream(start(), run));
   };
   function resolveApiProvider(api: Api) {
     const provider = registry.getApiProvider(api);

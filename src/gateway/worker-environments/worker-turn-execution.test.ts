@@ -598,15 +598,24 @@ describe("worker turn execution", () => {
     },
   );
 
-  it.each([undefined, "gateway", "worker", "runtime-local"] as const)(
-    "dispatches a registered paired-device turn with inference placement %s",
-    async (inference) => {
+  it.each([
+    ...[undefined, "gateway", "worker", "runtime-local"].map((inference) => ({
+      providerId: "device",
+      inference,
+    })),
+    ...[false, null, { mode: "remote" }, "worker"].map((inference) => ({
+      providerId: "custom-provider",
+      inference,
+    })),
+  ])(
+    "dispatches a registered worker turn with provider-owned inference %j",
+    async ({ providerId, inference }) => {
       await seedActivePlacement();
       const environment = attachedEnvironment();
-      environment.providerId = "device";
+      environment.providerId = providerId;
       environment.nodeDeviceId = "paired-inference-node";
       environment.sshEndpoint = null;
-      environment.profileSnapshot = { settings: inference ? { inference } : {} };
+      environment.profileSnapshot = { settings: inference === undefined ? {} : { inference } };
       environment.bootstrapReceipt!.protocolFeatures.push(WORKER_LOCAL_INFERENCE_PROTOCOL_FEATURE);
       let descriptor: WorkerLaunchPlan | undefined;
       const launchTurn = vi.fn<NonNullable<WorkerTunnelHandle["launchTurn"]>>(async ({ plan }) => {
@@ -667,7 +676,7 @@ describe("worker turn execution", () => {
       expect(environments.startTunnel).toHaveBeenCalledOnce();
       expect(runLocal).not.toHaveBeenCalled();
       expect(descriptor?.assignment.modelRef).toEqual({ provider: "openai", model: "gpt-test" });
-      if (inference === "worker" || inference === "runtime-local") {
+      if (providerId === "device" && (inference === "worker" || inference === "runtime-local")) {
         expect(descriptor?.assignment.inference).toBe("runtime-local");
       } else {
         expect(descriptor?.assignment).not.toHaveProperty("inference");
