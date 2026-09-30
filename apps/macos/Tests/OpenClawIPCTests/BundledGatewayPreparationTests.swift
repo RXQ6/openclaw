@@ -6,22 +6,36 @@ import Testing
 struct BundledGatewayPreparationTests {
     private struct Fixture {
         let root: URL
+        let state: URL
         let nodeRoot: URL
         let cli: GatewayLaunchAgentManager.InstalledServiceCLI
         let plist: URL
 
-        init(home: URL) throws {
-            let state = AppProfile.current.stateDirectoryURL()
+        init(home: URL, inferredLegacy: Bool = false) throws {
+            let state = inferredLegacy ? AppProfile.current.stateDirectoryURL(homeDirectory: home) :
+                AppProfile.current.stateDirectoryURL()
+            self.state = state
             let id = UUID().uuidString
             self.root = state.appendingPathComponent("onboarding-\(id)")
             self.nodeRoot = state.appendingPathComponent("tools/node-\(id)")
             let node = self.nodeRoot.appendingPathComponent("bin/node")
-            self.cli = .init(
-                prefix: [node.path, self.root.appendingPathComponent("openclaw.mjs").path],
-                sqliteLibrary: nil)
+            let entry = inferredLegacy
+                ? self.nodeRoot.appendingPathComponent("lib/node_modules/openclaw/openclaw.mjs")
+                : self.root.appendingPathComponent("openclaw.mjs")
+            self.cli = .init(prefix: [node.path, entry.path], sqliteLibrary: nil)
             self.plist = GatewayLaunchAgentManager.plistURL(homeDirectory: home, profile: .current)
-            for directory in [self.root, node.deletingLastPathComponent(), self.plist.deletingLastPathComponent()] {
+            for directory in [
+                self.root, node.deletingLastPathComponent(), self.plist.deletingLastPathComponent(),
+                entry.deletingLastPathComponent(),
+            ] {
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            }
+            if inferredLegacy {
+                try Data().write(to: entry)
+                try Data(#"{"name":"openclaw","version":"2026.8.1"}"#.utf8)
+                    .write(to: entry.deletingLastPathComponent().appendingPathComponent("package.json"))
+                try FileManager.default.createSymbolicLink(
+                    at: state.appendingPathComponent("tools/node"), withDestinationURL: self.nodeRoot)
             }
             try "2026.8.1\n".write(to: self.root.appendingPathComponent("version"), atomically: true, encoding: .utf8)
             try """
@@ -57,6 +71,79 @@ struct BundledGatewayPreparationTests {
         func remove() {
             try? FileManager.default.removeItem(at: self.root)
             try? FileManager.default.removeItem(at: self.nodeRoot)
+        }
+    }
+
+    @Test(arguments: ["unchanged", "wrapper", "alias", "attach-only", "late-wrapper"], [false, true])
+    func `managed updater and repair require current inferred authority before dispatch`(
+        change: String,
+        repair: Bool) async throws
+    {
+        let home = try makeTempDirForTests()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let config = home.appendingPathComponent("openclaw.json")
+        try Data(#"{"gateway":{"mode":"local"}}"#.utf8).write(to: config)
+        try await TestIsolation.withIsolatedState(
+            launchAgentHomeDirectory: home,
+            env: ["OPENCLAW_CONFIG_PATH": config.path],
+            defaults: [cliInstallPolicyKey: "exact", connectionModeKey: "local", postAppUpdateReceiptKey: nil])
+        {
+            let fixture = try Fixture(home: home, inferredLegacy: true)
+            defer { fixture.remove() }
+            try FileManager.default.removeItem(at: fixture.plist)
+            var cli = try #require(try GatewayLaunchAgentManager.legacyManagedNodeCLI(homeDirectory: home))
+            cli.environment["OPENCLAW_PREPARATION_FIXTURE_ROOT"] = fixture.root.path
+            let marker = home.appendingPathComponent("disable-launchagent")
+            GatewayLaunchAgentManager.setTestingDisableLaunchAgentMarkerURL(marker)
+            defer { GatewayLaunchAgentManager.setTestingDisableLaunchAgentMarkerURL(nil) }
+            let wrapper = fixture.state.appendingPathComponent("bin/openclaw")
+            try FileManager.default.createDirectory(
+                at: wrapper.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
+            let writeOperatorWrapper: @MainActor @Sendable () throws -> Void = {
+                try Data("#!/bin/sh\nexec /operator/openclaw \"$@\"\n".utf8).write(to: wrapper)
+            }
+            var dispatched = false
+            let result = await CLIInstaller.updateManaged(
+                targetVersion: "2026.9.1",
+                restartGateway: false,
+                repair: repair,
+                installedCLI: cli,
+                checkCurrent: {
+                    await Task.yield()
+                    switch change {
+                    case "wrapper": try writeOperatorWrapper()
+                    case "alias":
+                        let replacement = fixture.state.appendingPathComponent("tools/node-replacement")
+                        try FileManager.default.copyItem(at: fixture.nodeRoot, to: replacement)
+                        let alias = fixture.state.appendingPathComponent("tools/node")
+                        try FileManager.default.removeItem(at: alias)
+                        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: replacement)
+                    case "attach-only": try Data().write(to: marker)
+                    default: break
+                    }
+                },
+                onDispatch: {
+                    dispatched = true
+                    if change == "late-wrapper" {
+                        do { try writeOperatorWrapper() } catch { Issue.record(error) }
+                    }
+                },
+                statusHandler: { _ in })
+            if change == "unchanged" {
+                #expect(result == .success(fromVersion: "2026.8.1", toVersion: "2026.9.1"))
+                let command = try String(contentsOf: fixture.root.appendingPathComponent("updates"), encoding: .utf8)
+                #expect(command.contains(repair ? "update repair" : "update --tag 2026.9.1"))
+                #expect(command.contains("--no-restart"))
+            } else {
+                guard case .failure = result else { Issue.record("Revoked authority must not launch the updater")
+                    return
+                }
+                #expect(!FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("updates").path))
+                #expect(try String(contentsOf: fixture.root.appendingPathComponent("version"), encoding: .utf8) ==
+                    "2026.8.1\n")
+            }
+            #expect(dispatched == (change == "unchanged" || change == "late-wrapper"))
         }
     }
 

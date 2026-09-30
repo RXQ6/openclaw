@@ -12,7 +12,7 @@ struct OpenClawNativeStateSQLiteTests {
         "UPDATE schema_meta SET schema_version = 2",
         "UPDATE schema_meta SET role = 'agent'",
         "DROP TABLE schema_meta",
-        "DROP TABLE config_machine_state",
+        "PRAGMA user_version = 6; UPDATE schema_meta SET schema_version = 6; DROP TABLE config_machine_state",
         "PRAGMA user_version = 0",
     ])
     func `read-only admission rejects incompatible state before returning a handle`(_ mutation: String) throws {
@@ -25,6 +25,27 @@ struct OpenClawNativeStateSQLiteTests {
                 try OpenClawNativeStateSQLite(databaseURL: url, createIfMissing: false, readOnly: true)
             }
 
+            #expect(try Data(contentsOf: url) == original)
+        }
+    }
+
+    @Test(arguments: 1...5, [false, true])
+    func `older schemas preserve absent or populated config state`(version: Int, hasTable: Bool) throws {
+        try self.withDatabaseURL { writer, url in
+            try self.createConfigMachineState(writer)
+            try writer.execute("PRAGMA user_version = \(version); UPDATE schema_meta SET schema_version = \(version)")
+            if hasTable {
+                try writer.execute("INSERT INTO config_machine_state VALUES ('fixture', 'retained-pin', 10)")
+            } else {
+                try writer.execute("DROP TABLE config_machine_state")
+            }
+            let original = try Data(contentsOf: url)
+            let reader = try OpenClawNativeStateSQLite(databaseURL: url, createIfMissing: false, readOnly: true)
+            let expected: OpenClawNativeStateConfigValue? = hasTable
+                ? .init(value: "retained-pin", updatedAtMilliseconds: 10)
+                : nil
+
+            #expect(try reader.configMachineStateValue(key: "fixture") == expected)
             #expect(try Data(contentsOf: url) == original)
         }
     }

@@ -596,10 +596,23 @@ enum CLIInstaller {
                 profile: .current,
                 searchPaths: CommandResolver.preferredPaths())
         } ?? self.probeEnvironment(location: executable)
+        let beforeSpawn: @Sendable () -> String? = {
+            // The local Gateway marker does not own captured remote node service updates.
+            guard let installedCLI, installedCLI.isInferredLegacyInstall else { return nil }
+            guard !GatewayLaunchAgentManager.isLaunchAgentWriteDisabled() else {
+                return "Gateway service changes are disabled"
+            }
+            return GatewayLaunchAgentManager.legacyServiceAuthorityError(for: installedCLI)
+        }
         do { try await checkCurrent?() } catch {
             let message = String(localized: "Gateway update failed.")
             await statusHandler(message)
             return .failure(message: message, details: error.localizedDescription)
+        }
+        if let error = beforeSpawn() {
+            let message = String(localized: "Gateway update failed.")
+            await statusHandler(message)
+            return .failure(message: message, details: error)
         }
         onDispatch?()
         let response = await ShellExecutor.runDetailed(
@@ -608,7 +621,8 @@ enum CLIInstaller {
             env: environment,
             // The CLI timeout is per step. Keep the aggregate watchdog above
             // the full package, plugin, doctor, and restart sequence.
-            timeout: self.managedUpdateTimeout)
+            timeout: self.managedUpdateTimeout,
+            beforeSpawn: beforeSpawn)
         let summary = self.parseManagedUpdateSummary(response.stdout)
 
         let reportedStatus = summary?.status

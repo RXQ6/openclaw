@@ -478,10 +478,12 @@ public final class OpenClawNativeStateSQLite: @unchecked Sendable {
             return false
         }
         try self.validateSharedDatabaseMetadata(userVersion: version)
-        guard try self.schemaObjectExists(type: "table", name: "config_machine_state") else {
+        let available = try self.schemaObjectExists(type: "table", name: "config_machine_state")
+        // This table was added during schema 5 and became required with the canonical schema in version 6.
+        guard available || (1...5).contains(version) else {
             throw OpenClawNativeStateError("The shared state database is missing config_machine_state")
         }
-        return true
+        return available
     }
 
     private func validateVersionZeroOwnership() throws {
