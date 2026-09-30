@@ -78,7 +78,6 @@ export {
   preparedModelRuntimeConfigsMatch,
 } from "./prepared-model-runtime.owner.js";
 export type { PreparedModelRuntimeReplacementGateId } from "./prepared-model-runtime.owner.js";
-export { registerPreparedModelRuntimePublicationListener } from "./prepared-model-runtime.publication-events.js";
 export type {
   PreparedModelRuntimeInput,
   PreparedModelRuntimeLease,
@@ -126,7 +125,10 @@ function captureModelRuntimeLifetime(): () => void {
   if (!releaseProcessLifetime) {
     // Completed process teardown ends the previous refresh admission fence.
     refreshCancellation = new AbortController();
-    releaseProcessLifetime = registerPreparedModelRuntimeClose(closeModelRuntime);
+    releaseProcessLifetime = registerPreparedModelRuntimeClose(
+      closeModelRuntime,
+      createPreparedModelRuntimeCatalogRecovery(owners, refreshPreparedModelRuntimeSnapshots),
+    );
   }
   return assertCurrent;
 }
@@ -277,7 +279,7 @@ export function getPendingPreparedModelRuntimeReplacement(): Promise<void> | und
 }
 
 /** Publishes one owner from an explicit startup/activation lifecycle boundary. */
-export async function publishPreparedModelRuntimeSnapshot(
+async function publishPreparedModelRuntimeSnapshot(
   rawInput: PreparedModelRuntimeInput,
   options: PreparedModelRuntimePublicationOptions = {},
 ): Promise<PreparedModelRuntimeSnapshot> {
@@ -498,11 +500,6 @@ export function rejectPendingPreparedModelRuntimeReplacement(
   replacement.reject(replacementError);
   notifyPreparedModelRuntimePublication({ phase: "failed", error: replacementError });
 }
-
-export const recoverPreparedModelRuntimeCatalogWorker = createPreparedModelRuntimeCatalogRecovery(
-  owners,
-  refreshPreparedModelRuntimeSnapshots,
-);
 
 const recoverRetiredConfiguredPluginGeneration = createPreparedModelRuntimePluginRecovery(
   owners,
@@ -766,6 +763,7 @@ async function resetPreparedModelRuntimeSnapshotsForTest(): Promise<void> {
 if (process.env.VITEST || process.env.NODE_ENV === "test") {
   (globalThis as Record<PropertyKey, unknown>)[Symbol.for("openclaw.preparedModelRuntimeTestApi")] =
     {
+      publishPreparedModelRuntimeSnapshot,
       resetPreparedModelRuntimeSnapshotsForTest,
       getPreparedModelRuntimeOwnerCountForTest: () => owners.size,
       setModelRuntimeBuildTimeoutMsForTest: (timeoutMs: number) => {
