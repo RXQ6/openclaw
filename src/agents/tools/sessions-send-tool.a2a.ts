@@ -207,7 +207,6 @@ export async function runSessionsSendA2AFlow(params: {
           targetAgentId: params.targetAgentId,
           sessionGeneration: params.requesterDeliveryGeneration,
         });
-        return;
       }
       return;
     }

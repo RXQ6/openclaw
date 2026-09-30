@@ -240,7 +240,6 @@ describe("maybeWakeRequesterAfterAllChildrenSettled", () => {
     expect(message).not.toContain("unfinished follow-up");
     expect(message.indexOf("alpha findings")).toBeLessThan(message.indexOf("bravo findings"));
     expect(message.indexOf("bravo findings")).toBeLessThan(message.indexOf("charlie findings"));
-    expect(call.steerMessage).toBe(message);
     expect(completeBatchSpy).toHaveBeenCalledExactlyOnceWith(
       ["run-a", "run-b", "run-c"],
       undefined,

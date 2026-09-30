@@ -343,11 +343,22 @@ describe("sessions_send child coordination", () => {
       await writeEntry(reusedKey, currentEntry);
       const result = await send(requesterKey, targetKey, direction === "target" ? 0 : 1);
       await settleSessionWork();
-      expectCoordination(
-        result,
-        direction === "requester" && expectedChild,
-        direction === "target" ? expectedChild : undefined,
-      );
+      if (direction === "target") {
+        expect(result.details).toMatchObject({
+          status: "accepted",
+          delivery: { status: "skipped" },
+        });
+        const agentCalls = calls.filter((call) => call.method === "agent");
+        expect(agentCalls).toEqual([
+          expect.objectContaining({ params: expect.objectContaining({ sessionKey: targetKey }) }),
+        ]);
+        expect(agentParams(agentCalls[0] ?? {}).inputProvenance?.sourceRole).toBeUndefined();
+        expect(
+          calls.filter((call) => call.method === "agent.wait" || call.method === "send"),
+        ).toHaveLength(0);
+      } else {
+        expectCoordination(result, expectedChild);
+      }
     },
   );
 
