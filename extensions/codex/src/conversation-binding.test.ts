@@ -10,7 +10,10 @@ import type { PluginConversationBinding } from "openclaw/plugin-sdk/plugin-entry
 import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
 import { upsertSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
 import { appendSessionTranscriptMessageByIdentity } from "openclaw/plugin-sdk/session-transcript-runtime";
-import { useSessionStoreTempDirs } from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import {
+  closeOpenClawAgentDatabasesAsync,
+  useSessionStoreTempDirs,
+} from "openclaw/plugin-sdk/sqlite-runtime-testing";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const sessionDirs = useSessionStoreTempDirs(afterAll, "openclaw-codex-binding-");
@@ -518,6 +521,9 @@ function mockCallArg(mock: ReturnType<typeof vi.fn>, callIndex = 0, argIndex = 0
 }
 
 describe("codex conversation binding", () => {
+  // Incognito handles live in the isolated test home, outside the session-store root.
+  afterAll(() => closeOpenClawAgentDatabasesAsync());
+
   beforeEach(() => {
     resetCodexTestBindingStore();
     tempDir = sessionDirs.make();
