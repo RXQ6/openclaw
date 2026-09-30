@@ -13,11 +13,16 @@ const mocks = vi.hoisted(() => ({
   dispose: vi.fn(),
   release: vi.fn(),
   file: vi.fn(),
+  upload: vi.fn(),
+  viewCleanup: new Set<() => void>(),
 }));
 vi.mock("../mcp-app-extension-runtime.js", () => ({
   prepareMcpAppExtensionRuntime: mocks.prepare,
 }));
 vi.mock("../mcp-app-host-files.js", () => ({ prepareMcpAppHostFile: mocks.file }));
+vi.mock("../../agents/mcp-form-resource-upload.js", () => ({
+  prepareMcpAppFormUpload: mocks.upload,
+}));
 vi.mock("../mcp-app-operations.js", () => ({
   callMcpAppToolWithElicitation: async (request: {
     origin: { runtime: { callTool: typeof mocks.call }; serverName: string };
@@ -34,7 +39,7 @@ vi.mock("../../plugins/current-plugin-metadata-state.js", () => ({
 }));
 vi.mock("../../agents/mcp-ui-resource.js", () => ({
   fetchMcpAppView: mocks.fetch,
-  getMcpAppViewLease: () => ({ disposeCallbacks: new Set() }),
+  getMcpAppViewLease: () => ({ disposeCallbacks: mocks.viewCleanup }),
   buildMcpAppCanvasPayload: (value: unknown) => value,
 }));
 let catalog: McpToolCatalog;
@@ -47,6 +52,8 @@ const settings = {
 };
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.viewCleanup.clear();
+  mocks.upload.mockResolvedValue(undefined);
   mocks.dispose.mockResolvedValue(undefined);
   catalog = {
     version: 1,
@@ -178,6 +185,46 @@ describe("registered MCP App extensions", () => {
       }),
     );
     expect(mocks.dispose).toHaveBeenCalledOnce();
+  });
+  it.each(["upload", "view", "missing view"])(
+    "releases launch authority when %s preparation fails",
+    async (failure) => {
+      if (failure === "upload") {
+        mocks.upload
+          .mockResolvedValueOnce(undefined)
+          .mockRejectedValueOnce(new Error("upload failed"));
+      } else if (failure === "view") {
+        mocks.fetch.mockRejectedValueOnce(new Error("view failed"));
+      } else {
+        mocks.fetch.mockResolvedValueOnce(undefined);
+      }
+      const response = await invoke("mcp.app.launch", {
+        serverName: "demo",
+        toolName: "show",
+        entrypointType: "global",
+      });
+      expect(response).toHaveBeenCalledWith(false, undefined, expect.any(Object));
+      expect(mocks.release).toHaveBeenCalledTimes(2);
+      expect(mocks.viewCleanup.size).toBe(0);
+      expect(mocks.dispose).toHaveBeenCalledOnce();
+    },
+  );
+  it("transfers successful launch authority to the installed view exactly once", async () => {
+    const response = await invoke("mcp.app.launch", {
+      serverName: "demo",
+      toolName: "show",
+      entrypointType: "global",
+    });
+    expect(response).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({ viewId: "mcp-app-demo" }),
+    );
+    expect(mocks.release).toHaveBeenCalledOnce();
+    expect(mocks.viewCleanup.size).toBe(1);
+    for (const cleanup of mocks.viewCleanup) {
+      cleanup();
+    }
+    expect(mocks.release).toHaveBeenCalledTimes(2);
   });
   it("passes only a host-minted resource to file entrypoints", async () => {
     await invoke("mcp.app.launch", {

@@ -81,6 +81,8 @@ Global and thread entrypoint tools accept `{}`. File entrypoints declare extensi
 
 App resource metadata can declare supported and preferred display modes. Apps must inspect the actual host capabilities before using an extension: a standalone channel window does not have every capability of a connected Control UI conversation. Do not infer file, messaging, or model-context authority from a successful MCP connection alone.
 
+File saves follow the extension protocol’s optional `ifMatch` precondition. Sending the ETag from the last read prevents a stale save from replacing a newer edit; omitting `ifMatch` performs an unconditional save (last writer wins). App authors should send the ETag when protecting concurrent edits. Both forms still require a writable read, the host-issued file URI, and current session and requester authority.
+
 The extensions use the existing sandbox and permission boundaries below. Server-owned settings and plugin data remain with their existing owners. Raw app state is not a new durable Gateway store, and a reconstructed transcript preview is not a fresh grant to run tools.
 
 ## Behavior and security boundaries

@@ -122,44 +122,47 @@ async function launch(
   // The retained authority is released by the view's existing runtime lease owner.
   const viewTools = appToolsFor(active, tool.serverName);
   const retained = active.retainViewAuthority(viewTools);
-  const viewRuntime = active.runtime;
-  const allowedAppToolNames = new Set(viewTools.map((candidate) => candidate.toolName));
-  const view = await fetchMcpAppView({
-    runtime: viewRuntime,
-    agentId: active.agentId,
-    serverName: tool.serverName,
-    toolName: tool.toolName,
-    uiResourceUri: tool.uiResourceUri,
-    toolCallId: randomUUID(),
-    toolInput: input,
-    toolResult: result,
-    allowedAppToolNames,
-    requesterId: active.requesterId,
-    displayMode: "fullscreen",
-    prepareToolCall: retained.prepareToolCall,
-    uploadResources: await uploadFor(active, tool.serverName, retained.assertCurrent),
-    ...extra,
-    authorizeAppInteraction: () => {
-      retained.assertCurrent();
-      return true;
-    },
-  });
-  if (!view) {
-    retained.release();
-    throw new Error("MCP App resource could not be loaded");
+  let transferred = false;
+  try {
+    const viewRuntime = active.runtime;
+    const allowedAppToolNames = new Set(viewTools.map((candidate) => candidate.toolName));
+    const view = await fetchMcpAppView({
+      runtime: viewRuntime,
+      agentId: active.agentId,
+      serverName: tool.serverName,
+      toolName: tool.toolName,
+      uiResourceUri: tool.uiResourceUri,
+      toolCallId: randomUUID(),
+      toolInput: input,
+      toolResult: result,
+      allowedAppToolNames,
+      requesterId: active.requesterId,
+      displayMode: "fullscreen",
+      prepareToolCall: retained.prepareToolCall,
+      uploadResources: await uploadFor(active, tool.serverName, retained.assertCurrent),
+      ...extra,
+      authorizeAppInteraction: () => {
+        retained.assertCurrent();
+        return true;
+      },
+    });
+    if (!view) {
+      throw new Error("MCP App resource could not be loaded");
+    }
+    const preview = buildMcpAppCanvasPayload({ ...view, originSessionKey: active.sessionKey });
+    active.assertCurrent();
+    const lease = getMcpAppViewLease(view.viewId, viewRuntime);
+    if (lease) {
+      lease.disposeCallbacks ??= new Set();
+      lease.disposeCallbacks.add(retained.release);
+      transferred = true;
+    }
+    return { viewId: view.viewId, preview };
+  } finally {
+    if (!transferred) {
+      retained.release();
+    }
   }
-  const lease = getMcpAppViewLease(view.viewId, viewRuntime);
-  if (lease) {
-    lease.disposeCallbacks ??= new Set();
-    lease.disposeCallbacks.add(retained.release);
-  } else {
-    retained.release();
-  }
-  active.assertCurrent();
-  return {
-    viewId: view.viewId,
-    preview: buildMcpAppCanvasPayload({ ...view, originSessionKey: active.sessionKey }),
-  };
 }
 function handler<T>(
   schema: z.ZodType<T>,
