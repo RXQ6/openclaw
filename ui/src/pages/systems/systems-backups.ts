@@ -13,6 +13,8 @@ const byteFormat = {
 
 function renderTarget(target: BackupStatusResult["targets"][number], status: BackupStatusResult) {
   const { latest, latestOk } = target;
+  const pushFailed = target.kind === "git" && latest.status === "ok" && latest.pushFailed === true;
+  const failed = latest.status === "failed" || pushFailed;
   const storedLocation = latest.location ?? latestOk?.location;
   const location = status.locations.find(
     (entry) =>
@@ -32,24 +34,24 @@ function renderTarget(target: BackupStatusResult["targets"][number], status: Bac
     undefined,
   );
   const size = latestOk?.location?.storedBytes ?? latestOk?.bytes;
-  return html`<li class="systems-backup" data-status=${latest.status}>
+  return html`<li class="systems-backup" data-status=${failed ? "failed" : "ok"}>
     <div class="systems-backup__heading">
       <strong>${storedLocation?.name ?? target.target}</strong>
       <span class="systems-backup__state"
-        >${t(latest.status === "failed" ? "systems.backups.failed" : "systems.backups.ok")}</span
+        >${t(pushFailed ? "systems.backups.pushFailed" : failed ? "systems.backups.failed" : "systems.backups.ok")}</span
       >
     </div>
     <div class="systems-backup__meta">
       <span>${t("systems.backups.kinds." + target.kind)}</span>
       <span
-        >${t("systems.backups.lastSuccess", { age: latestOk ? formatTimeAgo(Math.max(0, Date.now() - latestOk.createdAt)) : t("systems.backups.never") })}</span
+        >${t(pushFailed ? "systems.backups.lastLocalSuccess" : "systems.backups.lastSuccess", { age: latestOk ? formatTimeAgo(Math.max(0, Date.now() - latestOk.createdAt)) : t("systems.backups.never") })}</span
       >
       ${size === undefined ? nothing : html`<span>${formatByteSize(size, byteFormat)}</span>`}
       ${nextRunAtMs === undefined ? nothing : html`<span>${t("systems.backups.nextRun", { time: formatDateTimeMs(nextRunAtMs, { dateStyle: "short", timeStyle: "short" }) })}</span>`}
     </div>
     <div class="systems-backup__destination">${location?.displayTarget ?? target.target}</div>
     ${storedLocation ? html`<div class="systems-backup__meta">${t("systems.backups.namespace", { name: storedLocation.namespace })}</div>` : nothing}
-    ${latest.status === "failed" ? html`<p class="systems-backup__error">${latest.error ?? t("systems.backups.failureHint")}</p>` : nothing}
+    ${failed ? html`<p class="systems-backup__error">${latest.error ?? t(pushFailed ? "systems.backups.pushFailureHint" : "systems.backups.failureHint")}</p>` : nothing}
   </li>`;
 }
 

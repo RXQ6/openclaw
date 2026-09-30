@@ -257,6 +257,46 @@ describe("Systems workspace", () => {
     expect(page.querySelector(".systems-backups")).toBeNull();
   });
 
+  it.each([undefined, "Git remote rejected the push: permission denied."])(
+    "shows a failed Git push while preserving local backup success (%s)",
+    async (error) => {
+      const now = Date.UTC(2026, 8, 30, 12);
+      vi.spyOn(Date, "now").mockReturnValue(now);
+      const localSuccess = {
+        id: "git-push-failed",
+        createdAt: now - 3_600_000,
+        archivePath: "/backups/git",
+        target: "/backups/git",
+        kind: "git" as const,
+        status: "ok" as const,
+        pushFailed: true as const,
+        ...(error ? { error } : {}),
+      };
+      const { controller } = harness(undefined, undefined, async () => ({
+        targets: [
+          {
+            kind: "git",
+            target: localSuccess.target,
+            latest: localSuccess,
+            latestOk: localSuccess,
+          },
+        ],
+        schedules: [],
+        locations: [],
+      }));
+      const { page } = await mount(controller);
+      const backup = page.querySelector('.systems-backup[data-status="failed"]');
+      expect(backup?.querySelector(".systems-backup__state")?.textContent?.trim()).toBe(
+        "Push failed",
+      );
+      expect(backup?.textContent).toMatch(/Last local success: .*ago/);
+      expect(backup?.querySelector(".systems-backup__error")?.textContent).toBe(
+        error ??
+          "Local backup succeeded, but pushing to the Git remote failed. Check the remote and retry.",
+      );
+    },
+  );
+
   it("shows loading and actionable failure, then the empty backup state after retry", async () => {
     const pending = createDeferred<BackupStatusResult>();
     const backups = vi

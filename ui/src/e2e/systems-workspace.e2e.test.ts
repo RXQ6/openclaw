@@ -139,6 +139,15 @@ suite.define(() => {
         const probe = await gateway.waitForRequest("storage.locations.probe");
         expect(probe.params).toEqual({ name: "offsite" });
         await backups.getByRole("status").filter({ hasText: "Available" }).waitFor();
+        const gitPushFailure = {
+          id: "git-push-failed",
+          createdAt: now - 3_600_000,
+          archivePath: "/backups/git",
+          target: "/backups/git",
+          kind: "git" as const,
+          status: "ok" as const,
+          pushFailed: true as const,
+        };
         await gateway.setMethodResponse("backup.status", {
           ...status,
           targets: [
@@ -150,6 +159,12 @@ suite.define(() => {
                 error: "Archive disk disconnected. Run openclaw storage test offsite.",
               },
             },
+            {
+              kind: "git",
+              target: gitPushFailure.target,
+              latest: gitPushFailure,
+              latestOk: gitPushFailure,
+            },
           ],
         });
         await page.getByRole("button", { name: "Refresh machines" }).click();
@@ -158,6 +173,11 @@ suite.define(() => {
             exact: true,
           })
           .waitFor();
+        await backups.getByText("Push failed", { exact: true }).waitFor();
+        expect(await backups.textContent()).toContain("Last local success:");
+        expect(await backups.textContent()).toContain(
+          "Local backup succeeded, but pushing to the Git remote failed. Check the remote and retry.",
+        );
         await page.screenshot({ path: path.join(artifacts, "backups-failed.png") });
         await gateway.setMethodResponse("backup.status", {
           targets: [],
