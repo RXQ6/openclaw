@@ -9,6 +9,7 @@ import { listUsageCountedTranscriptStats } from "../../infra/session-cost-usage-
 import type { DB } from "../../state/openclaw-agent-db.generated.js";
 import {
   closeOpenClawAgentDatabasesAsync,
+  closeOpenClawAgentDatabasesForTest,
   openOpenClawAgentDatabase,
   runOpenClawAgentWriteTransaction,
 } from "../../state/openclaw-agent-db.js";
@@ -65,16 +66,14 @@ describe("SQLite transcript archive worker", () => {
   let tempDir: string;
   let storePath: string;
   beforeEach(() => {
-    // openclaw-temp-dir: allow canonical per-case worker root drains before removal
-    tempDir = fs.mkdtempSync(
-      path.join(fs.realpathSync.native(os.tmpdir()), "openclaw-sqlite-archive-worker-"),
-    );
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-sqlite-archive-worker-"));
     storePath = path.join(tempDir, "agents", "main", "sessions", "sessions.json");
   });
   afterEach(async () => {
     // Workers must release native handles before Windows can remove the fixture.
     await waitForSessionTranscriptIndexReconcilesInStateDir(tempDir);
     await closeOpenClawAgentDatabasesAsync(tempDir);
+    closeOpenClawAgentDatabasesForTest(tempDir);
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
