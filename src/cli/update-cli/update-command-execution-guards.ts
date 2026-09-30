@@ -2,10 +2,15 @@ import { cloneEnvWithPlatformSemantics } from "../../config/config-env-vars.js";
 import { resolveUpdateInstallRoot } from "../../infra/update-install-root.js";
 import { UpdateRequesterRevokedError } from "../../infra/update-requester-authority.js";
 import type { UpdateRunPhasePatch } from "../../infra/update-run-mutation.types.js";
-import type { UpdateRunPhase } from "../../infra/update-run-record.js";
+import type {
+  UpdateRunPhase,
+  UpdateRunRecord,
+  UpdateRunStep,
+} from "../../infra/update-run-record.js";
 import type { UpdateRecoveryFence } from "../../infra/update-run-recovery.js";
 import {
   recordUpdateRunPhaseAsync,
+  recordUpdateRunStepAsync,
   type UpdateRunWriteOptions,
 } from "../../infra/update-run-write.async.js";
 import { captureOpenClawStateWorkerContext } from "../../state/openclaw-state-worker-context.js";
@@ -29,6 +34,7 @@ type PhaseWriter = {
   recordPhase: (phase: UpdateRunPhase, patch?: UpdateRunPhasePatch) => Promise<void>;
 };
 type ExecutionGuards = PhaseWriter & {
+  recordStep: (step: UpdateRunStep) => Promise<UpdateRunRecord>;
   captureWriteOptions: () => CapturedWriteOptions;
   onStateHandoff: () => void;
   admitExecutor: (acquired: UpdateRecoveryFence) => void;
@@ -127,6 +133,17 @@ export function createUpdateCommandExecutionGuards(
   return {
     captureWriteOptions,
     recordPhase,
+    recordStep: async (step: UpdateRunStep) => {
+      if (!run) {
+        throw new Error("Update step receipt requires an admitted run.");
+      }
+      const captured = captureWriteOptions();
+      const record = await recordUpdateRunStepAsync(run.runId, step, captured);
+      captured.context.admission.assertCurrent();
+      captured.assertCurrent();
+      captured.assertAccepting();
+      return record;
+    },
     onStateHandoff: () => {
       stateHandedOff = true;
     },
