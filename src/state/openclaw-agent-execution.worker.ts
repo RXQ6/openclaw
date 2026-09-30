@@ -4,7 +4,10 @@ import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import type { Result } from "@openclaw/normalization-core/result";
 import type { SessionTranscriptInitializationPublication } from "../config/sessions/session-accessor.sqlite-entry-cache.types.js";
 import { formatErrorMessage } from "../infra/errors.js";
-import { createSqliteLifecycleAggregateError } from "../infra/sqlite-lifecycle-errors.js";
+import {
+  createSqliteLifecycleAggregateError,
+  throwSqliteLifecycleErrors,
+} from "../infra/sqlite-lifecycle-errors.js";
 import { assertTransactionUsable } from "../infra/sqlite-transaction.js";
 import {
   SQLITE_WORKER_CLOSE_RECEIPT,
@@ -71,7 +74,7 @@ export function createSqliteWorkerBackend(
     return backend;
   } catch (error) {
     try {
-      backend.close();
+      backend.closeAfterFailedOpen();
     } catch (cleanupError) {
       throw createSqliteLifecycleAggregateError(
         [error, cleanupError],
@@ -91,11 +94,8 @@ export function openExistingSqliteWorkerBackend(
   return openAgentDatabaseBackend(input, opening);
 }
 
-type AgentDatabaseNativeBackend = Omit<
-  SqliteWorkerPreparedBackend<AgentDatabaseOperations>,
-  "close"
-> & {
-  close(): void;
+type AgentDatabaseNativeBackend = SqliteWorkerPreparedBackend<AgentDatabaseOperations> & {
+  closeAfterFailedOpen(): void;
 };
 
 function openAgentDatabaseBackend(
@@ -694,7 +694,7 @@ function openAgentDatabaseBackend(
     [SQLITE_WORKER_CLOSE_RECEIPT]() {
       return closeReceipt;
     },
-    close() {
+    closeAfterFailedOpen() {
       closed = true;
       closeReceipt = undefined;
       closeReceipt = closeAgentDatabaseExecution({
@@ -704,6 +704,29 @@ function openAgentDatabaseBackend(
         releaseBorrow,
         releaseSharedBorrow: () => sharedBorrow?.release(),
       });
+    },
+    async close() {
+      closed = true;
+      closeReceipt = undefined;
+      await database?.walMaintenance.stop();
+      const errors: unknown[] = [];
+      try {
+        closeReceipt = closeAgentDatabaseExecution({
+          database,
+          identity,
+          closeDomain: () => domain.close(),
+          releaseBorrow,
+          releaseSharedBorrow: () => {},
+        });
+      } catch (error) {
+        errors.push(error);
+      }
+      try {
+        await sharedBorrow?.releaseAsync();
+      } catch (error) {
+        errors.push(error);
+      }
+      throwSqliteLifecycleErrors(errors, "Agent database cleanup failed");
     },
   };
 }
