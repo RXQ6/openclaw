@@ -28,6 +28,10 @@ import {
 import { createSessionConversationTestRegistry } from "../../test-utils/session-conversation-registry.js";
 import { normalizeSessionDeliveryState } from "../../utils/delivery-context.shared.js";
 import { createOpenClawTools } from "../openclaw-tools.js";
+import {
+  readFollowupRequest,
+  SessionFollowupCompletion,
+} from "../subagents/completion/session-followup-completion.js";
 import "../test-helpers/fast-openclaw-tools-sessions.js";
 import { withGatewayToolCallerIdentity } from "./gateway-caller-context.js";
 import * as inProcessGateway from "./in-process-gateway.js";
@@ -73,7 +77,7 @@ describe("sessions_send dispatch admission", () => {
     setRuntimeConfigSnapshot(config);
     setActivePluginRegistry(createSessionConversationTestRegistry());
     resetGatewayWorkAdmission();
-    vi.mocked(runSessionsSendA2AFlow).mockClear();
+    vi.mocked(runSessionsSendA2AFlow).mockReset();
     registerWatch = vi.spyOn(sessionStateEvents, "registerSessionStateWatch");
     for (const [sessionKey, sessionId] of [
       [requesterSessionKey, "requester-session"],
@@ -113,6 +117,7 @@ describe("sessions_send dispatch admission", () => {
       () => true,
     );
     const finish = createDeferredCore();
+    let completion: SessionFollowupCompletion | undefined;
     vi.mocked(runSessionsSendA2AFlow).mockImplementationOnce(() => finish.promise);
     const callGateway = vi.fn();
     callGateway.mockImplementation(
@@ -124,6 +129,14 @@ describe("sessions_send dispatch admission", () => {
           return { sessions: [{ key: targetSessionKey, agentId: "main", kind: "direct" }] };
         }
         if (request.method === "agent") {
+          const followup = readFollowupRequest(runId, targetSessionKey);
+          if (followup) {
+            completion = SessionFollowupCompletion.bind(followup);
+            followup.completion = completion;
+            completion.markAccepted(runId);
+            await completion.settle(runId, { status: "ok", replyText: "Task complete" });
+            completion.finishExecution(runId);
+          }
           return { runId, status: "accepted" };
         }
         throw new Error(`Unexpected Gateway method: ${request.method}`);
@@ -178,6 +191,7 @@ describe("sessions_send dispatch admission", () => {
       expect(readGatewayDeviceSourceAuthority(source.isCurrent)?.()).toBe(true);
     } finally {
       finish.resolve();
+      completion?.close();
       source.release();
     }
   });
