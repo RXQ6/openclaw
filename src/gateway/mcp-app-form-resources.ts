@@ -4,7 +4,6 @@ import { pathToFileURL } from "node:url";
 import { ReadResourceResultSchema } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { QuestionResourceActionResult } from "../../packages/gateway-protocol/src/question-resource.js";
-import type { SessionMcpRuntime } from "../agents/agent-bundle-mcp-types.js";
 import { captureAgentQuestionAnswerAuthority } from "../agents/harness/host-private-capabilities.js";
 import type { StructuredInputResourceContext } from "../agents/harness/structured-input-boundary.js";
 import {
@@ -19,7 +18,8 @@ import {
 import {
   fetchMcpAppView,
   releaseMcpAppView,
-  type McpAppPrepareToolCall,
+  type McpAppFormOrigin,
+  type McpFormResourceUpload,
 } from "../agents/mcp-ui-resource.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import { resolveMcpAppRequesterId, callMcpAppToolWithElicitation } from "./mcp-app-operations.js";
@@ -36,21 +36,6 @@ import type { GatewayRequestHandlerOptions } from "./server-methods/types.js";
 import { createWorkspaceUploadBatch } from "./server-methods/workspace-fs.js";
 import { captureGatewayClientUploadCommitGuard } from "./upload-policy.js";
 
-export type McpFormResourceUpload = (request: {
-  options: GatewayRequestHandlerOptions;
-  kind: "file" | "directory";
-  files: Array<{ name: string; mimeType: string; data: Buffer; relativePath?: string }>;
-  assertCurrent: () => void;
-}) => Promise<Array<{ uri: string; name: string }>>;
-export type McpAppFormOrigin = {
-  runtime: SessionMcpRuntime;
-  serverName: string;
-  agentId: string;
-  sessionKey: string;
-  requesterId?: string;
-  assertCurrent: () => void;
-  prepareToolCall?: McpAppPrepareToolCall;
-};
 type Form = {
   origin: McpAppFormOrigin;
   uploaded: Map<string, Set<string>>;

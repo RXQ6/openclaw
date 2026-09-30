@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { McpAppFormOrigin } from "../gateway/mcp-app-form-resources.js";
 import { prepareMcpAppFormUpload } from "./mcp-form-resource-upload.js";
+import type { McpAppFormOrigin } from "./mcp-ui-resource.js";
 const mocks = vi.hoisted(() => ({ provider: vi.fn() }));
 vi.mock("../gateway/mcp-app-form-resources.js", () => ({
   createMcpAppWorkspaceUploadProvider: mocks.provider,

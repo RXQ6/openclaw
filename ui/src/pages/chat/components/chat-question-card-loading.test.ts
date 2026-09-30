@@ -6,34 +6,31 @@ import { createDeferred } from "../../../../../test/helpers/promise.js";
 import { ensureCustomElementDefined } from "../../../app/lazy-custom-element.ts";
 import { renderComposerQuestionDock } from "./chat-composer-question.ts";
 import { questionPanelIn } from "./chat-question-card.test-support.ts";
-import {
-  type ChatQuestionCard,
-  type QuestionPanelProps,
-  questionPanelElement,
-} from "./chat-question-card.ts";
+import type { ChatQuestionCard, QuestionPanelProps } from "./chat-question-card.ts";
 
 afterEach(() => {
   document.body.replaceChildren();
+  vi.doUnmock("./chat-question-panel.ts");
   vi.restoreAllMocks();
 });
 
 it("defers the question controls, retries failed loading, and mounts only the current connected request", async () => {
   const initialLoad = createDeferred();
   const retryLoad = createDeferred();
-  const loadModule = questionPanelElement.loadModule;
+  const loadStarted = createDeferred();
   const load = vi
-    .spyOn(questionPanelElement, "loadModule")
-    .mockImplementationOnce(async () => {
-      await initialLoad.promise;
-      return loadModule();
-    })
-    .mockImplementationOnce(async () => {
-      await retryLoad.promise;
-      return loadModule();
-    });
+    .fn<() => Promise<void>>()
+    .mockReturnValueOnce(initialLoad.promise)
+    .mockReturnValueOnce(retryLoad.promise);
+  vi.doMock(import("./chat-question-panel.ts"), async (importOriginal) => {
+    const pending = load();
+    loadStarted.resolve();
+    await pending;
+    return importOriginal();
+  });
   const container = document.body.appendChild(document.createElement("div"));
   render(renderComposerQuestionDock(null), container);
-  expect(customElements.get(questionPanelElement.tagName)).toBeUndefined();
+  expect(customElements.get("openclaw-chat-question-panel")).toBeUndefined();
   expect(load).not.toHaveBeenCalled();
 
   const onSubmit = vi.fn();
@@ -53,12 +50,16 @@ it("defers the question controls, retries failed loading, and mounts only the cu
   render(renderComposerQuestionDock(props), container);
   const card = container.querySelector<ChatQuestionCard>("openclaw-chat-question-card")!;
   await card.updateComplete;
+  await loadStarted.promise;
   expect(card.querySelector('[role="status"]')).not.toBeNull();
   expect(card.querySelector("openclaw-chat-question-panel")).toBeNull();
+  const loadError = new Error("Synthetic load failure");
   const failed = expect(
-    ensureCustomElementDefined(questionPanelElement.tagName, questionPanelElement.loadModule),
-  ).rejects.toThrow("Synthetic load failure");
-  initialLoad.reject(new Error("Synthetic load failure"));
+    ensureCustomElementDefined("openclaw-chat-question-panel", async () => {
+      throw new Error("Expected the question card to start loading its panel");
+    }),
+  ).rejects.toMatchObject({ cause: loadError });
+  initialLoad.reject(loadError);
   await failed;
   await card.updateComplete;
   expect(card.querySelector('[role="alert"]')?.textContent).toContain("Synthetic load failure");

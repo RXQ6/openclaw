@@ -4,7 +4,7 @@ import type {
   CodexAppServerServerRequest,
   CodexThreadRequestHandler,
   CodexThreadRouteScope,
-} from "./turn-router.js";
+} from "./turn-router.types.js";
 export type CodexMcpToolCallOptions = {
   threadId: string;
   serverName: string;

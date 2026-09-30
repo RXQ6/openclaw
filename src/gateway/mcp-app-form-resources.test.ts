@@ -26,7 +26,11 @@ import {
   runWithMcpElicitationHandler,
 } from "../agents/mcp-client-elicitation.js";
 import { buildMcpClientCapabilities } from "../agents/mcp-metadata.js";
-import { getMcpAppViewLease, type McpAppPrepareToolCall } from "../agents/mcp-ui-resource.js";
+import {
+  getMcpAppViewLease,
+  type McpAppPrepareToolCall,
+  type McpFormResourceUpload,
+} from "../agents/mcp-ui-resource.js";
 import { testing as viewTesting } from "../agents/mcp-ui-resource.test-support.js";
 import { createTestGatewayScheduler } from "../test-utils/gateway-scheduler-clock.js";
 import { QuestionManager } from "./question-manager.js";
@@ -72,7 +76,6 @@ vi.mock("./mcp-app-standalone.js", () => ({ createMcpAppStandaloneTicket: () => 
 import {
   createMcpAppFormResourceContext,
   createMcpAppWorkspaceUploadProvider,
-  type McpFormResourceUpload,
 } from "./mcp-app-form-resources.js";
 import { callMcpAppToolWithElicitation } from "./mcp-app-operations.js";
 import { mcpAppHandlers } from "./server-methods/mcp-app.js";

@@ -31,6 +31,8 @@ import {
   acquireMcpAppViewRequest,
   getMcpAppViewLease,
   getMcpAppViewLeaseForSession,
+  type McpAppFormOrigin,
+  type McpFormResourceUpload,
   type McpAppViewLease,
 } from "../agents/mcp-ui-resource.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
@@ -38,7 +40,6 @@ import { racePromiseWithAbortSignal } from "../infra/abort-signal.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { logWarn } from "../logger.js";
 import { parseAgentSessionKey } from "../routing/session-key.js";
-import type { McpAppFormOrigin, McpFormResourceUpload } from "./mcp-app-form-resources.js";
 import { restoreMcpAppView } from "./mcp-app-reconstruction.js";
 import { resolveGatewayOperatorRoleActor } from "./operator-role-policy.js";
 import type { GatewayRequestHandlerOptions } from "./server-methods/types.js";

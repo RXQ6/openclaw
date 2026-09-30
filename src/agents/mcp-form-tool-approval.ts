@@ -1,7 +1,6 @@
-import type { McpAppFormOrigin } from "../gateway/mcp-app-form-resources.js";
 import type { McpAppRequesterIdentity } from "./agent-bundle-mcp-types.js";
 import { captureAgentQuestionAnswerAuthority } from "./harness/host-private-capabilities.js";
-import type { McpAppPrepareToolCall } from "./mcp-ui-resource.js";
+import type { McpAppFormOrigin, McpAppPrepareToolCall } from "./mcp-ui-resource.js";
 
 /** Question admission owns the mapped profile; channel sender IDs cannot substitute for it. */
 export function captureMcpFormRequester(sessionKey?: string): McpAppRequesterIdentity | undefined {

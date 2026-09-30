@@ -41,6 +41,21 @@ export type McpAppPrepareToolCall = (request: {
   signal?: AbortSignal;
 }) => Promise<void | (() => void)>;
 
+export type McpFormResourceUpload = (request: {
+  options: import("../gateway/server-methods/types.js").GatewayRequestHandlerOptions;
+  kind: "file" | "directory";
+  files: Array<{ name: string; mimeType: string; data: Buffer; relativePath?: string }>;
+  assertCurrent: () => void;
+}) => Promise<Array<{ uri: string; name: string }>>;
+export type McpAppFormOrigin = {
+  runtime: SessionMcpRuntime;
+  serverName: string;
+  agentId: string;
+  sessionKey: string;
+  requesterId?: string;
+  assertCurrent: () => void;
+  prepareToolCall?: McpAppPrepareToolCall;
+};
 export type McpAppHostFile = {
   resourceUri: string;
   name: string;
@@ -65,7 +80,7 @@ export type McpAppViewLease = {
   permissions?: McpAppPermissions;
   allowedAppToolNames?: ReadonlySet<string>;
   prepareToolCall?: McpAppPrepareToolCall;
-  uploadResources?: import("../gateway/mcp-app-form-resources.js").McpFormResourceUpload;
+  uploadResources?: McpFormResourceUpload;
   authorizeAppInteraction?: () => boolean | Promise<boolean>;
   readOnly?: true;
   requesterId?: string;
@@ -269,7 +284,7 @@ export async function fetchMcpAppView(params: {
   toolResult: CallToolResult;
   allowedAppToolNames?: ReadonlySet<string>;
   prepareToolCall?: McpAppPrepareToolCall;
-  uploadResources?: import("../gateway/mcp-app-form-resources.js").McpFormResourceUpload;
+  uploadResources?: McpFormResourceUpload;
   authorizeAppInteraction?: () => boolean | Promise<boolean>;
   readOnly?: true;
   requesterId?: string;

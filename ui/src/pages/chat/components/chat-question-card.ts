@@ -150,7 +150,7 @@ export function renderChatQuestionSummary(prompt: QuestionPrompt) {
 }
 
 // Summaries and panel props are needed during chat boot; interactive controls are not.
-export const questionPanelElement = {
+const questionPanelElement = {
   tagName: "openclaw-chat-question-panel",
   get label() {
     return t("chat.questions.eyebrow");

@@ -4,7 +4,6 @@ import { normalizeToolParameterSchema } from "@openclaw/ai/internal/tool-schema"
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
-import type { McpAppFormOrigin } from "../gateway/mcp-app-form-resources.js";
 import { logWarn } from "../logger.js";
 import {
   getPluginToolMeta,
@@ -42,7 +41,11 @@ import {
 import { prepareMcpAppFormUpload } from "./mcp-form-resource-upload.js";
 import { captureMcpFormRequester, createMcpFormToolPreparer } from "./mcp-form-tool-approval.js";
 import { isMcpToolAllowed } from "./mcp-tool-filter.js";
-import { buildMcpAppCanvasPayload, fetchMcpAppView } from "./mcp-ui-resource.js";
+import {
+  buildMcpAppCanvasPayload,
+  fetchMcpAppView,
+  type McpAppFormOrigin,
+} from "./mcp-ui-resource.js";
 import { recordAgentCleanupFailure } from "./run-cleanup-timeout.js";
 import type { AgentToolResult } from "./runtime/index.js";
 import { toToolSearchJsonSafe } from "./tool-search-json.js";

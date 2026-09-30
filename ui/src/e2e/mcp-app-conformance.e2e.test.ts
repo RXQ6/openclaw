@@ -42,8 +42,8 @@ import {
   waitForTextContaining,
   writeFixtureServer,
 } from "../test-helpers/mcp-app-conformance-fixture.ts";
-import { seedMcpAppConformanceSession } from "../test-helpers/mcp-app-conformance-session.ts";
 import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
+import { seedMcpAppConformanceSession } from "./mcp-app-conformance-session.test-support.ts";
 import {
   assertMcpAppTimingEvents,
   waitForMcpAppTimingEvents,

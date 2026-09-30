@@ -1,4 +1,4 @@
-import type { McpAppFormOrigin } from "../gateway/mcp-app-form-resources.js";
+import type { McpAppFormOrigin } from "./mcp-ui-resource.js";
 
 /** Select the workspace adapter only from the existing transport owner's local-file fact. */
 export async function prepareMcpAppFormUpload(origin: McpAppFormOrigin) {
