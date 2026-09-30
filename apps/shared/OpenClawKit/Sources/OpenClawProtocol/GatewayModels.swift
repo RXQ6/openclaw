@@ -2551,6 +2551,129 @@ public struct AuditRunInspectResult: Codable, Sendable {
     }
 }
 
+public struct BackupRunLocation: Codable, Sendable {
+    public let name: String
+    public let provider: String
+    public let locationid: String
+    public let key: String
+    public let namespace: String
+    public let plaintextbytes: Int
+    public let storedbytes: Int
+
+    public init(
+        name: String,
+        provider: String,
+        locationid: String,
+        key: String,
+        namespace: String,
+        plaintextbytes: Int,
+        storedbytes: Int)
+    {
+        self.name = name
+        self.provider = provider
+        self.locationid = locationid
+        self.key = key
+        self.namespace = namespace
+        self.plaintextbytes = plaintextbytes
+        self.storedbytes = storedbytes
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case name
+        case provider
+        case locationid = "locationId"
+        case key
+        case namespace
+        case plaintextbytes = "plaintextBytes"
+        case storedbytes = "storedBytes"
+    }
+}
+
+public struct BackupRunRecord: Codable, Sendable {
+    public let id: String
+    public let createdat: Double
+    public let archivepath: String
+    public let status: AnyCodable
+    public let kind: AnyCodable
+    public let target: String?
+    public let error: String?
+    public let pushfailed: Bool?
+    public let bytes: Int?
+    public let location: BackupRunLocation?
+    public let retention: BackupRunRetention?
+
+    public init(
+        id: String,
+        createdat: Double,
+        archivepath: String,
+        status: AnyCodable,
+        kind: AnyCodable,
+        target: String? = nil,
+        error: String? = nil,
+        pushfailed: Bool? = nil,
+        bytes: Int? = nil,
+        location: BackupRunLocation? = nil,
+        retention: BackupRunRetention? = nil)
+    {
+        self.id = id
+        self.createdat = createdat
+        self.archivepath = archivepath
+        self.status = status
+        self.kind = kind
+        self.target = target
+        self.error = error
+        self.pushfailed = pushfailed
+        self.bytes = bytes
+        self.location = location
+        self.retention = retention
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id
+        case createdat = "createdAt"
+        case archivepath = "archivePath"
+        case status
+        case kind
+        case target
+        case error
+        case pushfailed = "pushFailed"
+        case bytes
+        case location
+        case retention
+    }
+}
+
+public struct BackupRunRetention: Codable, Sendable {
+    public let kept: Int
+    public let deleted: Int
+
+    public init(
+        kept: Int,
+        deleted: Int)
+    {
+        self.kept = kept
+        self.deleted = deleted
+    }
+}
+
+public struct BackupStatusParams: Codable, Sendable {}
+
+public struct BackupStatusResult: Codable, Sendable {
+    public let targets: [[String: AnyCodable]]
+    public let schedules: [[String: AnyCodable]]
+    public let locations: [[String: AnyCodable]]
+
+    public init(
+        targets: [[String: AnyCodable]],
+        schedules: [[String: AnyCodable]],
+        locations: [[String: AnyCodable]])
+    {
+        self.targets = targets
+        self.schedules = schedules
+        self.locations = locations
+    }
+}
+
 public struct BoardCanvasDocumentSource: Codable, Sendable {
     public let kind: String
     public let docid: String

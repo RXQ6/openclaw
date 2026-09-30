@@ -2,10 +2,22 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
-import { buildBackupStatusValue, noteBackupDoctorHint } from "../commands/backup-health.js";
+import {
+  buildBackupStatusValue,
+  buildOffsiteBackupDoctorHints,
+  noteBackupDoctorHint,
+} from "../commands/backup-health.js";
+import { backupRecordCommand } from "../commands/backup-record.js";
+import { createTestRuntime } from "../commands/test-runtime-config-helpers.js";
 import { requireNodeSqlite } from "../infra/node-sqlite.js";
 import { observeMainThreadSql } from "../test-utils/main-thread-sql-spies.test-support.js";
-import { readBackupRunFreshness, recordBackupRunOutcome } from "./backup-run-records.js";
+import { parseBackupRun } from "./backup-run-records.contract.js";
+import {
+  readBackupRunFreshness,
+  readBackupRuns,
+  summarizeBackupTargets,
+  recordBackupRunOutcome,
+} from "./backup-run-records.js";
 import { withExistingOpenClawStateDatabaseReadOnly } from "./openclaw-state-db-readonly.js";
 import {
   closeOpenClawStateDatabaseForTest,
@@ -23,6 +35,7 @@ const roots = useAutoCleanupTempDirTracker((cleanup) =>
       cleanup();
     } finally {
       vi.restoreAllMocks();
+      vi.unstubAllEnvs();
       mocks.note.mockReset();
     }
   }),
@@ -42,6 +55,134 @@ async function testEnv(options?: { bootstrap?: boolean }): Promise<NodeJS.Proces
 }
 
 describe("backup run records", () => {
+  it("reads legacy manifests and round trips offsite details and external command outcomes", async () => {
+    expect(
+      parseBackupRun({
+        id: "legacy",
+        created_at: 1,
+        archive_path: "/old.tar.gz",
+        status: "ok",
+        manifest_json: '{"kind":"archive"}',
+      }),
+    ).toEqual({
+      id: "legacy",
+      createdAt: 1,
+      archivePath: "/old.tar.gz",
+      status: "ok",
+      kind: "archive",
+    });
+    const env = await testEnv({ bootstrap: true });
+    vi.stubEnv("OPENCLAW_STATE_DIR", env.OPENCLAW_STATE_DIR);
+    const location = {
+      name: "offsite",
+      provider: "filesystem",
+      locationId: "location-1",
+      key: "20260930T120000Z-abcd1234.tar.gz",
+      namespace: "host",
+      plaintextBytes: 100,
+      storedBytes: 150,
+    };
+    await recordBackupRunOutcome({
+      env,
+      kind: "archive",
+      status: "ok",
+      archivePath: "",
+      target: "offsite",
+      location,
+      retention: { kept: 7, deleted: 2 },
+      createdAt: 20,
+    });
+    await recordBackupRunOutcome({
+      env,
+      kind: "archive",
+      status: "failed",
+      archivePath: "",
+      target: "offsite",
+      error: "reconnect the disk",
+      createdAt: 30,
+    });
+    vi.spyOn(Date, "now").mockReturnValue(40);
+    await backupRecordCommand(createTestRuntime(), {
+      status: "ok",
+      target: "host-restic",
+      bytes: "321",
+    });
+    const runs = await readBackupRuns(env);
+    expect(runs).toEqual([
+      expect.objectContaining({
+        kind: "external",
+        target: "host-restic",
+        status: "ok",
+        bytes: 321,
+      }),
+      expect.objectContaining({ target: "offsite", status: "failed", error: "reconnect the disk" }),
+      expect.objectContaining({ location, retention: { kept: 7, deleted: 2 } }),
+    ]);
+    expect(summarizeBackupTargets(runs)).toEqual([
+      { kind: "external", target: "host-restic", latest: runs[0], latestOk: runs[0] },
+      { kind: "archive", target: "offsite", latest: runs[1], latestOk: runs[2] },
+    ]);
+    expect((await readBackupRunFreshness(env)).latestOffsite?.createdAt).toBe(30);
+    vi.mocked(Date.now).mockReturnValue(50);
+    await backupRecordCommand(createTestRuntime(), {
+      status: "failed",
+      target: "host-restic",
+      error: "host timer failed",
+    });
+    expect((await readBackupRuns(env))[0]).toMatchObject({
+      kind: "external",
+      status: "failed",
+      error: "host timer failed",
+    });
+  });
+
+  it.each([
+    { status: "invalid", target: "host", bytes: undefined },
+    { status: "ok", target: "", bytes: undefined },
+    { status: "ok", target: "host", bytes: "-1" },
+    { status: "ok", target: "host", bytes: "1.5" },
+  ])("rejects invalid external outcome input %j", async (opts) => {
+    await expect(backupRecordCommand(createTestRuntime(), opts)).rejects.toThrow();
+  });
+
+  it("hints on failed or stale offsite schedules independently of newer successes elsewhere", () => {
+    const ok = {
+      id: "ok",
+      createdAt: 1_000,
+      archivePath: "",
+      status: "ok" as const,
+      kind: "archive" as const,
+      target: "archive",
+    };
+    const schedules = [
+      { id: "scheduled", mode: "offsite" as const, target: "archive", enabled: true, everyMs: 100 },
+    ];
+    expect(buildOffsiteBackupDoctorHints({ runs: [ok], schedules, now: 1_300 })).toEqual([]);
+    expect(buildOffsiteBackupDoctorHints({ runs: [ok], schedules, now: 1_301 })).toEqual([
+      expect.stringContaining("openclaw storage test archive"),
+    ]);
+    expect(
+      buildOffsiteBackupDoctorHints({
+        runs: [
+          { ...ok, target: "elsewhere", createdAt: 1_250 },
+          { ...ok, id: "failed", status: "failed", error: "disk unavailable", createdAt: 1_200 },
+          ok,
+        ],
+        schedules,
+        now: 1_250,
+      }),
+    ).toEqual([
+      expect.stringMatching(/archive failed: disk unavailable.*openclaw storage test archive/su),
+    ]);
+    expect(
+      buildOffsiteBackupDoctorHints({
+        runs: [],
+        schedules: [{ ...schedules[0]!, enabled: false }],
+        now: 1_301,
+      }),
+    ).toEqual([]);
+  });
+
   it("records an ordinary snapshot outcome without main-thread SQL and retains it after reopen", async () => {
     const env = await testEnv({ bootstrap: true });
     await closeOpenClawStateDatabaseAsync();
@@ -54,6 +195,9 @@ describe("backup run records", () => {
         kind: "sqlite-snapshot",
         status: "ok",
         createdAt: 7,
+      });
+      expect(await readBackupRunFreshness(env)).toMatchObject({
+        latest: { kind: "sqlite-snapshot", createdAt: 7 },
       });
       sql.expectIdle();
     } finally {
@@ -134,9 +278,12 @@ describe("backup run records", () => {
     });
     mutableEnv.OPENCLAW_STATE_DIR = secondEnv.OPENCLAW_STATE_DIR;
     await pending;
-    const reading = readBackupRunFreshness(firstEnv);
-    expect(await readBackupRunFreshness(secondEnv)).toEqual({});
-    expect(await reading).toMatchObject({ latest: { archivePath: "/backups/first.tar.gz" } });
+    const [first, second] = await Promise.all([
+      readBackupRunFreshness(firstEnv),
+      readBackupRunFreshness(secondEnv),
+    ]);
+    expect(second).toEqual({});
+    expect(first).toMatchObject({ latest: { archivePath: "/backups/first.tar.gz" } });
   });
 
   it("does not split surrogate pairs at the persisted diagnostic limit", async () => {
@@ -158,6 +305,7 @@ describe("backup run records", () => {
   it("treats an older same-version database without backup_runs as no recorded backups", async () => {
     const env = await testEnv({ bootstrap: true });
     withExistingOpenClawStateDatabaseReadOnly(() => undefined, { env });
+    await closeOpenClawStateDatabaseAsync();
     closeOpenClawStateDatabaseForTest();
     const { DatabaseSync } = await import("node:sqlite");
     const raw = new DatabaseSync(resolveOpenClawStateSqlitePath(env));

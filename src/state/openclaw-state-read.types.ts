@@ -88,6 +88,7 @@ import type {
   AgentDeletionJournalPurpose,
   AgentDeletionJournalStatus,
 } from "./agent-deletion-journal.types.js";
+import type { BackupRunRecord } from "./backup-run-records.contract.js";
 import type {
   SharedGitHubPublicationReadInput,
   GitHubPublicationReceiptTarget,
@@ -132,6 +133,7 @@ export type OpenClawStateReadAuthority = {
 };
 
 export type OpenClawStateReadCommand =
+  | { type: "backup.runs" }
   | TuiLastSessionReadCommand
   | ChannelIngressReadCommand
   | { type: "capture.readOnlyEvents"; sessionId: string; limit?: number }
@@ -251,6 +253,7 @@ export type OpenClawStateReadRequest = {
 type ReadResult<Reply> = Reply extends { ok: true } ? Omit<Reply, "ok" | "sourceAdmitted"> : never;
 
 export type OpenClawStateReadResult =
+  | { type: "backup.runs"; runs: BackupRunRecord[] }
   | {
       type: "tui.lastSession.read";
       row: Pick<Selectable<ConfigMachineState>, "value_json" | "updated_at_ms"> | undefined;
