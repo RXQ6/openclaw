@@ -13,13 +13,18 @@ import {
 } from "../../config/sessions/session-accessor.js";
 import { registerPluginCommandInRegistry } from "../../plugins/command-registration.js";
 import { loadOpenClawPlugins } from "../../plugins/loader.js";
+import { waitForPluginCacheRetirement } from "../../plugins/plugin-cache.js";
 import {
   PLUGIN_COMMAND_DISPATCH,
   type PluginCommandExecutionReplyOptions,
 } from "../../plugins/plugin-command-runtime.js";
 import { createEmptyPluginRegistry } from "../../plugins/registry-empty.js";
 import type { PluginRegistry } from "../../plugins/registry-types.js";
-import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
+import {
+  disposePluginRegistryInstances,
+  resetPluginRuntimeStateForTest,
+  setActivePluginRegistry,
+} from "../../plugins/runtime.js";
 import type { PluginCommandContext, PluginCommandResult } from "../../plugins/types.js";
 import { resolveIncognitoOpenClawAgentSqlitePath } from "../../state/openclaw-agent-db.js";
 import { withEnvAsync } from "../../test-utils/env.js";
@@ -162,6 +167,9 @@ async function withDeclaredCommandPlugin(
     );
   } finally {
     resetPluginRuntimeStateForTest();
+    // Loaded instances and failed registrations both retain capture ownership.
+    await expect(disposePluginRegistryInstances(registry)).resolves.toMatchObject({ failures: [] });
+    await expect(waitForPluginCacheRetirement()).resolves.toMatchObject({ failures: [] });
     await fs.rm(tempDir, { recursive: true, force: true });
   }
 }
