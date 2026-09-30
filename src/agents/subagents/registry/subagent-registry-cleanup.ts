@@ -3,7 +3,6 @@
  *
  * Decides whether completed runs can be cleaned up, deferred for descendants, retried, or abandoned.
  */
-import { getDeliveryAttemptCount } from "./subagent-delivery-state.js";
 import {
   SUBAGENT_ENDED_REASON_COMPLETE,
   type SubagentLifecycleEndedReason,
@@ -73,7 +72,7 @@ export function resolveDeferredCleanupDecision(params: {
     return { kind: "defer-descendants", delayMs: params.deferDescendantDelayMs };
   }
 
-  const retryCount = getDeliveryAttemptCount(params.entry) + 1;
+  const retryCount = (params.entry.delivery?.attemptCount ?? 0) + 1;
   if (params.entry.delivery?.disposition === "permanent_failure" || expiryExceeded) {
     return {
       kind: "give-up",

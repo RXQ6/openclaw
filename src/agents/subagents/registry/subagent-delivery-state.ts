@@ -240,10 +240,6 @@ export function hasRetainedRequiredCompletionDelivery(
   );
 }
 
-export function getDeliveryAttemptCount(entry: SubagentRunRecord): number {
-  return entry.delivery?.attemptCount ?? 0;
-}
-
 export function getDeliveryLastError(entry: SubagentRunRecord): string | undefined {
   const error = entry.delivery?.lastError;
   return typeof error === "string" && error.trim() ? error : undefined;

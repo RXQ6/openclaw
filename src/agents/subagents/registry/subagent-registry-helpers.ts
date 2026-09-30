@@ -27,7 +27,7 @@ import {
 } from "../../../sessions/session-run-error.js";
 import { truncateUtf8Prefix } from "../../../utils/utf8-truncate.js";
 import { cleanupMaterializedSubagentAttachments } from "../subagent-attachment-cleanup.js";
-import { getDeliveryAttemptCount, getDeliveryLastError } from "./subagent-delivery-state.js";
+import { getDeliveryLastError } from "./subagent-delivery-state.js";
 import { SUBAGENT_ENDED_REASON_KILLED } from "./subagent-lifecycle-events.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 import {
@@ -89,7 +89,7 @@ export function logAnnounceGiveUp(
   entry: SubagentRunRecord,
   reason: "expiry" | "permanent_failure",
 ) {
-  const retryCount = getDeliveryAttemptCount(entry);
+  const retryCount = entry.delivery?.attemptCount ?? 0;
   const endedAt = entry.execution.endedAt;
   const endedAgoMs = typeof endedAt === "number" ? Math.max(0, Date.now() - endedAt) : undefined;
   const endedAgoLabel = endedAgoMs != null ? `${Math.round(endedAgoMs / 1000)}s` : "n/a";

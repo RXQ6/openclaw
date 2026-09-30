@@ -59,6 +59,7 @@ import * as sessionEntryRuntime from "../announce/subagent-announce-delivery.run
 import { readSubagentRunAnnounceResultUsing } from "../announce/subagent-announce-result.js";
 import {
   consumeRequesterCronAuthorityAdmission,
+  prepareRequesterCronAuthority,
   revokeRequesterCronAuthority,
   withRequesterCronAuthority,
 } from "../requester-cron-authority.js";
@@ -5054,15 +5055,24 @@ describe("requester settle wake trigger", () => {
               approvalAuthority: authority,
             },
             async () => {
-              expect(
-                await markRequesterTurnYieldedInRuns({
-                  requesterSessionKey,
-                  requesterAgentId: "main",
-                  requesterTurnRunId,
-                  runs,
-                  transfer: createRequesterInitialTransferFixture(runs, () => undefined),
-                }),
-              ).toBe(1);
+              const requester = {
+                requesterSessionKey,
+                requesterAgentId: "main",
+                requesterTurnRunId,
+              };
+              const preparedAuthority = prepareRequesterCronAuthority(requester);
+              try {
+                expect(
+                  await markRequesterTurnYieldedInRuns({
+                    ...requester,
+                    preparedAuthority: preparedAuthority ?? null,
+                    runs,
+                    transfer: createRequesterInitialTransferFixture(runs, () => undefined),
+                  }),
+                ).toBe(1);
+              } finally {
+                await preparedAuthority?.release();
+              }
             },
           ),
         );

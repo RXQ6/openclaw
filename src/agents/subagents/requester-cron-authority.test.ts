@@ -32,6 +32,7 @@ import { createRequesterInitialTransferFixture } from "./registry/subagent-regis
 import type { SubagentRunRecord } from "./registry/subagent-registry.types.js";
 import {
   consumeRequesterCronAuthorityAdmission,
+  prepareRequesterCronAuthority,
   replaceRequesterCronAuthorityEntry,
   revokeRequesterCronAuthority,
   withRequesterCronAuthority,
@@ -161,14 +162,23 @@ async function inAdminRun<T>(
   }
 }
 
-function mark(batch: SubagentRunRecord[], persistOrThrow: () => void = () => {}) {
-  return markRequesterTurnYieldedInRuns({
+async function mark(batch: SubagentRunRecord[], persistOrThrow: () => void = () => {}) {
+  const requester = {
     requesterSessionKey: SESSION,
     requesterAgentId: "main",
     requesterTurnRunId: batch[0]!.requesterTurnRunId!,
-    runs,
-    transfer: createRequesterInitialTransferFixture(runs, persistOrThrow),
-  });
+  };
+  const preparedAuthority = prepareRequesterCronAuthority(requester);
+  try {
+    return await markRequesterTurnYieldedInRuns({
+      ...requester,
+      preparedAuthority: preparedAuthority ?? null,
+      runs,
+      transfer: createRequesterInitialTransferFixture(runs, persistOrThrow),
+    });
+  } finally {
+    await preparedAuthority?.release();
+  }
 }
 
 function settle(batch: SubagentRunRecord[]) {

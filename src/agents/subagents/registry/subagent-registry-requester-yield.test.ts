@@ -158,6 +158,7 @@ describe("settleRequesterTurnAfterSessionSpawns", () => {
 
     expect(
       await markRequesterTurnYieldedInRuns({
+        preparedAuthority: null,
         requesterSessionKey: REQUESTER,
         requesterTurnRunId: REQUESTER_TURN,
         runs,
@@ -426,6 +427,7 @@ describe("settleRequesterTurnAfterSessionSpawns", () => {
 
       expect(
         await markRequesterTurnYieldedInRuns({
+          preparedAuthority: null,
           requesterSessionKey: REQUESTER,
           requesterTurnRunId: REQUESTER_TURN,
           runs,
@@ -522,6 +524,7 @@ describe("settleRequesterTurnAfterSessionSpawns", () => {
       if (requesterYielded) {
         expect(
           await markRequesterTurnYieldedInRuns({
+            preparedAuthority: null,
             requesterSessionKey: REQUESTER,
             requesterTurnRunId: REQUESTER_TURN,
             runs,
