@@ -309,53 +309,54 @@ export async function runPackageUpdateDoctor(params: PackageDoctorOptions) {
       );
       delete doctorStep.advisory;
     }
-    // The outer join owns original Doctor errors; only result-only failures need a step cause.
-    const reportCompletion = (step: Parameters<typeof reportUpdateStepCompletion>[1]) =>
-      completionFailure
-        ? params.progress?.onStepComplete?.(step)
-        : reportUpdateStepCompletion(params.progress, step);
-    try {
-      if (databaseReceipt) {
-        await reportCompletion({
-          ...databaseReceipt,
-          index: 0,
-          total: 0,
-        });
-        assertCurrent?.();
-        context?.assertCurrent();
+    // Join callback failures with the settled Doctor error; authority checks keep their own outcome.
+    const reportCompletion = async (step: Parameters<typeof reportUpdateStepCompletion>[1]) => {
+      try {
+        await (completionFailure
+          ? params.progress?.onStepComplete?.(step)
+          : reportUpdateStepCompletion(params.progress, step));
+      } catch (error) {
+        if (completionFailure) {
+          throw new AggregateError(
+            [completionFailure.error, error],
+            "Doctor progress reporting failed",
+            {
+              cause: error,
+            },
+          );
+        }
+        throw error;
       }
+    };
+    if (databaseReceipt) {
       await reportCompletion({
-        ...doctorProgressInfo,
-        durationMs: doctorStep.durationMs,
-        exitCode: doctorStep.exitCode,
-        stdoutTail: doctorStep.stdoutTail,
-        stderrTail: doctorStep.stderrTail,
-        signal: doctorStep.signal,
-        killed: doctorStep.killed,
-        outputLimitExceeded: doctorStep.outputLimitExceeded,
-        termination: doctorStep.termination,
-        advisory: doctorStep.advisory,
-        warnings: doctorStep.warnings,
-        diagnostics: doctorStep.diagnostics,
-        failureFacts: doctorStep.failureFacts,
-        doctorLintFindings: doctorStep.doctorLintFindings,
-        configChanges: doctorStep.configChanges,
-        configWriteRefusal: doctorStep.configWriteRefusal,
+        ...databaseReceipt,
+        index: 0,
+        total: 0,
       });
       assertCurrent?.();
       context?.assertCurrent();
-    } catch (error) {
-      if (completionFailure) {
-        throw new AggregateError(
-          [completionFailure.error, error],
-          "Doctor progress reporting failed",
-          {
-            cause: error,
-          },
-        );
-      }
-      throw error;
     }
+    await reportCompletion({
+      ...doctorProgressInfo,
+      durationMs: doctorStep.durationMs,
+      exitCode: doctorStep.exitCode,
+      stdoutTail: doctorStep.stdoutTail,
+      stderrTail: doctorStep.stderrTail,
+      signal: doctorStep.signal,
+      killed: doctorStep.killed,
+      outputLimitExceeded: doctorStep.outputLimitExceeded,
+      termination: doctorStep.termination,
+      advisory: doctorStep.advisory,
+      warnings: doctorStep.warnings,
+      diagnostics: doctorStep.diagnostics,
+      failureFacts: doctorStep.failureFacts,
+      doctorLintFindings: doctorStep.doctorLintFindings,
+      configChanges: doctorStep.configChanges,
+      configWriteRefusal: doctorStep.configWriteRefusal,
+    });
+    assertCurrent?.();
+    context?.assertCurrent();
     if (completionFailure) {
       throw completionFailure.error;
     }
