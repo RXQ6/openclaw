@@ -241,6 +241,7 @@ it.each(["describe", "list"] as const)(
               published.runId,
             ]);
             subagentRuns.set(current.runId, current);
+            subagentRuns.commitOwnership(current);
           },
         );
         expect(response).toMatchObject({
