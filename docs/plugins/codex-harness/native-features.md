@@ -282,6 +282,12 @@ OpenClaw accepts Codex's `openaiForm` elicitation variant for the
 `openai/form` variant. Ordinary MCP form and URL requests keep their own
 protocol semantics; opening a URL is not confirmation that the step is complete.
 
+Codex applies its native approval policy before forwarding a form. For manual
+Apps in OpenClaw-created threads, use a prompting permission mode such as Guarded
+or Workspace when a tool requires interactive input. Full access maps to the
+native `never` approval policy, which can decline these forms before OpenClaw
+receives them. OpenClaw does not open a second MCP connection to bypass that policy.
+
 The Control UI displays option descriptions and base64 image thumbnails,
 including a fallback tile when only some choices have an image. HTTPS thumbnails
 use an explicit external-image link, not an automatic private-network browser fetch. String suggestions

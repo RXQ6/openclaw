@@ -83,6 +83,14 @@ App resource metadata can declare supported and preferred display modes. Apps mu
 
 File saves follow the extension protocol’s optional `ifMatch` precondition. Sending the ETag from the last read prevents a stale save from replacing a newer edit; omitting `ifMatch` performs an unconditional save (last writer wins). App authors should send the ETag when protecting concurrent edits. Both forms still require a writable read, the host-issued file URI, and current session and requester authority.
 
+Native Codex Apps borrow the conversation’s existing MCP connection and retain
+its approval policy. Interactive forms require a native policy that allows
+prompting; see [Rich MCP forms](/plugins/codex-harness/native-features#rich-mcp-forms).
+Only one native App tool call per server and conversation can be active at a time;
+wait for it to finish before starting another. Each view also enforces limits of
+four simultaneous requests, 120 requests per minute, and 30 tool calls per minute.
+Background preview generation consumes the same limits as user-triggered calls.
+
 The extensions use the existing sandbox and permission boundaries below. Server-owned settings and plugin data remain with their existing owners. Raw app state is not a new durable Gateway store, and a reconstructed transcript preview is not a fresh grant to run tools.
 
 ## Behavior and security boundaries
