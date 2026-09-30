@@ -6,6 +6,7 @@ import { buildBackupStatusValue, noteBackupDoctorHint } from "../commands/backup
 import { backupRecordCommand } from "../commands/backup-record.js";
 import { createTestRuntime } from "../commands/test-runtime-config-helpers.js";
 import { saveCronJobsStore } from "../cron/store.js";
+import { resolveCronJobsStorePathFromConfig } from "../cron/store/paths.js";
 import type { CronJob } from "../cron/types.js";
 import { requireNodeSqlite } from "../infra/node-sqlite.js";
 import { observeMainThreadSql } from "../test-utils/main-thread-sql-spies.test-support.js";
@@ -146,11 +147,8 @@ describe("backup run records", () => {
   it("hints on failed or stale offsite schedules independently of newer successes elsewhere", async () => {
     const env = await testEnv({ bootstrap: true });
     vi.stubEnv("OPENCLAW_STATE_DIR", env.OPENCLAW_STATE_DIR);
-    const cfg = {
-      cron: {
-        store: path.join(path.dirname(resolveOpenClawStateSqlitePath(env)), "scheduled-backups"),
-      },
-    };
+    const cfg = {};
+    const storePath = resolveCronJobsStorePathFromConfig(cfg, env);
     const ok = {
       env,
       createdAt: 1_000,
@@ -173,7 +171,7 @@ describe("backup run records", () => {
       state: {},
     };
     await recordBackupRunOutcome(ok);
-    await saveCronJobsStore(cfg.cron.store, { version: 1, jobs: [schedule] });
+    await saveCronJobsStore(storePath, { version: 1, jobs: [schedule] });
     vi.spyOn(Date, "now").mockReturnValue(1_300);
     await noteBackupDoctorHint(env, cfg);
     expect(mocks.note).not.toHaveBeenCalled();
@@ -197,7 +195,7 @@ describe("backup run records", () => {
       expect.stringMatching(/archive failed: disk unavailable.*openclaw storage test archive/su),
       "Backups",
     );
-    await saveCronJobsStore(cfg.cron.store, {
+    await saveCronJobsStore(storePath, {
       version: 1,
       jobs: [{ ...schedule, enabled: false }],
     });
