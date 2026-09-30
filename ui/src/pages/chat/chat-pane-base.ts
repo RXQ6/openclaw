@@ -543,9 +543,8 @@ export abstract class ChatPaneBase extends OpenClawLightDomElement {
     observeNativeGateway(this);
     void new SubscriptionsController(this)
       .effect(() => this.ownerDocument, installChatComposerPickerDismissal)
-      .watch(
+      .watchStore(
         () => this.context && chatInputOwnerForContext(this.context),
-        (owner, notify) => owner.subscribe(notify),
         () => this.activeChanged(this.active),
       )
       .watch(
@@ -566,14 +565,8 @@ export abstract class ChatPaneBase extends OpenClawLightDomElement {
             notify();
           }),
       )
-      .watch(
-        () => this.context?.theme,
-        (theme, notify) => theme.subscribe(notify),
-      )
-      .watch(
-        () => this.context?.plugins,
-        (plugins, notify) => plugins.subscribe(notify),
-      )
+      .watchStore(() => this.context?.theme)
+      .watchStore(() => this.context?.plugins)
       .watch(
         () => this.resolveBoardProvider(),
         (provider, notify) => {
