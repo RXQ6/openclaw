@@ -7,7 +7,7 @@ import {
 import type { CronJob, CronJobCreate } from "./types.js";
 
 // Installed Git schedules retain this declaration and command contract.
-export const BACKUP_SCHEDULE_DECLARATION_KEYS = {
+const BACKUP_SCHEDULE_DECLARATION_KEYS = {
   git: "openclaw-backup-scheduled",
   offsite: "openclaw-backup-offsite-scheduled",
 } as const;
@@ -110,7 +110,7 @@ export function buildBackupScheduleJob(spec: BackupScheduleSpec): CronJobCreate 
 }
 
 /** Decode the persisted argv contract for status without relying on display names. */
-export function parseBackupScheduleJob(
+function parseBackupScheduleJob(
   job: Pick<CronJob, "declarationKey" | "payload" | "schedule">,
 ): BackupScheduleSpec | undefined {
   const mode = backupScheduleModeForDeclaration(job.declarationKey);

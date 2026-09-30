@@ -10,7 +10,6 @@ import type { DB as OpenClawStateDatabase } from "./openclaw-state-db.generated.
 
 export type {
   BackupRunRecord,
-  BackupRunKind,
   BackupRunLocation,
   BackupRunRetention,
 } from "../../packages/gateway-protocol/src/schema/backup.js";

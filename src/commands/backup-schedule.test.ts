@@ -7,7 +7,7 @@ import { Command } from "commander";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerCronCli } from "../cli/cron-cli.js";
 import { registerBackupCommand } from "../cli/program/register.backup.js";
-import { parseBackupScheduleJob, summarizeBackupSchedules } from "../cron/backup-command.js";
+import { summarizeBackupSchedules } from "../cron/backup-command.js";
 import { CronService } from "../cron/service.js";
 import { createCronStoreHarness, createNoopLogger } from "../cron/service.test-harness.js";
 import type { CronListPageOptions } from "../cron/service/list-page-types.js";
@@ -199,16 +199,6 @@ describe("scheduled backups", () => {
         "0",
       ],
     });
-    expect(parseBackupScheduleJob(spec)).toEqual({
-      mode: "offsite",
-      everyMs: 21_600_000,
-      location: "archive",
-      namespace: "host-a",
-      includeWorkspace: false,
-      keepDaily: 7,
-      keepWeekly: 4,
-      keepMonthly: 0,
-    });
     expect(
       summarizeBackupSchedules([
         {
@@ -232,39 +222,49 @@ describe("scheduled backups", () => {
     ]);
   });
 
-  it.each([
-    { argv: ["--all"], scope: { kind: "all" } },
-    { argv: ["--global"], scope: { kind: "global" } },
-    { argv: ["--agent", "main"], scope: { kind: "agent", agentId: "main" } },
-  ])("recognizes installed Git schedule argv $argv", ({ argv, scope }) => {
-    expect(
-      parseBackupScheduleJob({
-        declarationKey: "openclaw-backup-scheduled",
-        schedule: { kind: "every", everyMs: 86_400_000 },
-        payload: {
-          kind: "command",
-          argv: [
-            "openclaw",
-            "backup",
-            "git",
-            "create",
-            "--repository",
-            "/backups/git",
-            ...argv,
-            "--push",
-            "--exclude-secrets",
-          ],
+  it.each([{ argv: ["--all"] }, { argv: ["--global"] }, { argv: ["--agent", "main"] }])(
+    "reports installed Git schedule argv $argv in status",
+    ({ argv }) => {
+      expect(
+        summarizeBackupSchedules([
+          {
+            id: "git-job",
+            name: "Renamed by operator",
+            enabled: true,
+            createdAtMs: 1,
+            updatedAtMs: 1,
+            sessionTarget: "isolated",
+            wakeMode: "now",
+            state: {},
+            declarationKey: "openclaw-backup-scheduled",
+            schedule: { kind: "every", everyMs: 86_400_000 },
+            payload: {
+              kind: "command",
+              argv: [
+                "openclaw",
+                "backup",
+                "git",
+                "create",
+                "--repository",
+                "/backups/git",
+                ...argv,
+                "--push",
+                "--exclude-secrets",
+              ],
+            },
+          },
+        ]),
+      ).toEqual([
+        {
+          id: "git-job",
+          mode: "git",
+          everyMs: 86_400_000,
+          target: "/backups/git",
+          enabled: true,
         },
-      }),
-    ).toEqual({
-      mode: "git",
-      everyMs: 86_400_000,
-      repository: "/backups/git",
-      scope,
-      push: true,
-      excludeSecrets: true,
-    });
-  });
+      ]);
+    },
+  );
 
   it.each([
     { flags: [], removed: ["git-job", "offsite-job"] },

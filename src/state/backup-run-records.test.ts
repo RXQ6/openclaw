@@ -2,13 +2,11 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
-import {
-  buildBackupStatusValue,
-  buildOffsiteBackupDoctorHints,
-  noteBackupDoctorHint,
-} from "../commands/backup-health.js";
+import { buildBackupStatusValue, noteBackupDoctorHint } from "../commands/backup-health.js";
 import { backupRecordCommand } from "../commands/backup-record.js";
 import { createTestRuntime } from "../commands/test-runtime-config-helpers.js";
+import { saveCronJobsStore } from "../cron/store.js";
+import type { CronJob } from "../cron/types.js";
 import { requireNodeSqlite } from "../infra/node-sqlite.js";
 import { observeMainThreadSql } from "../test-utils/main-thread-sql-spies.test-support.js";
 import { parseBackupRun } from "./backup-run-records.contract.js";
@@ -145,42 +143,68 @@ describe("backup run records", () => {
     await expect(backupRecordCommand(createTestRuntime(), opts)).rejects.toThrow();
   });
 
-  it("hints on failed or stale offsite schedules independently of newer successes elsewhere", () => {
+  it("hints on failed or stale offsite schedules independently of newer successes elsewhere", async () => {
+    const env = await testEnv({ bootstrap: true });
+    vi.stubEnv("OPENCLAW_STATE_DIR", env.OPENCLAW_STATE_DIR);
+    const cfg = {
+      cron: {
+        store: path.join(path.dirname(resolveOpenClawStateSqlitePath(env)), "scheduled-backups"),
+      },
+    };
     const ok = {
-      id: "ok",
+      env,
       createdAt: 1_000,
       archivePath: "",
       status: "ok" as const,
       kind: "archive" as const,
       target: "archive",
     };
-    const schedules = [
-      { id: "scheduled", mode: "offsite" as const, target: "archive", enabled: true, everyMs: 100 },
-    ];
-    expect(buildOffsiteBackupDoctorHints({ runs: [ok], schedules, now: 1_300 })).toEqual([]);
-    expect(buildOffsiteBackupDoctorHints({ runs: [ok], schedules, now: 1_301 })).toEqual([
+    const schedule: CronJob = {
+      id: "scheduled",
+      name: "Offsite backup",
+      declarationKey: "openclaw-backup-offsite-scheduled",
+      enabled: true,
+      createdAtMs: 1,
+      updatedAtMs: 1,
+      schedule: { kind: "every", everyMs: 100 },
+      sessionTarget: "isolated",
+      wakeMode: "now",
+      payload: { kind: "command", argv: ["openclaw", "backup", "create", "--to", "archive"] },
+      state: {},
+    };
+    await recordBackupRunOutcome(ok);
+    await saveCronJobsStore(cfg.cron.store, { version: 1, jobs: [schedule] });
+    vi.spyOn(Date, "now").mockReturnValue(1_300);
+    await noteBackupDoctorHint(env, cfg);
+    expect(mocks.note).not.toHaveBeenCalled();
+    vi.mocked(Date.now).mockReturnValue(1_301);
+    await noteBackupDoctorHint(env, cfg);
+    expect(mocks.note).toHaveBeenCalledWith(
       expect.stringContaining("openclaw storage test archive"),
-    ]);
-    expect(
-      buildOffsiteBackupDoctorHints({
-        runs: [
-          { ...ok, target: "elsewhere", createdAt: 1_250 },
-          { ...ok, id: "failed", status: "failed", error: "disk unavailable", createdAt: 1_200 },
-          ok,
-        ],
-        schedules,
-        now: 1_250,
-      }),
-    ).toEqual([
+      "Backups",
+    );
+    await recordBackupRunOutcome({ ...ok, target: "elsewhere", createdAt: 1_250 });
+    await recordBackupRunOutcome({
+      ...ok,
+      status: "failed",
+      error: "disk unavailable",
+      createdAt: 1_200,
+    });
+    mocks.note.mockClear();
+    vi.mocked(Date.now).mockReturnValue(1_250);
+    await noteBackupDoctorHint(env, cfg);
+    expect(mocks.note).toHaveBeenCalledWith(
       expect.stringMatching(/archive failed: disk unavailable.*openclaw storage test archive/su),
-    ]);
-    expect(
-      buildOffsiteBackupDoctorHints({
-        runs: [],
-        schedules: [{ ...schedules[0]!, enabled: false }],
-        now: 1_301,
-      }),
-    ).toEqual([]);
+      "Backups",
+    );
+    await saveCronJobsStore(cfg.cron.store, {
+      version: 1,
+      jobs: [{ ...schedule, enabled: false }],
+    });
+    mocks.note.mockClear();
+    vi.mocked(Date.now).mockReturnValue(1_301);
+    await noteBackupDoctorHint(env, cfg);
+    expect(mocks.note).not.toHaveBeenCalled();
   });
 
   it("records an ordinary snapshot outcome without main-thread SQL and retains it after reopen", async () => {

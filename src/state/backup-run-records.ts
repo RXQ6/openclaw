@@ -12,7 +12,6 @@ import { captureOpenClawStateWorkerContext } from "./openclaw-state-worker-conte
 
 export type {
   BackupRunRecord,
-  BackupRunKind,
   BackupRunLocation,
   BackupRunRetention,
 } from "./backup-run-records.contract.js";

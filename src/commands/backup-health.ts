@@ -58,7 +58,7 @@ function buildBackupDoctorHint(params: {
 }
 
 /** Report each scheduled destination independently of other successful backups. */
-export function buildOffsiteBackupDoctorHints(params: {
+function buildOffsiteBackupDoctorHints(params: {
   runs: readonly BackupRunRecord[];
   schedules: readonly BackupScheduleSummary[];
   now?: number;

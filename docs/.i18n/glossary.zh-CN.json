@@ -820,6 +820,14 @@
     "target": "Cloudflare 插件"
   },
   {
+    "source": "Cloudflare plugin reference",
+    "target": "Cloudflare 插件参考"
+  },
+  {
+    "source": "cloudflare",
+    "target": "cloudflare"
+  },
+  {
     "source": "Fly.io",
     "target": "Fly.io"
   },

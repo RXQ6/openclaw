@@ -57,7 +57,6 @@ export const BackupStatusResultSchema = closedObject({
   locations: StorageLocationsListResultSchema.properties.locations,
 });
 export type BackupRunRecord = Static<typeof BackupRunRecordSchema>;
-export type BackupRunKind = BackupRunRecord["kind"];
 export type BackupRunLocation = Static<typeof BackupRunLocationSchema>;
 export type BackupRunRetention = Static<typeof BackupRunRetentionSchema>;
 export type BackupStatusParams = Static<typeof BackupStatusParamsSchema>;
