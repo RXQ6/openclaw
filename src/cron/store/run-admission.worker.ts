@@ -14,7 +14,7 @@ import {
   deleteStaleCronJobFamilyRows,
   loadedCronStoreFromRows,
   loadCronRows,
-  upsertCronJobRow,
+  updateCronRuntimeRow,
 } from "./row-codec.js";
 import { readActiveCronRunReceiptsInDatabase } from "./run-receipt-read.js";
 import {
@@ -129,6 +129,7 @@ export function reserveCronRunsInWorker(
               resolveAgentId: (current) =>
                 resolveCronJobEffectiveAgentId(current, preparation.defaultAgentId),
             });
+            const previousEnabled = job.enabled ?? true;
             if (input.onExit) {
               job.enabled = false;
               job.updatedAtMs = input.reservedAtMs;
@@ -141,7 +142,7 @@ export function reserveCronRunsInWorker(
               retainManualOneShotOccurrence(job, input.scheduleOwnershipAtMs);
             }
             job.state.queuedAtMs = input.reservedAtMs;
-            upsertCronJobRow(db, input.storeKey, job, row.sort_order, { knownExistingRow: row });
+            updateCronRuntimeRow(db, input.storeKey, job, previousEnabled);
             outcome.reservations.push({ job, runReceipt });
           }
           return retainCronRuntimeMutationOutcome("cron.reserveRuns", db, input.nonce, outcome);
@@ -203,7 +204,7 @@ export function activateCronRunInWorker(
           current.state.runningReceiptId = receipt.receiptId;
           delete current.state.runningScheduleChangeId;
           current.state.lastError = undefined;
-          upsertCronJobRow(db, input.storeKey, current, row.sort_order, { knownExistingRow: row });
+          updateCronRuntimeRow(db, input.storeKey, current);
         } catch (error) {
           if (!(error instanceof CronRunReceiptRevisionError)) {
             throw error;
@@ -275,6 +276,7 @@ export function releaseCronReservationsInWorker(
         if (!queuedMatches && !runningMatches) {
           continue;
         }
+        const previousEnabled = job.enabled ?? true;
         if (policy.restoreLastError && reservation.activationPreviousLastError) {
           job.state.lastError = reservation.activationPreviousLastError.value;
         }
@@ -294,7 +296,7 @@ export function releaseCronReservationsInWorker(
             deferredNotifications: outcome.notifications,
           });
         }
-        upsertCronJobRow(db, input.storeKey, job, row.sort_order, { knownExistingRow: row });
+        updateCronRuntimeRow(db, input.storeKey, job, previousEnabled);
         outcome.jobs.push(job);
       }
       if (policy.terminal && !preparation.deferTerminal) {
@@ -371,7 +373,7 @@ export function finalizeCronRunsInWorker(
           for (const job of preparation.jobs) {
             const row = rows.get(job.id);
             if (row && !deleted.has(job.id)) {
-              upsertCronJobRow(db, input.storeKey, job, row.sort_order, { knownExistingRow: row });
+              updateCronRuntimeRow(db, input.storeKey, job, jobs.get(job.id)?.enabled ?? true);
             }
           }
           for (const { terminal } of input.receipts) {

@@ -41,9 +41,12 @@ import { runsDetachedFromMainSession } from "./timer-execution-timeout.js";
 function resolveCronRunReceiptAgentId(state: CronServiceState, job: CronAgentScope): string {
   return resolveCronJobEffectiveAgentId(
     job,
-    state.deps.resolveDefaultAgentId
-      ? state.deps.resolveDefaultAgentId()
-      : state.deps.defaultAgentId,
+    state.deps.legacyDefaultAgentId
+      ? undefined
+      : state.deps.resolveDefaultAgentId
+        ? state.deps.resolveDefaultAgentId()
+        : state.deps.defaultAgentId,
+    state.deps.legacyDefaultAgentId,
   );
 }
 
