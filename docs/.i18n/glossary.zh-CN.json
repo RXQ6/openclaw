@@ -816,6 +816,10 @@
     "target": "Cloudflare Containers"
   },
   {
+    "source": "Cloudflare plugin",
+    "target": "Cloudflare 插件"
+  },
+  {
     "source": "Fly.io",
     "target": "Fly.io"
   },
@@ -4362,6 +4366,10 @@
   {
     "source": "Storage locations",
     "target": "存储位置"
+  },
+  {
+    "source": "Storage CLI",
+    "target": "存储 CLI"
   },
   {
     "source": "Agent schema history",

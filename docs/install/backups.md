@@ -1,4 +1,5 @@
 ---
+doc-schema-version: 1
 summary: "Back up OpenClaw state: archives, per-database snapshots, scheduling, offsite copies, and continuous replication"
 read_when:
   - You want a backup routine for an OpenClaw install instead of a one-off archive
@@ -39,6 +40,7 @@ committed state safely.
 ## Choose a path
 
 - One-off state and workspace archive: `openclaw backup create`.
+- An archive on a disk or object store: `openclaw backup create --to <location>`.
 - One database, compact and verified: `openclaw backup sqlite create`.
 - Versioned and incremental by content: `openclaw backup git create`.
 - Regular protection: provision the Gateway-owned backup automation.
@@ -147,11 +149,23 @@ recovery artifact.
 
 ## Schedule backups
 
-The recommended schedule is one Gateway-owned automation. This example backs
-up the shared database and every configured agent database daily, including
-custom agent roots, and pushes the current branch to `origin`.
-Pushing requires the repository to have an `origin` remote first, so
-initialize it once before enabling a pushed schedule:
+After [configuring and initializing a storage location](/install/backups#copy-backups-offsite),
+enable a Gateway-owned daily archive backup:
+
+```bash
+openclaw backup enable --to offsite --every 24h --keep-daily 7 --keep-weekly 4 --keep-monthly 12
+```
+
+The Gateway creates, verifies, and uploads each archive using the location's
+encryption settings. Add `--no-include-workspace` to omit workspace files, or
+`--namespace <name>` to use a stable namespace instead of the sanitized hostname.
+Keep the location's credentials and encryption passphrase available to the
+Gateway process. Retention is optional; without any `--keep-*` flags, backups
+are never pruned. See [retention rules](/cli/backup#offsite-retention).
+
+For incremental database history in Git, initialize a private repository and
+enable the Git schedule instead. This backs up the shared database and every
+configured agent database, including custom agent roots:
 
 ```bash
 openclaw backup git init --repository ~/Backups/openclaw-git --remote git@github.com:you/openclaw-backups.git
@@ -170,16 +184,23 @@ remote is private; restores from redacted history require re-pairing devices
 and re-authenticating providers afterward. Local (non-push) schedules keep full
 fidelity so restores are complete.
 
-Use `--global-only` or `--agent <id>` to narrow the scope. Add
-`--exclude-secrets` for a redacted Git history. Re-running the command updates
-the fixed scheduled job instead of creating another one. Disable it with:
+Use `--global-only` or `--agent <id>` to narrow the Git scope. Add
+`--exclude-secrets` for a redacted Git history.
+
+There is one managed job per mode: offsite archives and Git backups can run
+together. Re-running `backup enable` updates the job for the selected mode,
+including its destination. Existing Git schedules continue to be recognized.
+The interval defaults to `24h`. Disable one mode or both:
 
 ```bash
+openclaw backup disable --offsite
+openclaw backup disable --git
 openclaw backup disable
 ```
 
-The Gateway must be reachable while enabling or disabling the schedule. There
-is no local fallback scheduler.
+Enabling or disabling requires a reachable local Gateway, because jobs run on
+the Gateway host. There is no local fallback scheduler. For a remote Gateway,
+create the job explicitly with `openclaw cron add` on that host.
 
 As an alternative, use your platform scheduler directly. A nightly cron
 example that snapshots the control-plane database and the `main` agent
@@ -196,24 +217,70 @@ emits one machine-readable result per run, so the log doubles as a backup
 audit trail. Prune old snapshot directories on your own retention schedule.
 
 Every non-dry-run archive, local SQLite snapshot, and Git backup attempt is
-also recorded in the shared state database. `openclaw status` shows the newest
-attempt, and `openclaw doctor` suggests a one-off or scheduled backup when no
-successful run is recorded or the newest success is more than 14 days old.
+also recorded in the shared state database. Host-level jobs can report their
+outcome with `openclaw backup record`; see
+[external backup jobs](/cli/backup#record-external-backup-jobs).
+
+`openclaw status` shows the newest backup attempt and offsite result. The
+Control UI's Backups section shows each target's last success, size, destination,
+latest failure, and next scheduled run. Its storage location **Check** action
+probes access without writing a backup. `openclaw doctor` keeps the 14-day
+freshness hint and also flags an offsite schedule after a failed attempt or
+when its last success is older than three schedule intervals. Diagnose that
+destination with `openclaw storage test <name>`.
 
 ## Copy backups offsite
 
-Archives and snapshot repositories are plain files, so any sync tool works.
-An `rclone` example targeting an S3-compatible bucket:
+Use a named [storage location](/concepts/storage-locations) for an external disk,
+mounted network directory, or plugin-provided object store. The built-in
+`filesystem` provider uses an existing directory; the
+[Cloudflare plugin](/plugins/cloudflare) provides R2 storage. Configure the
+location and its encryption first, then explicitly initialize the intended
+destination:
 
 ```bash
-rclone sync ~/Backups/openclaw-sqlite remote:openclaw-backups/sqlite
+openclaw storage init offsite
+openclaw storage test offsite
+openclaw backup create --to offsite
 ```
 
-Because every archive and local snapshot is a full copy, offsite syncs re-upload
-each new backup in full. Deduplicating backup tools such as `restic` reduce
-storage at the destination but still read full snapshots as input. When
-upload size per backup matters, use Git-backed snapshots or continuous
-replication.
+The backup command checks the location before creating the archive, verifies
+the archive locally, uploads it, and confirms its stored size. A missing
+initialization marker refuses the backup: reconnect the disk, or initialize
+the location only if it is new. Runtime backups never initialize a location
+or create a missing filesystem root. See [Storage CLI](/cli/storage).
+
+By default, the local archive lives only in managed scratch space and is
+removed after the upload. Add `--output ~/Backups/openclaw` to retain a local
+copy. Local copies are plaintext `.tar.gz` archives even when the storage
+location encrypts uploaded bytes; protect both destinations accordingly.
+
+Backups are stored under `backups/<namespace>/`, where the namespace defaults
+to the sanitized hostname. Use an explicit namespace to share a destination
+across machines without mixing their retention policies:
+
+```bash
+openclaw backup create --to offsite --namespace gateway --keep-daily 7 --keep-weekly 4 --keep-monthly 12
+openclaw backup list --from offsite --namespace gateway
+openclaw backup verify --from offsite --namespace gateway latest
+openclaw backup restore --from offsite --namespace gateway latest --target ./restored-openclaw
+```
+
+Retention runs only after a successful upload. It keeps the newest backup in
+each selected UTC day, week, or month, combining the policies and always
+preserving the newest backup. It never deletes other namespaces or objects
+whose keys do not match the backup filename pattern. No retention flags means
+no deletion; see [Backup CLI](/cli/backup#offsite-retention) for exact rules.
+
+Remote verification and restore download and decrypt into managed scratch,
+then use the same archive checks as local files. Restore still stages into a
+fresh target; follow [Restore a full archive](/install/backups#restore-a-full-archive) before
+activating the result. When recovering on another host, specify the original
+namespace and retain the original encryption passphrase and location marker.
+
+Each archive is a full copy. For large installs where upload size matters,
+use Git-backed snapshots or continuous replication. Plain local archives and
+snapshot repositories remain ordinary files that external backup tools can copy.
 
 ## Versioned backups to a Git repository
 
@@ -432,6 +499,8 @@ first with `openclaw database preflight`; see
 - [Agent workspace](/concepts/agent-workspace#git-backup-recommended-private) for keeping workspace files in a private git repository
 - [Backup CLI reference](/cli/backup)
 - [Cloudflare Containers](/install/cloudflare) — continuous Litestream replication to R2 for an ephemeral container deployment
+- [Cloudflare plugin](/plugins/cloudflare) — R2 storage locations for archive backups
 - [Database schemas](/reference/database-schemas)
 - [Migrating between machines](/install/migrating)
+- [Storage locations](/concepts/storage-locations)
 - [Updating](/install/updating)
