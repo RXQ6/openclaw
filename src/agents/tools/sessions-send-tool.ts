@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import { isRequesterParentOfBackgroundAcpSession } from "@openclaw/acp-core/session-interaction-mode";
 import { finiteSecondsToTimerSafeMilliseconds } from "@openclaw/normalization-core/number-coercion";
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { readAcpSessionMetaForEntry } from "../../acp/runtime/session-meta-readonly.js";
 import { resolveSessionThreadInfo } from "../../channels/plugins/session-conversation.js";
@@ -148,7 +149,7 @@ export function createSessionsSendTool(opts?: SessionsSendToolOptions): AnyAgent
     parameters: SessionsSendToolSchema,
     outputSchema: SessionsSendOutputSchema,
     execute: wrapGatewayPersonalToolExecution(async (_toolCallId, args) => {
-      const params = args as Record<string, unknown>;
+      const params = isRecord(args) ? args : {};
       const promptedAt = Date.now();
       const gatewayCall = opts?.callGateway ?? callAgentToolGatewayRequest;
       const message = readToolStringParam(params, "message", { required: true, trim: false });
