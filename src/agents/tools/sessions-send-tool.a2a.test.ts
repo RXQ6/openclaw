@@ -105,6 +105,7 @@ describe("runSessionsSendA2AFlow reply delivery", () => {
 
   it("passes threadId through to gateway send for Telegram forum topics", async () => {
     await runSessionsSendA2AFlow({
+      callGateway: callGatewayMock,
       runId: "run-test",
       targetAgentId: "main",
       targetSessionKey: "agent:main:telegram:group:-100123:topic:554",
@@ -127,6 +128,7 @@ describe("runSessionsSendA2AFlow reply delivery", () => {
 
   it("omits threadId for non-topic sessions", async () => {
     await runSessionsSendA2AFlow({
+      callGateway: callGatewayMock,
       runId: "run-test",
       targetAgentId: "main",
       targetSessionKey: "agent:main:discord:group:dev",
@@ -202,6 +204,7 @@ describe("runSessionsSendA2AFlow reply delivery", () => {
     "projects $name into the same-session source delivery contract",
     async ({ reply, expected }) => {
       await runSessionsSendA2AFlow({
+        callGateway: callGatewayMock,
         runId: "run-test",
         targetAgentId: "orion",
         targetSessionKey: "agent:orion:discord:channel:target-room",
@@ -509,6 +512,7 @@ describe("runSessionsSendA2AFlow reply delivery", () => {
     sessionListRows = [session];
 
     await runSessionsSendA2AFlow({
+      callGateway: callGatewayMock,
       runId: "run-test",
       targetAgentId: "main",
       targetSessionKey: session.key,
