@@ -47,7 +47,7 @@ import {
   handoffUpdateFromGateway,
   parkForegroundUpdateForActivation,
 } from "./update-command-handoff.js";
-import { stopAfterTuiGate } from "./update-command-local-tui.js";
+import { preflightUpdateLocalTui, stopAfterTuiGate } from "./update-command-local-tui.js";
 import {
   captureOwnedManagedUpdateContext,
   readUpdateCandidateSource,
@@ -98,7 +98,6 @@ export async function executeMutableUpdate(
     candidateAdmissionChecks,
   } satisfies Omit<Parameters<typeof inspectUpdateDatabaseContexts>[0], "roots">;
   const originalRun = opts.run;
-  const requesterAuthority = originalRun?.requesterAuthority;
   const {
     assertCurrent: assertExecutionCurrent,
     assertBoundChildCurrent,
@@ -201,7 +200,7 @@ export async function executeMutableUpdate(
       capable: doctorConfigWrites,
       runId: originalRun?.runId,
       executorFence: originalRun?.executorFence,
-      requester: requesterAuthority?.requester,
+      requester: originalRun?.requesterAuthority?.requester,
       inputHash: validatedConfigSnapshot?.hash,
       changes: doctorConfigChanges,
       databaseBackup: databaseCapture?.backup,
@@ -510,7 +509,6 @@ export async function executeMutableUpdate(
           preManagedServiceStop,
         );
       }
-      // Health and candidate work can outlive the inspected service/config generation.
       await recheckSchemas(admittedTargetSchemaVersions);
       assertExecutionCurrent();
       const activationTimeoutMs =
@@ -580,6 +578,7 @@ export async function executeMutableUpdate(
     getDoctorContext,
   };
   try {
+    preflightUpdateLocalTui(params.root);
     if (params.updateInstallKind === "package" || params.updateInstallKind === "git") {
       admission = await inspectUpdateDatabaseContexts({
         ...databaseContextOptions,
