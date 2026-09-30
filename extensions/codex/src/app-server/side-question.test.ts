@@ -21,8 +21,8 @@ import {
 } from "openclaw/plugin-sdk/plugin-test-runtime";
 import type { ModelCompatConfig } from "openclaw/plugin-sdk/provider-model-types";
 import { patchSessionEntry, upsertSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
-import { describe, expect, it, vi } from "vitest";
-import { useCodexSessionStoreTempDirs } from "../session-store.test-helpers.js";
+import { useSessionStoreTempDirs } from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { codexTestTurnIds } from "./codex-app-server.test-fixtures.js";
 import { resolveCodexSupervisionAppServerRuntimeOptions } from "./config.js";
 import * as elicitationBridge from "./elicitation-bridge.js";
@@ -172,11 +172,11 @@ function nativeCommandItem(
   };
 }
 
+// Register first so provider retirement finishes before cleanup closes shared state.
+const tempDirs = useSessionStoreTempDirs(afterAll, "codex-side-predecessor-");
 useProviderToolSchemaRuntimeForTest(["openai", "codex", "lmstudio"]);
 
 describe("runCodexAppServerSideQuestion", () => {
-  const tempDirs = useCodexSessionStoreTempDirs("codex-side-predecessor-");
-
   useSideQuestionTestSetup();
 
   it.each([false, true])(

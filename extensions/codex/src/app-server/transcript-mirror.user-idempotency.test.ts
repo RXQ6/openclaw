@@ -11,13 +11,13 @@ import {
   readSessionTranscriptEvents,
   type TranscriptEntryAnchor,
 } from "openclaw/plugin-sdk/session-transcript-runtime";
+import { useSessionStoreTempDirs } from "openclaw/plugin-sdk/sqlite-runtime-testing";
 import {
   castAgentMessage,
   makeAgentAssistantMessage,
   makeAgentUserMessage,
 } from "openclaw/plugin-sdk/test-fixtures";
-import { afterEach, expect, it, vi } from "vitest";
-import { useCodexSessionStoreTempDirs } from "../session-store.test-helpers.js";
+import { afterAll, afterEach, expect, it, vi } from "vitest";
 import {
   attachCodexMirrorAttestation,
   fingerprintCodexMirrorSourceMessage,
@@ -25,7 +25,7 @@ import {
 import { codexTranscriptMirrorRuntime } from "./transcript-mirror.js";
 import { attachCodexMirrorIdentity } from "./upstream-prompt-provenance.js";
 
-const sessionDirs = useCodexSessionStoreTempDirs("codex-mirror-user-race-");
+const sessionDirs = useSessionStoreTempDirs(afterAll, "codex-mirror-user-race-");
 
 const transcriptRace = vi.hoisted(() => ({
   competingMessage: undefined as unknown,

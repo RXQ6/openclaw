@@ -16,8 +16,7 @@ import {
   upsertSessionEntry,
 } from "openclaw/plugin-sdk/session-store-runtime";
 // Slack tests cover Agent View lifecycle handling.
-import { closeOpenClawAgentDatabasesAsync } from "openclaw/plugin-sdk/sqlite-runtime-testing";
-import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
+import { useSessionStoreTempDirs } from "openclaw/plugin-sdk/sqlite-runtime-testing";
 import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getSlackListenerWriteClient } from "../../client.js";
 import { appendSlackStream, markSlackStreamsStopped, startSlackStream } from "../../streaming.js";
@@ -54,13 +53,7 @@ vi.mock("../../streaming.js", async (importOriginal) => {
 const slashMocks = getSlackSlashMocks();
 
 let tempDir: string;
-const tempDirs = useAutoCleanupTempDirTracker((cleanup) => {
-  afterAll(async () => {
-    await closeOpenClawAgentDatabasesAsync(sessionRoot);
-    cleanup();
-  });
-});
-const sessionRoot = tempDirs.make("slack-session-events-");
+const sessionDirs = useSessionStoreTempDirs(afterAll, "slack-session-events-");
 
 function createSessionEventHarness(channelType: "im" | "channel" | "mpim" = "im") {
   const harness = createSlackSystemEventTestHarness({ channelType, allowFrom: ["*"] });
@@ -133,7 +126,7 @@ function createSessionEventHarness(channelType: "im" | "channel" | "mpim" = "im"
 
 describe("registerSlackAgentEvents", () => {
   beforeEach(() => {
-    tempDir = tempDirs.make("case-", sessionRoot);
+    tempDir = sessionDirs.make();
     vi.clearAllMocks();
     clearRuntimeConfigSnapshot();
     resetSlackSlashMocks();

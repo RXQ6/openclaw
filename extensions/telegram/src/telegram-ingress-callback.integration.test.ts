@@ -8,17 +8,12 @@ import { createPluginRuntimeMock } from "openclaw/plugin-sdk/channel-test-helper
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { OpenAsyncKeyedStoreOptions } from "openclaw/plugin-sdk/plugin-state-runtime";
 import {
-  closeOpenClawStateDatabaseForTest,
   createChannelIngressQueueForTests,
   createPluginStateKeyedStoreForTests,
   resetPluginStateStoreForTests,
 } from "openclaw/plugin-sdk/plugin-state-test-runtime";
 import type { MsgContext } from "openclaw/plugin-sdk/reply-runtime";
-import {
-  closeOpenClawAgentDatabasesAsync,
-  closeOpenClawStateDatabaseAsync,
-} from "openclaw/plugin-sdk/sqlite-runtime-testing";
-import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
+import { useSessionStoreTempDirs } from "openclaw/plugin-sdk/sqlite-runtime-testing";
 import { afterAll, expect, it, vi } from "vitest";
 import { defaultTelegramBotDeps } from "./bot-deps.js";
 import {
@@ -43,15 +38,7 @@ const downstream = vi.hoisted(() =>
     counts: { block: 0, final: 0, tool: 0 },
   })),
 );
-const tempDirs = useAutoCleanupTempDirTracker((cleanup) => {
-  afterAll(async () => {
-    await closeOpenClawAgentDatabasesAsync(sessionRoot);
-    await closeOpenClawStateDatabaseAsync();
-    closeOpenClawStateDatabaseForTest();
-    cleanup();
-  });
-});
-const sessionRoot = tempDirs.make("telegram-native-admission-");
+const sessionDirs = useSessionStoreTempDirs(afterAll, "telegram-native-admission-");
 
 vi.mock("openclaw/plugin-sdk/channel-inbound", async (importOriginal) => {
   const actual = await importOriginal<typeof import("openclaw/plugin-sdk/channel-inbound")>();
@@ -70,7 +57,7 @@ it.each(["none", "middleware", "handler"] as const)(
   "answers a callback during a native menu request with %s ACK recovery",
   async (recovery) => {
     downstream.mockClear();
-    const stateDir = tempDirs.make("case-", sessionRoot);
+    const stateDir = sessionDirs.make();
     const previousStateDir = process.env.OPENCLAW_STATE_DIR;
     process.env.OPENCLAW_STATE_DIR = stateDir;
     resetPluginStateStoreForTests({ closeDatabase: false });

@@ -5,8 +5,7 @@ import {
   upsertSessionEntry,
 } from "openclaw/plugin-sdk/session-store-runtime";
 import type { SessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
-import { closeOpenClawAgentDatabasesAsync } from "openclaw/plugin-sdk/sqlite-runtime-testing";
-import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
+import { useSessionStoreTempDirs } from "openclaw/plugin-sdk/sqlite-runtime-testing";
 import { afterAll, describe, expect, it } from "vitest";
 import { telegramApprovalCapability } from "./approval-native.js";
 
@@ -28,16 +27,10 @@ function buildConfig(
   } as OpenClawConfig;
 }
 
-const tempDirs = useAutoCleanupTempDirTracker((cleanup) => {
-  afterAll(async () => {
-    await closeOpenClawAgentDatabasesAsync(sessionRoot);
-    cleanup();
-  });
-});
-const sessionRoot = tempDirs.make("openclaw-telegram-approval-native-");
+const sessionDirs = useSessionStoreTempDirs(afterAll, "openclaw-telegram-approval-native-");
 
 function createTempStorePath(): string {
-  const dir = tempDirs.make("case-", sessionRoot);
+  const dir = sessionDirs.make();
   return path.join(dir, "sessions.json");
 }
 

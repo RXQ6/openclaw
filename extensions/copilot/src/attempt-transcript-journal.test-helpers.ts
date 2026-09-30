@@ -1,5 +1,3 @@
-import { realpathSync } from "node:fs";
-import fs from "node:fs/promises";
 import path from "node:path";
 import type { SessionEvent } from "@github/copilot-sdk";
 import type { AgentMessage } from "openclaw/plugin-sdk/agent-harness-runtime";
@@ -8,15 +6,13 @@ import type {
   SessionTranscriptTargetParams,
   TranscriptTurnAdmission,
 } from "openclaw/plugin-sdk/session-transcript-runtime";
-import { closeOpenClawAgentDatabasesAsync } from "openclaw/plugin-sdk/sqlite-runtime-testing";
-import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
-import { vi, type Mock } from "vitest";
+import { useSessionStoreTempDirs } from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import { afterAll, vi, type Mock } from "vitest";
 import { createAttemptTranscriptJournal } from "./attempt-transcript-journal.js";
 import type { AttemptParamsLike } from "./attempt-types.js";
 import { attachEventBridge, type SessionLike } from "./event-bridge.js";
 
-let suiteRoot: string | undefined;
-let fixtureIndex = 0;
+const sessionDirs = useSessionStoreTempDirs(afterAll, "openclaw-copilot-journal-");
 
 export type FakeSession = SessionLike & {
   emit: (event: SessionEvent) => void;
@@ -121,12 +117,7 @@ export async function createFixture(
   trigger?: string,
   resultContentSourceByToolName?: ReadonlyMap<string, "network">,
 ): Promise<AttemptTranscriptJournalFixture> {
-  // openclaw-temp-dir: allow suite-owned session stores drain once before removal
-  suiteRoot ??= await fs.mkdtemp(
-    path.join(realpathSync.native(resolvePreferredOpenClawTmpDir()), "openclaw-copilot-journal-"),
-  );
-  const tempDir = path.join(suiteRoot, `case-${++fixtureIndex}`);
-  await fs.mkdir(tempDir);
+  const tempDir = sessionDirs.make();
   const target: SessionTranscriptTargetParams = {
     agentId: "main",
     sessionId: "session-1",
@@ -205,13 +196,4 @@ export function transcriptMessages(events: unknown[]) {
     };
     return [record];
   });
-}
-
-export async function cleanupAttemptTranscriptJournalFixtures(): Promise<void> {
-  if (!suiteRoot) {
-    return;
-  }
-  await closeOpenClawAgentDatabasesAsync(suiteRoot);
-  await fs.rm(suiteRoot, { force: true, recursive: true });
-  suiteRoot = undefined;
 }

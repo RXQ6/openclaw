@@ -7,7 +7,8 @@ import {
   resolveStorePath,
   upsertSessionEntry,
 } from "openclaw/plugin-sdk/session-store-runtime";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useSessionStoreTempDirs } from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   buildCodexSupervisionTestConnectionFingerprint,
   readCodexAppServerBinding,
@@ -26,9 +27,8 @@ import {
   setCodexConversationModel as setCodexConversationModelImpl,
   setCodexConversationPermissions as setCodexConversationPermissionsImpl,
 } from "./conversation-control.js";
-import { useCodexSessionStoreTempDirs } from "./session-store.test-helpers.js";
 
-const sessionDirs = useCodexSessionStoreTempDirs("openclaw-codex-control-");
+const sessionDirs = useSessionStoreTempDirs(afterAll, "openclaw-codex-control-");
 
 function controlTarget(sessionFile: string) {
   const identity = { kind: "session" as const, agentId: "main", sessionId: sessionFile };

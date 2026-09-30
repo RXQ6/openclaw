@@ -1,8 +1,8 @@
 import path from "node:path";
 import type { EmbeddedRunAttemptParamsV2 as EmbeddedRunAttemptParams } from "openclaw/plugin-sdk/agent-harness-runtime";
 import { upsertSessionEntry, patchSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useCodexSessionStoreTempDirs } from "../session-store.test-helpers.js";
+import { useSessionStoreTempDirs } from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   consumeCodexAppServerLiveThread,
   ensureCodexAppServerClientRuntime,
@@ -23,7 +23,7 @@ import {
   startOrResumeThread,
 } from "./thread-lifecycle.test-fixtures.js";
 
-const tempDirs = useCodexSessionStoreTempDirs("openclaw-codex-thread-adoption-");
+const tempDirs = useSessionStoreTempDirs(afterAll, "openclaw-codex-thread-adoption-");
 let tempDir: string;
 
 function threadStartResult(threadId = "thread-1") {

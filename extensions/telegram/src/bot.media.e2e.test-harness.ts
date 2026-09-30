@@ -13,11 +13,7 @@ import {
 } from "openclaw/plugin-sdk/plugin-test-runtime";
 import { finalizeInboundContext, resetInboundDedupe } from "openclaw/plugin-sdk/reply-runtime";
 import type { GetReplyOptions, MsgContext } from "openclaw/plugin-sdk/reply-runtime";
-import {
-  closeOpenClawAgentDatabasesAsync,
-  closeOpenClawStateDatabaseAsync,
-} from "openclaw/plugin-sdk/sqlite-runtime-testing";
-import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
+import { useSessionStoreTempDirs } from "openclaw/plugin-sdk/sqlite-runtime-testing";
 import { afterAll, afterEach, beforeEach, vi, type Mock } from "vitest";
 import type { TelegramBotDeps } from "./bot-deps.js";
 import { runTelegramChannelInboundEventWithHarness } from "./bot.test-helpers.js";
@@ -89,17 +85,10 @@ async function defaultSaveMediaBuffer(buffer: Buffer, contentType?: string) {
 const saveMediaBufferSpy: Mock = vi.fn(defaultSaveMediaBuffer);
 const originalStateDir = process.env.OPENCLAW_STATE_DIR;
 let mediaHarnessStoreRoot: string | undefined;
-const tempDirs = useAutoCleanupTempDirTracker((cleanup) => {
-  afterAll(async () => {
-    await closeOpenClawAgentDatabasesAsync(sessionRoot);
-    await closeOpenClawStateDatabaseAsync();
-    cleanup();
-  });
-});
-const sessionRoot = tempDirs.make("openclaw-telegram-media-e2e-");
+const sessionDirs = useSessionStoreTempDirs(afterAll, "openclaw-telegram-media-e2e-");
 
 function ensureMediaHarnessStoreRoot(): string {
-  mediaHarnessStoreRoot ??= tempDirs.make("case-", sessionRoot);
+  mediaHarnessStoreRoot ??= sessionDirs.make();
   return mediaHarnessStoreRoot;
 }
 

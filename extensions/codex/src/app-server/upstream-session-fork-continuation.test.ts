@@ -4,9 +4,9 @@ import type { EmbeddedRunAttemptParamsV2 as EmbeddedRunAttemptParams } from "ope
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { upsertSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
 import { readVisibleSessionTranscriptMessageEntries } from "openclaw/plugin-sdk/session-transcript-runtime";
-import { describe, expect, it, vi } from "vitest";
+import { useSessionStoreTempDirs } from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { createCodexCatalogHomeResolver } from "../session-catalog-homes.js";
-import { useCodexSessionStoreTempDirs } from "../session-store.test-helpers.js";
 import { resolveCodexAppServerHomeDir } from "./auth-start-options.js";
 import { resolveCodexBindingAppServerConnection } from "./binding-connection.js";
 import { createFakeCodexAppServerClient } from "./codex-app-server.test-fixtures.js";
@@ -40,7 +40,7 @@ vi.mock("openclaw/plugin-sdk/session-catalog", async (importOriginal) => ({
 import { forkCodexUpstreamSession } from "./upstream-session-fork.js";
 
 describe("persistent upstream fork continuation", () => {
-  const sessionDirs = useCodexSessionStoreTempDirs("codex-fork-home-");
+  const sessionDirs = useSessionStoreTempDirs(afterAll, "codex-fork-home-");
   it("continues a persistent upstream fork on its secondary home and native model with applied harness configuration", async () => {
     const root = sessionDirs.make();
     const agentDir = path.join(root, "agents", "main", "agent");

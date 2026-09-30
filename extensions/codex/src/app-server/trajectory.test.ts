@@ -4,14 +4,14 @@ import path from "node:path";
 import { createAgentHarnessHostCapabilitiesForTest } from "openclaw/plugin-sdk/plugin-test-runtime";
 import { upsertSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
 import {
+  useSessionStoreTempDirs,
   appendSqliteTrajectoryRuntimeEvents,
   createTrajectoryRuntimeRecorderForTest,
   exportTrajectoryBundleForTest,
   loadSqliteTrajectoryRuntimeEvents,
   type SqliteTrajectoryRuntimeEventForTest,
 } from "openclaw/plugin-sdk/sqlite-runtime-testing";
-import { beforeEach, describe, expect, it } from "vitest";
-import { useCodexSessionStoreTempDirs } from "../session-store.test-helpers.js";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import {
   createCodexTrajectoryRecorder,
   recordCodexTrajectoryCompletion,
@@ -19,7 +19,7 @@ import {
   type CodexTrajectoryRecorder,
 } from "./trajectory.js";
 
-const sessionDirs = useCodexSessionStoreTempDirs("openclaw-codex-trajectory-");
+const sessionDirs = useSessionStoreTempDirs(afterAll, "openclaw-codex-trajectory-");
 let tempDir: string;
 
 beforeEach(() => {

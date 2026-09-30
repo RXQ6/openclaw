@@ -1,8 +1,8 @@
 // Codex tests cover harness plugin behavior.
 import path from "node:path";
 import { upsertSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
-import { describe, expect, it, vi } from "vitest";
-import { useCodexSessionStoreTempDirs } from "./src/session-store.test-helpers.js";
+import { useSessionStoreTempDirs } from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 const runHostPreparedIsolatedCompletion = vi.hoisted(() => vi.fn());
 const runCodexIsolatedCompletion = vi.hoisted(() => vi.fn());
@@ -33,7 +33,7 @@ import {
   testCodexAppServerBindingStore,
 } from "./src/app-server/session-binding.test-helpers.js";
 
-const sessionDirs = useCodexSessionStoreTempDirs("openclaw-codex-harness-reset-");
+const sessionDirs = useSessionStoreTempDirs(afterAll, "openclaw-codex-harness-reset-");
 
 const isolatedTask = {
   config: {},

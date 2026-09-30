@@ -4,7 +4,8 @@ import {
   patchSessionEntry,
   upsertSessionEntry,
 } from "openclaw/plugin-sdk/session-store-runtime";
-import { describe, expect, it, vi } from "vitest";
+import { useSessionStoreTempDirs } from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import { createCodexAppServerAgentHarness } from "./harness.js";
 import { clearCodexBindingAfterInvalidImagePayload } from "./src/app-server/run-attempt-state.js";
 import {
@@ -12,9 +13,8 @@ import {
   sessionBindingIdentity,
   type CodexAppServerThreadBinding,
 } from "./src/app-server/session-binding.test-helpers.js";
-import { useCodexSessionStoreTempDirs } from "./src/session-store.test-helpers.js";
 
-const sessionDirs = useCodexSessionStoreTempDirs("codex-ownership-predecessor-");
+const sessionDirs = useSessionStoreTempDirs(afterAll, "codex-ownership-predecessor-");
 
 const session = {
   agentId: "worker",

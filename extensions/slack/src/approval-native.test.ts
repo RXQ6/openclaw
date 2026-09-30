@@ -6,8 +6,7 @@ import {
   normalizeSessionDeliveryState,
   upsertSessionEntry,
 } from "openclaw/plugin-sdk/session-store-runtime";
-import { closeOpenClawAgentDatabasesAsync } from "openclaw/plugin-sdk/sqlite-runtime-testing";
-import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
+import { useSessionStoreTempDirs } from "openclaw/plugin-sdk/sqlite-runtime-testing";
 import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { slackApprovalCapability } from "./approval-native.js";
 import { registerSlackInstallationState } from "./installation-identity-state.js";
@@ -45,13 +44,7 @@ function buildPluginRequest(
   };
 }
 
-const tempDirs = useAutoCleanupTempDirTracker((cleanup) => {
-  afterAll(async () => {
-    await closeOpenClawAgentDatabasesAsync(sessionRoot);
-    cleanup();
-  });
-});
-const sessionRoot = tempDirs.make("openclaw-slack-approval-native-");
+const sessionDirs = useSessionStoreTempDirs(afterAll, "openclaw-slack-approval-native-");
 const installationStates: SlackInstallationStateRegistration[] = [];
 
 afterEach(() => {
@@ -61,7 +54,7 @@ afterEach(() => {
 });
 
 function createTempStorePath(): string {
-  const dir = tempDirs.make("case-", sessionRoot);
+  const dir = sessionDirs.make();
   return path.join(dir, "sessions.json");
 }
 

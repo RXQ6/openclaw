@@ -10,10 +10,10 @@ import type { PluginConversationBinding } from "openclaw/plugin-sdk/plugin-entry
 import { createTestPluginApi } from "openclaw/plugin-sdk/plugin-test-api";
 import { upsertSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
 import { appendSessionTranscriptMessageByIdentity } from "openclaw/plugin-sdk/session-transcript-runtime";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useCodexSessionStoreTempDirs } from "./session-store.test-helpers.js";
+import { useSessionStoreTempDirs } from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const sessionDirs = useCodexSessionStoreTempDirs("openclaw-codex-binding-");
+const sessionDirs = useSessionStoreTempDirs(afterAll, "openclaw-codex-binding-");
 
 const sharedClientMocks = vi.hoisted(() => ({
   getSharedCodexAppServerClient: vi.fn(),
