@@ -12,6 +12,7 @@ import {
   closeOpenClawAgentDatabasesForTest,
 } from "../state/openclaw-agent-db.js";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
+import { closeStateDatabaseForTest } from "../test-utils/database-cleanup.js";
 import { useSessionStoreTempDirs } from "../test-utils/session-state-cleanup.js";
 import { runDoctorSessionSqlite, type DoctorSessionSqliteReport } from "./doctor-session-sqlite.js";
 import { doctorCommand } from "./doctor.js";
@@ -148,9 +149,13 @@ export function useDoctorSessionSqliteTestFixture() {
   const explicitRoots = new Set<string>();
   const explicitTempDirs = useAutoCleanupTempDirTracker((cleanup) =>
     afterAll(async () => {
+      if (explicitRoots.size === 0) {
+        return;
+      }
       for (const root of explicitRoots) {
         await closeOpenClawAgentDatabasesAsync(root);
       }
+      await closeStateDatabaseForTest();
       cleanup();
     }),
   );

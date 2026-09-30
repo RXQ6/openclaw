@@ -13,7 +13,6 @@ import {
 import type { SessionEntry } from "../config/sessions/types.js";
 import type { RuntimeEnv } from "../runtime.js";
 import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.js";
-import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { useSessionStoreTempDirs } from "../test-utils/session-state-cleanup.js";
 import { appendSqliteTrajectoryRuntimeEvents } from "../trajectory/runtime-store.sqlite.js";
 import type { TrajectoryEvent } from "../trajectory/types.js";
@@ -78,8 +77,6 @@ describe("sessionsTailCommand", () => {
     } else {
       process.env.OPENCLAW_STATE_DIR = previousStateDir;
     }
-    closeOpenClawAgentDatabasesForTest();
-    closeOpenClawStateDatabaseForTest();
   });
 
   async function writeSessionEntry(

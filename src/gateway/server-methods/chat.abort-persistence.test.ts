@@ -9,8 +9,6 @@ import {
   replaceSessionEntry,
 } from "../../config/sessions/session-accessor.js";
 import { onAgentEvent, resetAgentEventsForTest } from "../../infra/agent-events.js";
-import { closeOpenClawAgentDatabasesForTest } from "../../state/openclaw-agent-db.js";
-import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
 import { useSessionStoreTempDirs } from "../../test-utils/session-state-cleanup.js";
 import { createWorkerInferenceCancellationService } from "../worker-environments/inference-control.test-helpers.js";
 import { handleChatAbortRequest } from "./chat-abort-handler.js";
@@ -256,8 +254,6 @@ async function createMissingEntryFixture() {
 afterEach(() => {
   vi.restoreAllMocks();
   resetAgentEventsForTest();
-  closeOpenClawAgentDatabasesForTest();
-  closeOpenClawStateDatabaseForTest();
   transcriptFixtures.clear();
 });
 

@@ -11,7 +11,6 @@ import {
   closeOpenClawAgentDatabasesForTest,
   resolveOpenClawAgentSqlitePath,
 } from "../../state/openclaw-agent-db.js";
-import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
 import { useSessionStoreTempDirs } from "../../test-utils/session-state-cleanup.js";
 import {
   buildHealthAgentSummaries,
@@ -37,8 +36,6 @@ describe("health session store paths", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
-    closeOpenClawAgentDatabasesForTest();
-    closeOpenClawStateDatabaseForTest();
   });
 
   it("reports the SQLite database that supplied the session count", async () => {

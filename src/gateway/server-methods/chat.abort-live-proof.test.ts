@@ -1,15 +1,15 @@
 import fs from "node:fs/promises";
 import { createServer } from "node:http";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { createDeferred } from "../../../test/helpers/promise.js";
-import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import { clearConfigCache, clearRuntimeConfigSnapshot } from "../../config/config.js";
 import { loadTranscriptEvents } from "../../config/sessions/session-accessor.js";
 import { clearSessionStoreCacheForTest } from "../../config/sessions/store-writer-state.js";
 import { closeOpenClawAgentDatabasesForTest } from "../../state/openclaw-agent-db.js";
 import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
 import { captureEnv, setTestEnvValue } from "../../test-utils/env.js";
+import { useSessionStoreTempDirs } from "../../test-utils/session-state-cleanup.js";
 import { loadSessionEntry } from "../session-utils.js";
 import { disconnectGatewayClient, startGatewayWithClient } from "../test-helpers.e2e.js";
 import { buildMockOpenAiResponsesProvider } from "../test-openai-responses-model.js";
@@ -56,11 +56,7 @@ function assistantRows(events: readonly unknown[]): Array<Record<string, unknown
   });
 }
 
-afterEach(() => {
-  closeOpenClawAgentDatabasesForTest();
-  closeOpenClawStateDatabaseForTest();
-});
-const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+const tempDirs = useSessionStoreTempDirs(afterAll, "openclaw-pr132123-proof-");
 
 describe("late abort real Gateway proof", () => {
   it(
@@ -76,7 +72,7 @@ describe("late abort real Gateway proof", () => {
       let gateway: Awaited<ReturnType<typeof startGatewayWithClient>> | undefined;
 
       try {
-        const tempHome = tempDirs.make("openclaw-pr132123-proof-");
+        const tempHome = tempDirs.make();
         const stateDir = path.join(tempHome, ".openclaw");
         const workspaceDir = path.join(tempHome, "workspace");
         const configPath = path.join(stateDir, "openclaw.json");
@@ -224,6 +220,11 @@ describe("late abort real Gateway proof", () => {
           },
         });
 
+        // Load the RPC implementation before starting its timed run-state assertion.
+        const { coreGatewayHandlers } = await import("./core-handlers.js");
+        const { prepareGatewayRequestHandler } = await import("./lazy-core-handlers.js");
+        await prepareGatewayRequestHandler(coreGatewayHandlers["agent.wait"]!);
+
         const started = await gateway.client.request<{ runId?: string; status?: string }>(
           "chat.send",
           {
@@ -334,8 +335,6 @@ describe("late abort real Gateway proof", () => {
         clearRuntimeConfigSnapshot();
         clearConfigCache();
         clearSessionStoreCacheForTest();
-        closeOpenClawAgentDatabasesForTest();
-        closeOpenClawStateDatabaseForTest();
       }
     },
   );

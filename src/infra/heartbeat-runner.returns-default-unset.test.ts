@@ -1,4 +1,3 @@
-import { realpathSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -299,10 +298,7 @@ beforeAll(async () => {
   ]);
   setActivePluginRegistry(testRegistry);
 
-  // openclaw-temp-dir: allow suite-owned heartbeat stores drain before removal
-  fixtureRoot = realpathSync.native(
-    await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-heartbeat-suite-")),
-  );
+  fixtureRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-heartbeat-suite-"));
   previousStateDir = process.env.OPENCLAW_STATE_DIR;
   process.env.OPENCLAW_STATE_DIR = path.join(fixtureRoot, "state");
 });

@@ -15,6 +15,7 @@ import type { SessionEntry } from "../config/sessions/types.js";
 import { setRemoteModelCatalogOverlaySourcesForTest } from "../model-catalog/remote-overlay.test-support.js";
 import { closeOpenClawAgentDatabasesAsync } from "../state/openclaw-agent-db.js";
 import { createSuiteTempRootTracker } from "../test-helpers/temp-dir.js";
+import { closeStateDatabaseForTest } from "../test-utils/database-cleanup.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import * as usageFormat from "../utils/usage-format.js";
 import { refreshCostUsageCacheForAgent } from "./session-cost-usage-aggregation.js";
@@ -288,6 +289,7 @@ describe("session cost usage", () => {
 
   afterAll(async () => {
     await closeOpenClawAgentDatabasesAsync(suiteRoot);
+    await closeStateDatabaseForTest();
     await suiteRootTracker.cleanup();
   });
 

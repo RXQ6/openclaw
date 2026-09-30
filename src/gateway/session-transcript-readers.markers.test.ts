@@ -1,8 +1,6 @@
 import path from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, test } from "vitest";
 import { replaceTranscriptEvents } from "../config/sessions/session-accessor.js";
-import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.js";
-import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { captureEnv, setTestEnvValue } from "../test-utils/env.js";
 import { useSessionStoreTempDirs } from "../test-utils/session-state-cleanup.js";
 import {
@@ -88,8 +86,6 @@ describe("session transcript reader marker projection", () => {
   });
 
   afterEach(() => {
-    closeOpenClawAgentDatabasesForTest();
-    closeOpenClawStateDatabaseForTest();
     envSnapshot.restore();
   });
 

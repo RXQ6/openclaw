@@ -23,11 +23,6 @@ import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../plug
 import * as gatewayWorkAdmission from "../process/gateway-work-admission.js";
 import { resetGatewayWorkAdmission } from "../process/gateway-work-admission.js";
 import { createDeferredCore } from "../shared/deferred.js";
-import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.js";
-import {
-  closeOpenClawStateDatabaseAsync,
-  closeOpenClawStateDatabaseForTest,
-} from "../state/openclaw-state-db.js";
 import { createOutboundTestPlugin, createTestRegistry } from "../test-utils/channel-plugins.js";
 import { createTestGatewayScheduler } from "../test-utils/gateway-scheduler-clock.js";
 import { useSessionStoreTempDirs } from "../test-utils/session-state-cleanup.js";
@@ -68,9 +63,6 @@ afterEach(async () => {
   services = undefined;
   scheduler = undefined;
   lifecycle = undefined;
-  await closeOpenClawStateDatabaseAsync();
-  closeOpenClawStateDatabaseForTest();
-  closeOpenClawAgentDatabasesForTest();
   clearRuntimeConfigSnapshot();
   resetPluginRuntimeStateForTest();
   resetGatewayWorkAdmission();

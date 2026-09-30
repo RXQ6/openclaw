@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import { afterAll, afterEach, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 import { readSqliteTranscriptPayload } from "../../scripts/lib/sqlite-transcript-payload.mjs";
 import {
   lookupSessionGoalOperation,
@@ -39,11 +39,6 @@ import { useSessionStoreTempDirs } from "../test-utils/session-state-cleanup.js"
 import { runDoctorSessionSqlite } from "./doctor-session-sqlite.js";
 
 const sessionDirs = useSessionStoreTempDirs(afterAll, "openclaw-doctor-canonical-store-");
-
-afterEach(() => {
-  closeOpenClawAgentDatabasesForTest();
-  closeOpenClawStateDatabaseForTest();
-});
 
 async function createStore() {
   const root = sessionDirs.make();

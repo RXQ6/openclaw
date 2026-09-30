@@ -28,10 +28,7 @@ import {
 } from "../infra/system-events.js";
 import { enqueueCommandInLane, getQueueSize } from "../process/command-queue.js";
 import { CommandLane } from "../process/lanes.js";
-import {
-  closeOpenClawAgentDatabasesForTest,
-  openOpenClawAgentDatabase,
-} from "../state/openclaw-agent-db.js";
+import { openOpenClawAgentDatabase } from "../state/openclaw-agent-db.js";
 import {
   createGatewaySchedulerClock,
   createTestGatewayScheduler,
@@ -61,7 +58,6 @@ afterEach(() => {
   setHeartbeatsEnabled(true);
   resetSystemEventsForTest();
   resetCronActiveJobs();
-  closeOpenClawAgentDatabasesForTest();
   vi.restoreAllMocks();
 });
 

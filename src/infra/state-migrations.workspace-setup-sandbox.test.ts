@@ -12,7 +12,6 @@ import * as sessionAccessor from "../config/sessions/session-accessor.js";
 import type { AgentSandboxConfig } from "../config/types.agents-shared.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { parseAgentSessionKey } from "../routing/session-key.js";
-import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { captureEnv, setTestEnvValue } from "../test-utils/env.js";
 import { useSessionStoreTempDirs } from "../test-utils/session-state-cleanup.js";
 import {
@@ -30,7 +29,6 @@ describe("sandbox workspace Doctor migration", () => {
     "openclaw-sandbox-workspace-migration-home-",
   );
   afterEach(() => {
-    closeOpenClawStateDatabaseForTest();
     envSnapshot?.restore();
     envSnapshot = undefined;
   });
