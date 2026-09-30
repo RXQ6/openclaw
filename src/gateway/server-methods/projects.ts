@@ -593,7 +593,9 @@ export function createProjectsHandlers(service: ProjectWorktreeService): Gateway
           signal,
           host,
           apiBaseUrl,
-          ...(nativeToken === undefined ? {} : { token: nativeToken }),
+          ...(cfg.gateway?.projects?.nativeGitHubSearch === true
+            ? { token: nativeToken ?? "" }
+            : {}),
         });
         assertCurrent();
         respond(true, result, undefined);

@@ -45,24 +45,21 @@ describe("new-session browser preferences", () => {
     expect(loadNewSessionPreference("ws://two.example", "main")).toBeNull();
   });
 
-  it("round-trips a remote repository and its default branch", () => {
-    replaceBrowserPreference("ws://one.example", "main", {
+  it("keeps a remote repository in identity preferences and preserves other browser choices", () => {
+    const choice = {
       remoteProject: {
         identity: "acme/private-repo",
         cloneUrl: "https://ghe.example.test/acme/private-repo.git",
         defaultBranch: "main",
       },
       baseRef: "main",
-    });
-
-    expect(loadNewSessionPreference("ws://one.example", "main")).toEqual({
-      remoteProject: {
-        identity: "acme/private-repo",
-        cloneUrl: "https://ghe.example.test/acme/private-repo.git",
-        defaultBranch: "main",
-      },
-      baseRef: "main",
-    });
+    };
+    replaceBrowserPreference("ws://one.example", "main", choice);
+    expect(loadNewSessionPreference("ws://one.example", "main")).toEqual({ baseRef: "main" });
+    expect(decodeIdentityPreferences(encodeIdentityPreferences({ main: choice })).main).toEqual(
+      choice,
+    );
+    expect(localStorage.getItem(localStorage.key(0)!)).not.toContain("private-repo");
   });
 
   it("keeps a legacy cloud source after unavailable Git clears the stored worktree flag", () => {

@@ -174,6 +174,17 @@ function normalizePreference(value: unknown): NewSessionPreference | null {
   return Object.keys(preference).length ? preference : null;
 }
 
+/** Browser-origin fallback is shared by people; remote choices belong to authenticated users.prefs. */
+function normalizeBrowserPreference(value: unknown): NewSessionPreference | null {
+  const preference = normalizePreference(value);
+  if (!preference) {
+    return null;
+  }
+  delete preference.remoteProject;
+  delete preference.defaultRepositoryOptOut;
+  return Object.keys(preference).length ? preference : null;
+}
+
 function normalizeWhere(value: unknown): NewSessionWhere | undefined {
   if (!isRecord(value) || typeof value.kind !== "string") {
     return undefined;
@@ -208,7 +219,7 @@ export function loadNewSessionPreference(
   if (!storage || !gatewayUrl || !normalizedAgentId) {
     return null;
   }
-  return normalizePreference(readStore(storage, gatewayUrl).agents?.[normalizedAgentId]);
+  return normalizeBrowserPreference(readStore(storage, gatewayUrl).agents?.[normalizedAgentId]);
 }
 
 export function loadBrowserPreferences(gatewayUrl: string): Record<string, NewSessionPreference> {
@@ -219,7 +230,7 @@ export function loadBrowserPreferences(gatewayUrl: string): Record<string, NewSe
   const entries = Object.entries(readStore(storage, gatewayUrl).agents ?? {}).flatMap(
     ([agentId, value]) => {
       const normalizedAgentId = normalizeAgentId(agentId);
-      const preference = normalizePreference(value);
+      const preference = normalizeBrowserPreference(value);
       return normalizedAgentId && preference ? [[normalizedAgentId, preference] as const] : [];
     },
   );
@@ -262,8 +273,13 @@ export function replaceBrowserPreference(
     return false;
   }
   const store = readStore(storage, gatewayUrl);
-  const agents = { ...store.agents };
-  const normalized = normalizePreference(preference);
+  const agents = Object.fromEntries(
+    Object.entries(store.agents ?? {}).flatMap(([id, value]) => {
+      const safe = normalizeBrowserPreference(value);
+      return safe ? [[id, safe]] : [];
+    }),
+  );
+  const normalized = normalizeBrowserPreference(preference);
   if (normalized) {
     agents[normalizedAgentId] = normalized;
   } else {

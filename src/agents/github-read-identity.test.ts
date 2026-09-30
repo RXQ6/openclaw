@@ -163,6 +163,19 @@ describe("native GitHub identity absence", () => {
     );
   });
 
+  it("does not pass public ambient credentials to a ghe.com tenant profile lookup", async () => {
+    setRuntimeConfigSnapshot({ gateway: { github: { host: "tenant.ghe.com" } } });
+    mocks.runCommandBuffered.mockImplementation(async (_argv, options) =>
+      commandResult(options.env.GH_TOKEN || options.env.GITHUB_TOKEN || "stored-tenant-token"),
+    );
+    await expect(
+      readNativeGitHubToken({
+        GH_TOKEN: "synthetic-public-token",
+        GITHUB_TOKEN: "synthetic-public-secondary",
+      }),
+    ).resolves.toBe("stored-tenant-token");
+  });
+
   it("does not reuse a cached native token after the selected Enterprise host changes", async () => {
     const env = {
       GH_CONFIG_DIR: tempDirs.make("github-native-host-cache-"),
@@ -184,11 +197,24 @@ describe("native GitHub identity absence", () => {
     ]);
   });
 
+  it.each([undefined, "other.ghe.example.test"])(
+    "rejects an ambient Enterprise token bound to %s",
+    async (declaredHost) => {
+      setRuntimeConfigSnapshot({ gateway: { github: { host: "ghe.example.test" } } });
+      const env = { GH_ENTERPRISE_TOKEN: "synthetic-host-a-token", GH_HOST: declaredHost };
+      await expect(readCachedNativeGitHubToken(env)).rejects.toMatchObject({
+        reason: "unverified",
+      });
+      expect(mocks.runCommandBuffered).not.toHaveBeenCalled();
+    },
+  );
+
   it("prefers the Enterprise token over a public GitHub token for an Enterprise host", async () => {
     setRuntimeConfigSnapshot({ gateway: { github: { host: "ghe.example.test" } } });
     const env = {
       GH_TOKEN: "synthetic-public-token",
       GH_ENTERPRISE_TOKEN: "synthetic-enterprise-token",
+      GH_HOST: "ghe.example.test",
     };
     await expect(readNativeGitHubToken(env)).resolves.toBe("synthetic-enterprise-token");
     await expect(readCachedNativeGitHubToken(env)).resolves.toBe("synthetic-enterprise-token");

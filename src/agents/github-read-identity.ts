@@ -32,10 +32,15 @@ function ambientGitHubCredential(env: NodeJS.ProcessEnv, host = resolveGitHubHos
     host === "github.com"
       ? (["GH_TOKEN", "GITHUB_TOKEN"] as const)
       : (["GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN"] as const);
-  return {
-    host,
-    token: resolveEnvironmentValue(env, names[0]) || resolveEnvironmentValue(env, names[1]),
-  };
+  const token = resolveEnvironmentValue(env, names[0]) || resolveEnvironmentValue(env, names[1]);
+  if (
+    token &&
+    host !== "github.com" &&
+    resolveEnvironmentValue(env, "GH_HOST")?.trim().toLowerCase() !== host
+  ) {
+    throw new GitHubIdentityError("unverified");
+  }
+  return { host, token };
 }
 
 export async function readCachedNativeGitHubToken(
@@ -156,10 +161,20 @@ export async function readNativeGitHubToken(
   if (token) {
     return normalizeGitHubToken(token);
   }
+  // gh also accepts public ambient tokens for ghe.com tenants. Native lookup
+  // must read only the explicitly selected host's stored profile.
+  const commandEnv = {
+    ...env,
+    GH_HOST: githubHost,
+    GH_TOKEN: undefined,
+    GITHUB_TOKEN: undefined,
+    GH_ENTERPRISE_TOKEN: undefined,
+    GITHUB_ENTERPRISE_TOKEN: undefined,
+  };
   const startedAt = performance.now();
   const result = await runGitHubIdentityCommand(
     ["gh", "auth", "token", "--hostname", githubHost],
-    env,
+    commandEnv,
   );
   try {
     if (result.code === 0) {
@@ -201,7 +216,7 @@ export async function readNativeGitHubToken(
   // configured accounts. Only an empty host map proves anonymous admission.
   const observed = await runGitHubIdentityCommand(
     ["gh", "auth", "status", "--active", "--hostname", githubHost, "--json", "hosts"],
-    env,
+    commandEnv,
     undefined,
     remainingMs,
   );

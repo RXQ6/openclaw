@@ -204,6 +204,97 @@ test.each(["revoked", "aborted"] as const)(
   },
 );
 
+test("registered project search keeps an ambient Enterprise token at its declared host", async () => {
+  const config = (host: string) => ({
+    gateway: {
+      github: { host, apiBaseUrl: `https://${host}/api/v3` },
+      projects: { nativeGitHubSearch: true },
+    },
+  });
+  vi.stubEnv("GH_ENTERPRISE_TOKEN", "synthetic-host-a-ambient-token");
+  vi.stubEnv("GITHUB_ENTERPRISE_TOKEN", "");
+  vi.stubEnv("GH_HOST", "a.ghe.example.test");
+  const fetchImpl = vi.fn<typeof fetch>().mockImplementation(
+    async () =>
+      new Response(JSON.stringify({ items: [] }), {
+        headers: { "content-type": "application/json" },
+      }),
+  );
+  vi.stubGlobal("fetch", fetchImpl);
+  const allowed = config("a.ghe.example.test");
+  setRuntimeConfigSnapshot(allowed);
+  expect(
+    await invokeProjectMethod(
+      "projects.searchRemote",
+      { query: "ambient-allowed" },
+      allowed,
+      ["operator.write"],
+      undefined,
+      registeredProjectsHandlers,
+    ),
+  ).toMatchObject({ ok: true });
+  expect(fetchImpl).toHaveBeenCalled();
+  for (const [url, init] of fetchImpl.mock.calls) {
+    expect(url).toMatch(/^https:\/\/a\.ghe\.example\.test\//);
+    expect(new Headers(init?.headers).get("Authorization")).toBe(
+      "Bearer synthetic-host-a-ambient-token",
+    );
+  }
+  fetchImpl.mockClear();
+  const forbidden = config("b.ghe.example.test");
+  setRuntimeConfigSnapshot(forbidden);
+  expect(
+    await invokeProjectMethod(
+      "projects.searchRemote",
+      { query: "ambient-forbidden" },
+      forbidden,
+      ["operator.write"],
+      undefined,
+      registeredProjectsHandlers,
+    ),
+  ).toMatchObject({ ok: false });
+  expect(fetchImpl).not.toHaveBeenCalled();
+});
+
+test("registered anonymous native search does not borrow the service credential", async () => {
+  const native = vi
+    .spyOn(githubReadIdentity, "readCachedNativeGitHubToken")
+    .mockResolvedValue(undefined);
+  const cfg = {
+    gateway: {
+      github: { host: "tenant.ghe.com", apiBaseUrl: "https://api.tenant.ghe.com" },
+      controlUi: { github: { host: "tenant.ghe.com", token: "synthetic-service-token" } },
+      projects: { nativeGitHubSearch: true },
+    },
+  };
+  const fetchImpl = vi.fn<typeof fetch>().mockImplementation(
+    async () =>
+      new Response(JSON.stringify({ items: [] }), {
+        headers: { "content-type": "application/json" },
+      }),
+  );
+  vi.stubGlobal("fetch", fetchImpl);
+  setRuntimeConfigSnapshot(cfg);
+  try {
+    expect(
+      await invokeProjectMethod(
+        "projects.searchRemote",
+        { query: "anonymous-tenant" },
+        cfg,
+        ["operator.write"],
+        undefined,
+        registeredProjectsHandlers,
+      ),
+    ).toMatchObject({ ok: true });
+    expect(fetchImpl).toHaveBeenCalled();
+    for (const [, init] of fetchImpl.mock.calls) {
+      expect(new Headers(init?.headers).get("Authorization")).toBeNull();
+    }
+  } finally {
+    native.mockRestore();
+  }
+});
+
 test("projects.searchRemote uses the opted-in native system GitHub identity", async () => {
   const token = vi
     .spyOn(githubReadIdentity, "readCachedNativeGitHubToken")
