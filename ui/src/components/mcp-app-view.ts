@@ -29,6 +29,7 @@ import {
   type McpAppHostSandboxCsp,
 } from "./mcp-app-security.ts";
 import { collectMcpAppStyleVariables } from "./mcp-app-theme.ts";
+import { promoteToPopoverTopLayer } from "./menu-surface.ts";
 
 type McpAppViewPayload = {
   sandboxUrl: string;
@@ -156,6 +157,9 @@ export class McpAppView extends LitElement {
       z-index: 1000;
       background: var(--bg);
       padding-top: 40px;
+      margin: 0;
+      border: 0;
+      box-sizing: border-box;
     }
     :host([display-mode="fullscreen"]) .mount {
       height: calc(100dvh - 40px);
@@ -221,6 +225,13 @@ export class McpAppView extends LitElement {
   }
 
   override updated(changedProperties: PropertyValues<this>) {
+    if (changedProperties.has("displayMode")) {
+      if (this.displayMode === "fullscreen") {
+        promoteToPopoverTopLayer(this);
+      } else {
+        this.removeAttribute("popover");
+      }
+    }
     if (this.resources) {
       this.resources.iframe.title = this.title || t("mcpApp.title");
       if (
@@ -367,7 +378,7 @@ export class McpAppView extends LitElement {
     binding: McpAppBinding,
     signal: AbortSignal,
   ): Promise<McpAppResources> {
-    const { sessionKey, viewId } = binding;
+    const { sessionKey, viewId, agentId } = binding;
     let resources: McpAppResources | null = null;
     try {
       const payload = (await this.request(
@@ -543,12 +554,13 @@ export class McpAppView extends LitElement {
           return result as { _meta?: Record<string, unknown> };
         });
       }
-      const startResourceNotifications = bindMcpAppResourceHandlers({
+      const startNotifications = bindMcpAppResourceHandlers({
         bridge,
         request,
         sessionKey,
         viewId,
         iframe,
+        agentId,
         fileResourcesSupported: payload.fileResourcesSupported,
         openFilesSupported: payload.openFilesSupported,
         isDisposed: () => createdResources.disposed,
@@ -556,6 +568,12 @@ export class McpAppView extends LitElement {
           this.addResourceCleanup(createdResources, cleanup);
         },
         dispatchEvent: (event) => this.dispatchEvent(event),
+        onModelContextChanged: () => {
+          void refreshModelContext().catch(() => undefined);
+        },
+        onConversationInputRequested: () => {
+          this.displayMode = "inline";
+        },
         subscribeEvents: (listener) => this.context?.gateway.subscribeEvents?.(listener),
       });
       bridge.onrequestdisplaymode = async ({ mode }) => {
@@ -623,19 +641,7 @@ export class McpAppView extends LitElement {
       const updateHostContext = () => bridge.setHostContext(buildHostContext());
       createdResources.updateHostContext = updateHostContext;
       publishContext();
-      startResourceNotifications();
-      const stopEvents = this.context?.gateway.subscribeEvents?.((event) => {
-        const value = event.payload as { viewId?: string; uri?: string } | undefined;
-        if (value?.viewId !== viewId || createdResources.disposed) {
-          return;
-        }
-        if (event.event === "mcp.app.hostContextChanged") {
-          void refreshModelContext().catch(() => undefined);
-        }
-      });
-      if (stopEvents) {
-        this.addResourceCleanup(createdResources, stopEvents);
-      }
+      startNotifications();
       const hostContextCleanup = this.context?.theme.subscribe(updateHostContext);
       if (hostContextCleanup) {
         this.addResourceCleanup(createdResources, hostContextCleanup);

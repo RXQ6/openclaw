@@ -71,12 +71,15 @@ export function bindMcpAppResourceHandlers(owner: {
   request: (method: string, params: Record<string, unknown>) => Promise<unknown>;
   sessionKey: string;
   viewId: string;
+  agentId?: string;
   iframe: HTMLIFrameElement;
   fileResourcesSupported?: boolean;
   openFilesSupported?: boolean;
   isDisposed: () => boolean;
   addCleanup: (cleanup: () => void) => void;
   dispatchEvent: (event: Event) => boolean;
+  onModelContextChanged: () => void;
+  onConversationInputRequested: () => void;
   subscribeEvents: (
     listener: Parameters<ApplicationContext["gateway"]["subscribeEvents"]>[0],
   ) => (() => void) | undefined;
@@ -188,9 +191,27 @@ export function bindMcpAppResourceHandlers(owner: {
   // The view starts notifications only after the App initialization handshake.
   return () => {
     const stopEvents = owner.subscribeEvents((event) => {
-      const value = asOptionalRecord(event.payload);
-      if (value?.viewId !== viewId || owner.isDisposed()) {
+      if (owner.isDisposed()) {
         return;
+      }
+      const value = asOptionalRecord(event.payload);
+      const input =
+        event.event === "question.requested" && value?.status === "pending"
+          ? value
+          : event.event === "plugin.approval.requested"
+            ? asOptionalRecord(value?.request)
+            : undefined;
+      if (
+        input?.sessionKey === sessionKey &&
+        (!owner.agentId || !input.agentId || input.agentId === owner.agentId)
+      ) {
+        owner.onConversationInputRequested();
+      }
+      if (value?.viewId !== viewId) {
+        return;
+      }
+      if (event.event === "mcp.app.hostContextChanged") {
+        owner.onModelContextChanged();
       }
       if (
         event.event === "mcp.app.resourceUpdated" &&

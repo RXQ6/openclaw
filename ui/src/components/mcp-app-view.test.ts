@@ -1,6 +1,7 @@
 import { GatewayErrorDetailCodes } from "@openclaw/gateway-protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDeferred as deferred } from "../../../test/helpers/promise.js";
+import type { GatewayEventFrame } from "../api/gateway.ts";
 import { i18n } from "../i18n/index.ts";
 import {
   MCP_APP_VIEW_EXPIRED_EVENT,
@@ -117,6 +118,7 @@ describe("mcp-app-view localization", () => {
       addEventListener(type, listener, options);
     });
     const themeListeners = new Set<() => void>();
+    const gatewayListeners = new Set<(event: GatewayEventFrame) => void>();
     const unsubscribe = vi.fn();
     const request = vi.fn(async (_method: string, _params: Record<string, unknown>) => ({
       sandboxUrl: "/mcp-app-sandbox?ticket=test",
@@ -133,6 +135,10 @@ describe("mcp-app-view localization", () => {
       gateway: {
         snapshot: { client: { request } },
         connection: { gatewayUrl: "ws://gateway.example:8443/openclaw" },
+        subscribeEvents(listener: (event: GatewayEventFrame) => void) {
+          gatewayListeners.add(listener);
+          return () => gatewayListeners.delete(listener);
+        },
       },
       theme: {
         subscribe(listener: () => void) {
@@ -185,11 +191,44 @@ describe("mcp-app-view localization", () => {
       frame,
       request,
       themeListeners,
+      gatewayListeners,
       unsubscribe,
       transport: bridgeMocks.transports[0] as { close: ReturnType<typeof vi.fn> },
       view,
     };
   }
+
+  it("reveals questions and approvals only for its conversation without replacing the App frame", async () => {
+    const { view, frame, gatewayListeners } = await mountBridge(
+      "view-input-" + crypto.randomUUID(),
+    );
+    await expect.poll(() => gatewayListeners.size).toBeGreaterThan(0);
+    const emit = (event: string, payload: unknown) => {
+      for (const listener of gatewayListeners) {
+        listener({ type: "event", event, payload });
+      }
+    };
+    view.displayMode = "fullscreen";
+    await view.updateComplete;
+    emit("question.requested", { sessionKey: "agent:other:main", status: "pending" });
+    expect(view.displayMode).toBe("fullscreen");
+    emit("question.resolved", { sessionKey: view.sessionKey, status: "answered" });
+    expect(view.displayMode).toBe("fullscreen");
+    emit("question.requested", { sessionKey: view.sessionKey, status: "pending" });
+    await view.updateComplete;
+    expect(view.displayMode).toBe("inline");
+    expect(view.shadowRoot?.querySelector("iframe")).toBe(frame);
+    view.displayMode = "fullscreen";
+    await view.updateComplete;
+    emit("plugin.approval.requested", { request: { sessionKey: "agent:other:main" } });
+    expect(view.displayMode).toBe("fullscreen");
+    emit("plugin.approval.requested", { request: { sessionKey: view.sessionKey } });
+    await view.updateComplete;
+    expect(view.displayMode).toBe("inline");
+    expect(view.shadowRoot?.querySelector("iframe")).toBe(frame);
+    view.remove();
+    await expect.poll(() => gatewayListeners.size).toBe(0);
+  });
 
   it("sends rich user messages only after visible focus, confirmation, and conversation custody", async () => {
     const { bridge, frame, view } = await mountBridge("view-message-" + crypto.randomUUID());
@@ -314,17 +353,13 @@ describe("mcp-app-view localization", () => {
   it("does not let App parameters replace the mounted session, agent, or view", async () => {
     const viewId = "bound-" + crypto.randomUUID();
     const { bridge, request } = await mountBridge(viewId);
-    await bridge.updateModelContextHandler?.({
-      content: [
-        {
-          type: "text",
-          text: "context",
-        },
-      ],
+    const hostileAppInput = {
+      content: [{ type: "text", text: "context" }],
       sessionKey: "foreign",
       viewId: "foreign-view",
       agentId: "foreign-agent",
-    });
+    };
+    await bridge.updateModelContextHandler?.(hostileAppInput);
     expect(request).toHaveBeenCalledWith("mcp.app.updateModelContext", {
       sessionKey: "agent:main:main",
       viewId,

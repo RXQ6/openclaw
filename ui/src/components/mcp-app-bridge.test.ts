@@ -311,6 +311,8 @@ it("forwards resource metadata and keeps subscriptions with the extracted bridge
       cleanups.add(cleanup);
     },
     dispatchEvent: (event) => frame.dispatchEvent(event),
+    onModelContextChanged: vi.fn(),
+    onConversationInputRequested: vi.fn(),
     subscribeEvents: (listener) => {
       listeners.add(listener);
       return () => {
