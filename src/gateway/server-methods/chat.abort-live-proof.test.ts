@@ -220,11 +220,6 @@ describe("late abort real Gateway proof", () => {
           },
         });
 
-        // Load the RPC implementation before starting its timed run-state assertion.
-        const { coreGatewayHandlers } = await import("./core-handlers.js");
-        const { prepareGatewayRequestHandler } = await import("./lazy-core-handlers.js");
-        await prepareGatewayRequestHandler(coreGatewayHandlers["agent.wait"]!);
-
         const started = await gateway.client.request<{ runId?: string; status?: string }>(
           "chat.send",
           {
