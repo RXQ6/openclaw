@@ -1990,8 +1990,6 @@ describe("Claude session catalog", () => {
 
   it("keeps the CLI records when only the Desktop store changes", async () => {
     const home = await createHome();
-    // Adding 250 to this native clock sample rounds the elapsed interval below 250 ms.
-    vi.spyOn(performance, "now").mockReturnValue(100.00001);
     const watches = createClaudeCatalogWatchDriver(home);
     let now = Date.now();
     vi.spyOn(Date, "now").mockImplementation(() => now);
