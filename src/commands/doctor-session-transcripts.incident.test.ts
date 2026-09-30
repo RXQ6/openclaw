@@ -48,7 +48,8 @@ const stableKey = (sessionKey: string, agentId = "main") =>
   `session-key:${agentId}:${createHash("sha256").update(sessionKey).digest("base64url")}`;
 
 afterEach(() => {
-  resetPluginStateStoreForTests();
+  // The suite helper closes shared state after its agent drain.
+  resetPluginStateStoreForTests({ closeDatabase: false });
   vi.unstubAllEnvs();
   note.mockClear();
 });
