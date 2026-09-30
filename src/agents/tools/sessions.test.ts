@@ -844,20 +844,6 @@ describe("sessions_send gating", () => {
     expect(forwarded.message).toMatch(/\n {4}indented body$/u);
   });
 
-  it.each(["SendMessage", "send_message", "content", "text"])(
-    "requires canonical message instead of hidden alias %s",
-    async (alias) => {
-      await expect(
-        createMainSessionsSendTool().execute("alias-body", {
-          sessionKey: MAIN_AGENT_SESSION_KEY,
-          [alias]: "hidden message",
-          timeoutSeconds: 0,
-        }),
-      ).rejects.toThrow("message required");
-      expect(callGatewayMock).not.toHaveBeenCalled();
-    },
-  );
-
   it.each([" \n\t "])("rejects blank message %j before forwarding", async (message) => {
     await expect(
       createMainSessionsSendTool().execute("blank-body", {

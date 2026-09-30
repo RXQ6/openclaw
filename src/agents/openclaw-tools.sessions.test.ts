@@ -322,6 +322,20 @@ describe("sessions tools", () => {
     expect(peekSystemEventEntries(targetKey)).toEqual([]);
   });
 
+  it.each(["SendMessage", "send_message", "content", "text"])(
+    "sessions_send requires canonical message instead of hidden alias %s",
+    async (alias) => {
+      await expect(
+        getSessionTool("sessions_send").execute("alias-body", {
+          sessionKey: "agent:main:main",
+          [alias]: "hidden message",
+          timeoutSeconds: 0,
+        }),
+      ).rejects.toThrow("message required");
+      expect(callGatewayMock).not.toHaveBeenCalled();
+    },
+  );
+
   it("sessions_list filters visibility before hydrating mailbox previews and messages", async () => {
     const session = (key: string, classification: string, extra = {}) => ({
       key: `agent:main:${key}`,
