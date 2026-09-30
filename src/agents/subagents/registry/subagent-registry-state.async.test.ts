@@ -695,8 +695,8 @@ it("keeps published compact facts through a temporary writer scope without reloa
   const changed = original.get("changed")!;
   changed.createdAt = 20;
   original.get("other")!.createdAt = 10;
-  persistSubagentRunsToDiskOrThrow(original, [...original.keys()]);
   await prepareSubagentSessionListReadCache();
+  persistSubagentRunsToDiskOrThrow(original, [...original.keys()]);
   const initial = getSubagentSessionListRunsSnapshotForRead(new Map());
   const admission = captureOpenClawStateWorkerContext().admission;
   const load = vi.spyOn(store, "loadSubagentSessionListRunsFromSqlite");

@@ -91,6 +91,7 @@ async function withFixture(
     context: GatewayRequestContext;
     ownerId: string;
     viewer: GatewayClient;
+    retainedRunIds: string[];
   }) => Promise<void>,
 ) {
   await withOpenClawTestState(
@@ -143,7 +144,13 @@ async function withFixture(
       const context = requestContext(cfg);
       context.getRuntimeConfig = () => getRuntimeConfigSnapshot() ?? cfg;
       try {
-        await run({ cfg, context, ownerId, viewer });
+        await run({
+          cfg,
+          context,
+          ownerId,
+          viewer,
+          retainedRunIds: records.map((entry) => entry.runId),
+        });
       } finally {
         getSessionRowProjection(context)?.dispose();
         clearSubagentRunsReadCacheForTest();
@@ -204,7 +211,7 @@ async function afterCommittedChange(
 it.each(["describe", "list"] as const)(
   "captures current registry facts after %s owner publications",
   async (method) => {
-    await withFixture(async ({ context, viewer }) => {
+    await withFixture(async ({ context, viewer, retainedRunIds }) => {
       await describeSession(context, viewer);
       const current = retainedRun("current-memory", {
         childSessionKey: targetKey,
@@ -229,7 +236,10 @@ it.each(["describe", "list"] as const)(
               swarmRequesterSessionKey: targetKey,
               collectorCompletion: { status: "done" },
             });
-            persistSubagentRunsToDisk(new Map([[published.runId, published]]), [published.runId]);
+            persistSubagentRunsToDisk(new Map([[published.runId, published]]), [
+              ...retainedRunIds,
+              published.runId,
+            ]);
             subagentRuns.set(current.runId, current);
           },
         );
