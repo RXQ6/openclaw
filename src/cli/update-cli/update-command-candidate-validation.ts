@@ -70,6 +70,7 @@ export async function validateUpdateCandidateWithProgress(
         `${step.step}: ${step.detail ?? step.status}`,
       );
     },
+    onStepStart: (step) => execution.progress?.onStepStart?.({ ...step, index: 0, total: 0 }),
     onStep: (step) => execution.progress?.onStepComplete?.({ ...step, index: 0, total: 0 }),
   });
   assertCurrent();

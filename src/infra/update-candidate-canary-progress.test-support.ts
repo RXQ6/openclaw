@@ -3,6 +3,7 @@ import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { expect, it, vi, type Mock } from "vitest";
+import { createUpdateProgress } from "../cli/update-cli/progress.js";
 import type { UpdateCommandOptions } from "../cli/update-cli/shared.js";
 import { validateUpdateCandidateWithProgress } from "../cli/update-cli/update-command-candidate-validation.js";
 import { createUpdateCommandExecutionGuards } from "../cli/update-cli/update-command-execution-guards.js";
@@ -10,6 +11,7 @@ import {
   CommandProcessCleanupError,
   hasCommandProcessCleanupError,
 } from "../process/exec-result.js";
+import { defaultRuntime } from "../runtime.js";
 import { createDeferredCore } from "../shared/deferred.js";
 import * as stateWorker from "../state/openclaw-state-worker-store.js";
 import { closeStateDatabaseForTest } from "../test-utils/database-cleanup.js";
@@ -29,6 +31,54 @@ export function registerCanaryProgressWorkerTests(
   mocks: CanaryProgressMocks,
   admission: { active: boolean; beforeGrant?: (stage: string) => void },
 ) {
+  it.each([false, true])("names candidate checks before starting them (json=%s)", async (json) => {
+    const root = getRoot();
+    stubHealthyGateway();
+    const log = vi.spyOn(defaultRuntime, "log").mockImplementation(() => {});
+    const error = vi.spyOn(defaultRuntime, "error").mockImplementation(() => {});
+    const spawn = mocks.spawn.getMockImplementation()!;
+    const announcements: unknown[][] = [];
+    const presentation = createUpdateProgress(!json);
+    mocks.spawn.mockImplementation((...args) => {
+      announcements.push(log.mock.calls.flat());
+      return spawn(...args);
+    });
+    try {
+      const guards = createUpdateCommandExecutionGuards({}, root);
+      const result = await validateUpdateCandidateWithProgress(
+        {
+          root,
+          config: {},
+          env: {},
+          assertCurrent: () => {},
+          writeOptions: guards.captureWriteOptions(),
+        },
+        { opts: { json }, progress: presentation.progress },
+        undefined,
+      );
+      expect(result.status).toBe("ok");
+      if (json) {
+        expect(log).not.toHaveBeenCalled();
+      } else {
+        for (const [index, check] of [
+          "doctor",
+          "doctor-lint",
+          "config",
+          "plugins",
+          "recovery",
+          "gateway-startup",
+        ].entries()) {
+          expect(announcements[index]).toContain(`candidate-${check}...`);
+        }
+        expect(error).not.toHaveBeenCalled();
+      }
+    } finally {
+      presentation.dispose();
+      log.mockRestore();
+      error.mockRestore();
+    }
+  });
+
   it.each([
     "recorded",
     "reopened",

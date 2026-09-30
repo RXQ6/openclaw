@@ -159,6 +159,12 @@ rollback outcomes. The parent updater retains its live installation and requeste
 checks without reopening migrated state through its older schema. A successful
 migration proceeds to finalization; it still prohibits code-only rollback.
 
+Candidate validation names each check before it starts: state snapshots, Doctor
+repairs, health checks, configuration, plugins, recovery, and Gateway startup.
+Terminal output shows elapsed time; redirected output reports quiet checks every
+30 seconds. `--json` keeps stdout machine-readable. This display is owned by the
+installed updater, so older updaters gain it on their next update after installation.
+
 For versions that support checks before installation, the old Gateway keeps serving through `staging` and
 `validating`. The updater uses the new version to run health checks
 (`doctor --lint --json --severity-min error`), config validation, and read-only

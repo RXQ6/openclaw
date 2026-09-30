@@ -92,6 +92,7 @@ export async function validateUpdateCandidateCanary(params: {
   assertCurrent?: () => void;
   /** Emit at completion; replaying after the canary shifts persisted step timestamps. */
   onStep?: (step: UpdateStepResult) => void | Promise<void>;
+  onStepStart?: (step: Pick<UpdateStepResult, "name" | "command">) => void;
   onProgress?: (step: UpdateRunStep) => void | Promise<void>;
 }): Promise<CanaryResult> {
   const started = Date.now();
@@ -207,6 +208,7 @@ export async function validateUpdateCandidateCanary(params: {
     phase = "snapshot";
     activeStep = { name: "candidate-state-snapshot", command: "Preparing update checks" };
     stepStartedAt = Date.now();
+    params.onStepStart?.(activeStep);
     rehearsal = await prepareUpdateCandidateRehearsal({
       candidateRoot: params.root,
       config: params.config,
@@ -296,6 +298,7 @@ export async function validateUpdateCandidateCanary(params: {
       activeStep = { name: command.name, command: command.args.join(" ") };
       stepStartedAt = Date.now();
       stepLogTail.length = 0;
+      params.onStepStart?.(activeStep);
       startBudget();
       remaining();
       const doctorResultPath =
@@ -547,6 +550,7 @@ export async function validateUpdateCandidateCanary(params: {
     activeStep = { name: "candidate-gateway-startup", command: "gateway run" };
     stepStartedAt = Date.now();
     stepLogTail.length = 0;
+    params.onStepStart?.(activeStep);
     startBudget();
     remaining();
     const args = ["gateway", "run", "--update-canary", "--bind", "loopback"];
