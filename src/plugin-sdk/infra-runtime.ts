@@ -302,7 +302,6 @@ export * from "../infra/fs-safe.ts";
 export * from "../infra/heartbeat-events.ts";
 export * from "../infra/heartbeat-summary.ts";
 export * from "../infra/heartbeat-visibility.ts";
-// Keep the deprecated barrel pinned to its shipped home-path helpers.
 export {
   expandHomePrefix,
   resolveEffectiveHomeDir,
