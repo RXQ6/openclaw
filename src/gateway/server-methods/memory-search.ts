@@ -69,7 +69,29 @@ function hasUsableAgentIdInput(value: string): boolean {
 
 /** Operator-scoped search over the active agent memory index. */
 export const memorySearchHandlers: GatewayRequestHandlers = {
-  "memory.search": async ({ params, respond, context }) => {
+  "memory.get": async (options) => {
+    const { memoryProviderHandlers } = await import("./memory-provider.js");
+    await memoryProviderHandlers["memory.get"](options);
+  },
+  "memory.status": async (options) => {
+    const { memoryProviderHandlers } = await import("./memory-provider.js");
+    await memoryProviderHandlers["memory.status"](options);
+  },
+  "memory.search": async (options) => {
+    const { params, respond, context } = options;
+    if (params?.version === 2) {
+      const { memoryProviderHandlers } = await import("./memory-provider.js");
+      await memoryProviderHandlers["memory.search"](options);
+      return;
+    }
+    if (params?.version !== undefined && params.version !== 1) {
+      respond(
+        false,
+        undefined,
+        errorShape(ErrorCodes.INVALID_REQUEST, "unsupported memory version"),
+      );
+      return;
+    }
     const record = params && typeof params === "object" ? (params as Record<string, unknown>) : {};
     const query = typeof record.query === "string" ? record.query.trim() : "";
     if (!query) {

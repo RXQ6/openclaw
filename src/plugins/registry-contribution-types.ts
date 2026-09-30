@@ -23,6 +23,10 @@ import type {
   EmbeddingProviderIndexIdentity,
   EmbeddingProviderRuntime,
 } from "./embedding-provider-types.js";
+import type {
+  MemoryProviderOpenParams,
+  MemoryProviderOpenResult,
+} from "./memory-provider-types.js";
 
 export type ContextEngineFactoryContext = {
   config?: OpenClawConfig;
@@ -266,6 +270,14 @@ export type MemoryPluginRuntime = {
   closeAllMemorySearchManagers?(): Promise<void>;
 };
 
+/** Additive runtime; lifecycle hooks share the existing memory runtime cleanup owner. */
+export type MemoryProviderRuntime = Pick<
+  MemoryPluginRuntime,
+  "prepareReload" | "closeMemorySearchManager" | "closeAllMemorySearchManagers"
+> & {
+  open(params: MemoryProviderOpenParams): Promise<MemoryProviderOpenResult>;
+};
+
 type MemoryPluginPublicArtifactContentType = "markdown" | "json" | "text";
 
 export type MemoryPluginPublicArtifact = {
@@ -285,6 +297,8 @@ export type MemoryPluginCapability = {
   promptBuilder?: MemoryPromptSectionBuilder;
   flushPlanResolver?: MemoryFlushPlanResolver;
   runtime?: MemoryPluginRuntime;
+  /** Provider-neutral host integration; preferred over runtime when present. */
+  providerRuntime?: MemoryProviderRuntime;
   publicArtifacts?: MemoryPluginPublicArtifactsProvider;
   /** Local deterministic recall tool required by provider-owned direct lookup. */
   deterministicRecallToolName?: string;

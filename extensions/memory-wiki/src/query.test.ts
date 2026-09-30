@@ -4,22 +4,29 @@ import os from "node:os";
 import path from "node:path";
 import { filterMemorySearchHitsBySessionVisibility } from "@openclaw/memory-core/session-search-visibility-api.js";
 import type { MemoryReadResult } from "openclaw/plugin-sdk/memory-core-host-engine-storage";
+import type { MemoryProviderOpenParams } from "openclaw/plugin-sdk/memory-host-search";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../api.js";
 import { compileMemoryWikiVault } from "./compile.js";
 import type { MemoryWikiPluginConfig } from "./config.js";
 import { renderWikiMarkdown } from "./markdown.js";
 import { getMemoryWikiPage, searchMemoryWiki } from "./query.js";
+import {
+  createLegacyMemoryProviderResult,
+  registerProviderRecordQueryTests,
+} from "./query.provider-runtime.test-support.js";
 import { createMemoryWikiTestHarness } from "./test-helpers.js";
 import { createWikiGetTool } from "./tool.js";
 
 const {
   getActiveMemorySearchManagerMock,
+  getActiveMemoryProviderMock,
   loadCombinedSessionStoreForGatewayMock,
   resolveDefaultAgentIdMock,
   resolveSessionAgentIdMock,
 } = vi.hoisted(() => ({
   getActiveMemorySearchManagerMock: vi.fn(),
+  getActiveMemoryProviderMock: vi.fn(),
   loadCombinedSessionStoreForGatewayMock: vi.fn(),
   resolveDefaultAgentIdMock: vi.fn(() => "main"),
   resolveSessionAgentIdMock: vi.fn(({ sessionKey }: { sessionKey?: string }) => {
@@ -29,7 +36,7 @@ const {
 }));
 
 vi.mock("openclaw/plugin-sdk/memory-host-search", () => ({
-  getActiveMemorySearchManager: getActiveMemorySearchManagerMock,
+  getActiveMemoryProvider: getActiveMemoryProviderMock,
 }));
 
 vi.mock("@openclaw/memory-core/session-search-visibility-api.js", { spy: true });
@@ -59,10 +66,10 @@ const { createVault } = createMemoryWikiTestHarness();
 let suiteRoot = "";
 let caseIndex = 0;
 
-function collectWikiResultPaths(results: readonly { corpus: string; path: string }[]): string[] {
+function collectWikiResultPaths(results: readonly { corpus: string; path?: string }[]): string[] {
   const paths: string[] = [];
   for (const result of results) {
-    if (result.corpus === "wiki") {
+    if (result.corpus === "wiki" && result.path) {
       paths.push(result.path);
     }
   }
@@ -81,6 +88,10 @@ function expectFields(value: unknown, expected: Record<string, unknown>): Record
 }
 
 beforeEach(() => {
+  getActiveMemoryProviderMock.mockReset();
+  getActiveMemoryProviderMock.mockImplementation((params: MemoryProviderOpenParams) =>
+    createLegacyMemoryProviderResult(params, getActiveMemorySearchManagerMock),
+  );
   getActiveMemorySearchManagerMock.mockReset();
   getActiveMemorySearchManagerMock.mockResolvedValue({ manager: null, error: "unavailable" });
   loadCombinedSessionStoreForGatewayMock.mockReset();
@@ -840,31 +851,6 @@ describe("searchMemoryWiki", () => {
     });
   });
 
-  it("reports a contract error when the shared manager lacks search()", async () => {
-    const { config } = await createQueryVault({
-      initialize: true,
-      config: {
-        search: { backend: "shared", corpus: "all" },
-      },
-    });
-    // Partial manager as registered by @mem0/openclaw-mem0 <= 1.0.14.
-    const partialManager = {
-      status: vi.fn().mockReturnValue({ backend: "builtin", provider: "builtin" }),
-      probeEmbeddingAvailability: vi.fn().mockResolvedValue({ ok: true }),
-      close: vi.fn().mockResolvedValue(undefined),
-    };
-    getActiveMemorySearchManagerMock.mockResolvedValue({ manager: partialManager });
-
-    await expect(
-      searchMemoryWiki({
-        config,
-        appConfig: createAppConfig(),
-        query: "alpha",
-        maxResults: 5,
-      }),
-    ).rejects.toThrow("does not implement search() from the MemorySearchManager contract");
-  });
-
   it("includes memory results and backfills wiki capacity for all-corpus search", async () => {
     const { rootDir, config } = await createQueryVault({
       initialize: true,
@@ -912,7 +898,10 @@ describe("searchMemoryWiki", () => {
       "entities/alpha-3.md",
       "entities/alpha-4.md",
     ]);
-    expect(manager.search).toHaveBeenCalledWith("alpha", { maxResults: 5 });
+    expect(manager.search).toHaveBeenCalledWith(
+      "alpha",
+      expect.objectContaining({ maxResults: 5 }),
+    );
   });
 
   for (const { name, sandboxed } of [
@@ -1027,17 +1016,24 @@ describe("searchMemoryWiki", () => {
         appConfig: createSessionVisibilityAppConfig(),
         agentId: "main",
         agentSessionKey: requesterSessionKey,
+        memoryContext: {
+          authority: { kind: "session", sessionKey: requesterSessionKey, sandboxed: false },
+          assertCurrent() {},
+        },
         conversationRecall,
         query: "alpha",
         ...(requestedCorpus ? { searchCorpus: requestedCorpus } : {}),
       });
 
       expect(results).toStrictEqual([]);
-      expect(manager.search).toHaveBeenCalledWith("alpha", {
-        maxResults: 10,
-        sources: ["sessions"],
-        sessionKey: requesterSessionKey,
-      });
+      expect(manager.search).toHaveBeenCalledWith(
+        "alpha",
+        expect.objectContaining({
+          maxResults: 10,
+          sources: ["sessions"],
+          sessionKey: requesterSessionKey,
+        }),
+      );
       expect(filterMemorySearchHitsBySessionVisibility).toHaveBeenCalledWith(
         expect.objectContaining({
           conversationRecall,
@@ -1186,7 +1182,7 @@ describe("searchMemoryWiki", () => {
     const results = await searchMemoryWiki({ config, query: "Source" });
 
     expect(results).toHaveLength(2);
-    const paths = results.map((r) => r.path).toSorted();
+    const paths = results.map((r) => r.path).toSorted((a, b) => String(a).localeCompare(String(b)));
     expect(paths).toEqual(["sources/sub/nested.md", "sources/top.md"]);
   });
 
@@ -1280,7 +1276,10 @@ describe("searchMemoryWiki", () => {
 
     expect(memoryOnly).toHaveLength(1);
     expect(memoryOnly[0]?.corpus).toBe("memory");
-    expect(manager.search).toHaveBeenCalledWith("alpha", { maxResults: 10 });
+    expect(manager.search).toHaveBeenCalledWith(
+      "alpha",
+      expect.objectContaining({ maxResults: 10 }),
+    );
   });
 
   it("keeps memory search disabled when the backend is local", async () => {
@@ -1408,6 +1407,10 @@ describe("getMemoryWikiPage", () => {
     expect(result).toEqual({
       corpus: "memory",
       path: "MEMORY.md",
+      reference: { providerId: "memory-core", id: "MEMORY.md" },
+      lookup: `memory-ref:${encodeURIComponent(JSON.stringify({ providerId: "memory-core", id: "MEMORY.md" }))}`,
+      citations: undefined,
+      truncated: undefined,
       title: "MEMORY",
       kind: "memory",
       content: "durable alpha memory\nline two",
@@ -1525,28 +1528,6 @@ describe("getMemoryWikiPage", () => {
       from: 1,
       lines: 200,
     });
-  });
-
-  it("reports a contract error when the shared manager lacks readFile()", async () => {
-    const { config } = await createQueryVault({
-      initialize: true,
-      config: {
-        search: { backend: "shared", corpus: "memory" },
-      },
-    });
-    const partialManager = {
-      search: vi.fn().mockResolvedValue([]),
-      status: vi.fn().mockReturnValue({ backend: "builtin", provider: "builtin" }),
-    };
-    getActiveMemorySearchManagerMock.mockResolvedValue({ manager: partialManager });
-
-    await expect(
-      getMemoryWikiPage({
-        config,
-        appConfig: createAppConfig(),
-        lookup: "MEMORY.md",
-      }),
-    ).rejects.toThrow("does not implement readFile() from the MemorySearchManager contract");
   });
 
   it("defaults non-finite memory line options before memory reads", async () => {
@@ -1861,3 +1842,11 @@ describe("wiki corpus bridge page agent scoping", () => {
   });
 });
 /* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */
+registerProviderRecordQueryTests({
+  createQueryVault,
+  createAppConfig,
+  getActiveMemoryProviderMock,
+  getActiveMemorySearchManagerMock,
+  searchMemoryWiki,
+  getMemoryWikiPage,
+});
