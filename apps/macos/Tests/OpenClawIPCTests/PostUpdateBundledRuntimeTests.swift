@@ -4,6 +4,103 @@ import Testing
 
 @MainActor
 struct PostUpdateBundledRuntimeTests {
+    @Test(arguments: [false, true])
+    func `core repair completion preserves receipt origin across interruption and relaunch`(
+        ordinaryNotice: Bool) throws
+    {
+        let suite = "PostUpdateBundledRuntimeTests.coreRepair.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let recordedAt = Date(timeIntervalSince1970: 1_720_000_000)
+        if ordinaryNotice {
+            PostAppUpdateReceiptStore.record(
+                fromVersion: "2026.8.1", toVersion: "2026.9.1", defaults: defaults, now: recordedAt)
+            var notice = try #require(PostAppUpdateReceiptStore.pendingForLaunch(
+                currentVersion: "2026.9.1", currentRuntimeBuildID: "build-one", onboardingSeen: true,
+                defaults: defaults))
+            notice = PostAppUpdateReceiptStore.recordNotificationFailure(receipt: notice, defaults: defaults)
+            PostAppUpdateReceiptStore.setNotificationInFlight(true, receipt: notice, defaults: defaults)
+        }
+        PostAppUpdateReceiptStore.recordSetupRecovery(
+            fromVersion: "2026.8.1", toVersion: "2026.9.1", runtimeBuildID: "build-one",
+            defaults: defaults, now: recordedAt)
+        let interrupted = try #require(PostAppUpdateReceiptStore.pendingForLaunch(
+            currentVersion: "2026.9.1", currentRuntimeBuildID: "build-one", onboardingSeen: true,
+            defaults: defaults))
+        #expect(interrupted.gatewayUpdateIncomplete)
+        #expect(interrupted.setupRecovery == !ordinaryNotice)
+
+        let completed = try #require(PostAppUpdateReceiptStore.completeCoreRepair(
+            currentVersion: "2026.9.1", defaults: defaults))
+        #expect(completed.fromVersion == "2026.8.1")
+        #expect(completed.toVersion == "2026.9.1")
+        #expect(completed.recordedAt == recordedAt)
+        #expect(completed.runtimeBuildID == "build-one")
+        #expect(completed.notificationAttempts == (ordinaryNotice ? 1 : 0))
+        #expect(completed.notificationInFlight == ordinaryNotice)
+        #expect(completed.setupRecovery == !ordinaryNotice)
+        #expect(completed.gatewayUpdateIncomplete == ordinaryNotice)
+        #expect(PostAppUpdateReceiptStore.pendingSetupRecovery(defaults: defaults) == nil)
+        #expect(PostUpdateController.notificationContinuation(
+            receipt: completed, runtimeVerified: false, migrationOnlyLaunchCheck: false) == .waitForRuntime)
+
+        let failedRuntime = PostAppUpdateReceiptStore.recordMigrationFailure(receipt: completed, defaults: defaults)
+        let relaunched = try #require(PostAppUpdateReceiptStore.pendingForLaunch(
+            currentVersion: "2026.9.1", currentRuntimeBuildID: "build-one", onboardingSeen: true,
+            defaults: defaults))
+        #expect(relaunched == failedRuntime)
+        #expect(relaunched.hasPendingRuntimeMigration)
+        #expect(PostUpdateController.coreRepairAction(
+            receipt: relaunched, absentManagedService: false, migrationNeedsCoreRepair: false,
+            migrationFailed: false, explicitRetry: true) == .none)
+        let named = AppProfile(environment: ["OPENCLAW_PROFILE": "rollback-fixture"])
+        #expect(PostUpdateController.shouldOfferRuntimeMigrationRetry(
+            profile: named, receipt: relaunched, serviceInstalled: true, retainedManagedNode: true))
+        #expect(!PostUpdateController.shouldOfferRuntimeMigrationRetry(
+            profile: named, receipt: relaunched, serviceInstalled: true, retainedManagedNode: false))
+        #expect(!PostUpdateController.shouldOfferRuntimeMigrationRetry(
+            profile: named, receipt: relaunched, serviceInstalled: false, retainedManagedNode: true))
+        #expect(PostUpdateController.notificationContinuation(
+            receipt: failedRuntime, runtimeVerified: false, migrationOnlyLaunchCheck: false) == .waitForRuntime)
+        #expect(PostUpdateController.notificationContinuation(
+            receipt: failedRuntime, runtimeVerified: true, migrationOnlyLaunchCheck: false) ==
+            (ordinaryNotice ? .deliveryUnconfirmed : .completeSilently))
+    }
+
+    @Test func `named bundled launches monitor migration failures without an ordinary receipt`() throws {
+        let named = AppProfile(environment: ["OPENCLAW_PROFILE": "migration-fixture"])
+        let receipt = try #require(PostUpdateController.launchReceipt(
+            pending: nil, profile: named, bundledApp: true, onboardingSeen: true, appVersion: "2026.9.1"))
+        #expect(receipt.fromVersion == "2026.9.1")
+        #expect(receipt.toVersion == "2026.9.1")
+        #expect(PostUpdateController.launchReceipt(
+            pending: nil, profile: named, bundledApp: true, onboardingSeen: false, appVersion: "2026.9.1") == nil)
+        #expect(PostUpdateController.launchReceipt(
+            pending: receipt, profile: named, bundledApp: false, onboardingSeen: true, appVersion: "2026.9.1") == nil)
+        #expect(PostUpdateController.launchReceipt(
+            pending: receipt, profile: named, bundledApp: true, onboardingSeen: true, appVersion: "2026.9.1") ==
+            receipt)
+    }
+
+    @Test func `fresh core update failure stops while deferred repair and explicit retry can proceed`() {
+        let ordinary = PostAppUpdateReceipt(
+            fromVersion: "2026.8.1", toVersion: "2026.9.1", recordedAt: .distantPast,
+            gatewayUpdateIncomplete: true)
+        #expect(PostUpdateController.coreRepairAction(
+            receipt: ordinary, absentManagedService: true, migrationNeedsCoreRepair: false,
+            migrationFailed: true, explicitRetry: false) == .reportFailure)
+        #expect(PostUpdateController.coreRepairAction(
+            receipt: ordinary, absentManagedService: true, migrationNeedsCoreRepair: true,
+            migrationFailed: true, explicitRetry: false) == .repair)
+        #expect(PostUpdateController.coreRepairAction(
+            receipt: ordinary, absentManagedService: true, migrationNeedsCoreRepair: false,
+            migrationFailed: true, explicitRetry: true) == .repair)
+        // A present-service runtime rollback still goes through its explicit migration retry.
+        #expect(PostUpdateController.coreRepairAction(
+            receipt: ordinary, absentManagedService: false, migrationNeedsCoreRepair: false,
+            migrationFailed: true, explicitRetry: true) == .none)
+    }
+
     @Test func `setup recovery survives relaunches and target changes without welcome notifications`() throws {
         let suite = "PostUpdateBundledRuntimeTests.setup.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
@@ -250,8 +347,11 @@ struct PostUpdateBundledRuntimeTests {
         }
     }
 
-    @Test(arguments: [false, true])
-    func `remote primary keeps legacy node work separate from its local companion`(hasCompanion: Bool) async {
+    @Test(arguments: [false, true], [false, true])
+    func `remote primary keeps legacy node work separate from its local companion`(
+        hasCompanion: Bool,
+        companionVerified: Bool) async
+    {
         let cli = GatewayLaunchAgentManager.InstalledServiceCLI(
             prefix: ["/fixture/state/tools/node/bin/node", "/fixture/state/lib/node_modules/openclaw/dist/index.js"],
             sqliteLibrary: nil)
@@ -264,7 +364,8 @@ struct PostUpdateBundledRuntimeTests {
                     usesSeededGateway: hasCompanion,
                     hasService: true,
                     installedCLI: cli,
-                    ownsManagedRuntime: true),
+                    ownsManagedRuntime: true,
+                    localCompanionVerified: companionVerified),
                 gatewayUpdateIncomplete: incomplete)
             {
                 probes += 1
@@ -276,7 +377,7 @@ struct PostUpdateBundledRuntimeTests {
             #expect(resolution.action == (incomplete ? .repair : .update))
             #expect(resolution.installedCLI?.prefix == cli.prefix)
             #expect(resolution.needsManagedVerification)
-            #expect(resolution.prepareLocalCompanion == hasCompanion)
+            #expect(resolution.prepareLocalCompanion == (hasCompanion && !companionVerified))
         }
         var probedAbsentService = false
         let companionOnly = await PostUpdateController.resolveGatewayAction(
@@ -286,7 +387,8 @@ struct PostUpdateBundledRuntimeTests {
                 usesSeededGateway: hasCompanion,
                 hasService: false,
                 installedCLI: nil,
-                ownsManagedRuntime: false),
+                ownsManagedRuntime: false,
+                localCompanionVerified: companionVerified),
             gatewayUpdateIncomplete: true)
         {
             probedAbsentService = true
@@ -295,7 +397,7 @@ struct PostUpdateBundledRuntimeTests {
         #expect(!probedAbsentService)
         #expect(companionOnly.action == .none)
         #expect(!companionOnly.needsManagedVerification)
-        #expect(companionOnly.prepareLocalCompanion == hasCompanion)
+        #expect(companionOnly.prepareLocalCompanion == (hasCompanion && !companionVerified))
     }
 
     @Test func `bundled Gateway updates never select package registry work`() {
@@ -320,5 +422,65 @@ struct PostUpdateBundledRuntimeTests {
                     usesBundledRuntime: true) == (incomplete ? .ownershipFailure : .none))
             }
         }
+    }
+
+    @Test func `completed migration preserves notification receipts and synthetic launches remain silent`() {
+        let receipt = PostAppUpdateReceipt(
+            fromVersion: "2026.8.1",
+            toVersion: "2026.9.1",
+            recordedAt: .distantPast,
+            notificationAttempts: 1)
+        for verified in [false, true] {
+            #expect(PostUpdateController.notificationContinuation(
+                receipt: receipt,
+                runtimeVerified: verified,
+                migrationOnlyLaunchCheck: false) == .notify)
+        }
+        for inFlight in [false, true] {
+            let pendingRuntime = PostAppUpdateReceipt(
+                fromVersion: "2026.8.1",
+                toVersion: "2026.9.1",
+                recordedAt: .distantPast,
+                gatewayUpdateIncomplete: true,
+                notificationInFlight: inFlight)
+            #expect(PostUpdateController.notificationContinuation(
+                receipt: pendingRuntime,
+                runtimeVerified: false,
+                migrationOnlyLaunchCheck: false) == .waitForRuntime)
+            #expect(PostUpdateController.notificationContinuation(
+                receipt: pendingRuntime,
+                runtimeVerified: true,
+                migrationOnlyLaunchCheck: false) == (inFlight ? .deliveryUnconfirmed : .notify))
+            #expect(PostUpdateController.notificationContinuation(
+                receipt: pendingRuntime,
+                runtimeVerified: true,
+                migrationOnlyLaunchCheck: true) == .completeSilently)
+        }
+    }
+
+    @Test func `paused retries and unfinished setup repair stay with the core updater`() {
+        let setup = PostAppUpdateReceipt(
+            fromVersion: "2026.8.1",
+            toVersion: "2026.9.1",
+            recordedAt: .distantPast,
+            gatewayUpdateIncomplete: true,
+            setupRecovery: true)
+        let migration = PostAppUpdateReceipt(
+            fromVersion: "2026.8.1",
+            toVersion: "2026.9.1",
+            recordedAt: .distantPast,
+            gatewayUpdateIncomplete: true)
+        for paused in [false, true] {
+            #expect(!PostUpdateController.allowsNodeMigration(paused: paused, canActivate: true, receipt: setup))
+            #expect(PostUpdateController
+                .allowsNodeMigration(paused: paused, canActivate: true, receipt: migration) == !paused)
+            #expect(PostUpdateController
+                .allowsNodeMigration(paused: paused, canActivate: true, receipt: nil) == !paused)
+        }
+        // A remote primary without a local companion is unpaused but has no local activation intent.
+        #expect(!PostUpdateController.allowsNodeMigration(paused: false, canActivate: false, receipt: migration))
+        #expect(!PostUpdateController.allowsNodeMigration(paused: false, canActivate: false, receipt: nil))
+        #expect(PostUpdateController.notificationContinuation(
+            receipt: setup, runtimeVerified: false, migrationOnlyLaunchCheck: false) == .waitForRuntime)
     }
 }

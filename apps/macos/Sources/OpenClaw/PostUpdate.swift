@@ -26,6 +26,10 @@ struct PostAppUpdateReceipt: Codable, Equatable {
     let runtimeBuildID: String?
     let setupRecovery: Bool
 
+    var hasPendingRuntimeMigration: Bool {
+        self.setupRecovery ? !self.gatewayUpdateIncomplete : self.gatewayUpdateIncomplete
+    }
+
     init(
         fromVersion: String,
         toVersion: String,
@@ -199,6 +203,26 @@ enum PostAppUpdateReceiptStore {
         self.clear(defaults: defaults)
     }
 
+    @discardableResult
+    static func completeCoreRepair(
+        currentVersion: String?, defaults: UserDefaults = AppDefaults.standard) -> PostAppUpdateReceipt?
+    {
+        guard let receipt = self.pending(currentVersion: currentVersion, defaults: defaults) else { return nil }
+        // Setup-only work remains silent until runtime verification. Ordinary app notices
+        // remain incomplete so their notification cannot overtake the runtime installation.
+        return self.setGatewayUpdateIncomplete(!receipt.setupRecovery, receipt: receipt, defaults: defaults)
+    }
+
+    @discardableResult
+    static func recordMigrationFailure(
+        receipt: PostAppUpdateReceipt,
+        defaults: UserDefaults = AppDefaults.standard) -> PostAppUpdateReceipt
+    {
+        // A completed setup repair still awaits runtime health, but must not run core repair again.
+        let coreRepairCompleted = receipt.setupRecovery && !receipt.gatewayUpdateIncomplete
+        return self.setGatewayUpdateIncomplete(!coreRepairCompleted, receipt: receipt, defaults: defaults)
+    }
+
     private static func load(defaults: UserDefaults) -> PostAppUpdateReceipt? {
         guard let data = defaults.data(forKey: postAppUpdateReceiptKey) else { return nil }
         return try? JSONDecoder().decode(PostAppUpdateReceipt.self, from: data)
@@ -288,6 +312,7 @@ final class PostUpdateModel {
         case updating
         case verifying
         case notifying
+        case deferred
         case complete
         case failed
     }
@@ -300,13 +325,14 @@ final class PostUpdateModel {
     var isWorking: Bool {
         switch self.phase {
         case .checking, .updating, .verifying, .notifying: true
-        case .complete, .failed: false
+        case .deferred, .complete, .failed: false
         }
     }
 
     var mood: OpenClawMascotMood {
         switch self.phase {
         case .checking, .updating, .verifying, .notifying: .working
+        case .deferred: .idle
         case .complete: .celebrating
         case .failed: .sad
         }
@@ -323,6 +349,12 @@ enum PostUpdateGatewayAction: Equatable {
     case managedRuntimeUnavailable
 }
 
+enum PostUpdateRuntimeVerification: Equatable {
+    case verified
+    case deferred
+    case failed
+}
+
 struct PostUpdateRuntimeContext {
     var connectionMode: AppState.ConnectionMode = .local
     let bundledApp: Bool
@@ -330,12 +362,18 @@ struct PostUpdateRuntimeContext {
     let hasService: Bool
     let installedCLI: GatewayLaunchAgentManager.InstalledServiceCLI?
     let ownsManagedRuntime: Bool
+    var localCompanionVerified = false
 }
 
 struct PostUpdateGatewayResolution {
     let action: PostUpdateGatewayAction
     let installedCLI: GatewayLaunchAgentManager.InstalledServiceCLI?
     let prepareLocalCompanion: Bool
+    let serviceInstalled: Bool
+
+    func shouldRestartGateway(connectionMode: AppState.ConnectionMode, paused: Bool) -> Bool {
+        connectionMode == .local && !paused && self.serviceInstalled
+    }
 
     var needsManagedVerification: Bool {
         switch self.action {
@@ -357,6 +395,19 @@ struct PostUpdateSession: Decodable {
     let lastInteractionAt: Double?
     let spawnedBy: String?
     let parentSessionKey: String?
+}
+
+enum PostUpdateNotificationContinuation: Equatable {
+    case waitForRuntime
+    case notify
+    case deliveryUnconfirmed
+    case completeSilently
+}
+
+enum PostUpdateCoreRepairAction: Equatable {
+    case none
+    case repair
+    case reportFailure
 }
 
 enum PostUpdateNotificationOutcome: Equatable {
@@ -382,26 +433,102 @@ final class PostUpdateController: NSObject, NSWindowDelegate {
     private var receipt: PostAppUpdateReceipt?
     private var window: NSWindow?
     private var task: Task<Void, Never>?
+    private var retryNodeMigration = false
+    private var retryCoreRepair = false
+    private var migrationOnlyLaunchCheck = false
 
     @discardableResult
     func startIfNeeded(profile: AppProfile = .current) -> Bool {
+        guard self.task == nil else { return true }
         try? GatewayProcessManager.shared.initializeGatewayHosting()
         guard (try? GatewayProcessManager.shared.shouldDeferLegacyServiceWhilePaused()) == false else { return false }
         guard !profile.isActive || BundledRuntime.isBundledApp else { return false }
-        guard let receipt = PostAppUpdateReceiptStore.pendingForLaunch(
+        let pending = PostAppUpdateReceiptStore.pendingForLaunch(
             currentVersion: GatewayEnvironment.appVersionString(),
             currentRuntimeBuildID: Bundle.main.infoDictionary?["OpenClawRuntimeBuildID"] as? String,
             onboardingSeen: AppStateStore.shared.onboardingSeen,
             allowsUpdateWorkflow: BundledRuntime.isBundledApp || !CLIInstallBuild.isDebug)
+        // A legacy Node migration can fail on the first launch of a same-version rebuild,
+        // even when there is no ordinary app update receipt left to replay.
+        guard let receipt = Self.launchReceipt(
+            pending: pending,
+            profile: profile,
+            bundledApp: BundledRuntime.isBundledApp,
+            onboardingSeen: AppStateStore.shared.onboardingSeen,
+            appVersion: GatewayEnvironment.appVersionString())
         else { return false }
+        self.migrationOnlyLaunchCheck = pending == nil
         self.receipt = receipt
         self.run()
         return true
     }
 
+    static func launchReceipt(
+        pending: PostAppUpdateReceipt?,
+        profile: AppProfile,
+        bundledApp: Bool,
+        onboardingSeen: Bool,
+        appVersion: String?) -> PostAppUpdateReceipt?
+    {
+        guard !profile.isActive || bundledApp else { return nil }
+        if let pending { return pending }
+        guard bundledApp, onboardingSeen, let appVersion else { return nil }
+        return PostAppUpdateReceipt(fromVersion: appVersion, toVersion: appVersion, recordedAt: Date())
+    }
+
     func retry() {
         guard self.receipt != nil, !self.model.isWorking else { return }
+        let pendingSetup = PostAppUpdateReceiptStore.pendingSetupRecovery()
+        if let pendingSetup { self.receipt = pendingSetup }
+        let allowsMigration = Self.allowsNodeMigration(
+            paused: AppStateStore.shared.isPaused,
+            canActivate: GatewayProcessManager.shared.desiredActive && !GatewayProcessManager.shared.isTerminating,
+            receipt: self.receipt)
+        let retained = try? GatewayProcessManager.shared.nodeMigrationRetainedCLI()
+        let retainedManagedNode = retained?.hadRuntimePin == false && retained?.prefix.first.map {
+            GatewayLaunchAgentManager.isManagedNode($0, stateDirectory: AppProfile.current.stateDirectoryURL())
+        } == true
+        self.retryCoreRepair = Self.coreRepairAction(
+            receipt: self.receipt,
+            absentManagedService: AppStateStore.shared.connectionMode == .local &&
+                GatewayLaunchAgentManager.launchdProgramArguments()?.isEmpty == true &&
+                retainedManagedNode,
+            migrationNeedsCoreRepair: GatewayProcessManager.shared.nodeMigrationNeedsCoreRepair,
+            migrationFailed: GatewayProcessManager.shared.nodeMigrationFailure != nil,
+            explicitRetry: true) == .repair
+        self.retryNodeMigration = allowsMigration && !self.retryCoreRepair &&
+            (GatewayProcessManager.shared.nodeMigrationFailure != nil ||
+                GatewayProcessManager.shared.nodeMigrationVersionUpdated || retainedManagedNode)
+        if !allowsMigration, self.receipt?.gatewayUpdateIncomplete == true {
+            self.migrationOnlyLaunchCheck = false
+        }
         self.run()
+    }
+
+    static func allowsNodeMigration(paused: Bool, canActivate: Bool, receipt: PostAppUpdateReceipt?) -> Bool {
+        canActivate && !paused && !(receipt?.setupRecovery == true && receipt?.gatewayUpdateIncomplete == true)
+    }
+
+    static func coreRepairAction(
+        receipt: PostAppUpdateReceipt?,
+        absentManagedService: Bool,
+        migrationNeedsCoreRepair: Bool,
+        migrationFailed: Bool,
+        explicitRetry: Bool) -> PostUpdateCoreRepairAction
+    {
+        guard receipt?.gatewayUpdateIncomplete == true,
+              receipt?.setupRecovery == true || absentManagedService else { return .none }
+        if migrationFailed, !migrationNeedsCoreRepair, !explicitRetry { return .reportFailure }
+        return .repair
+    }
+
+    static func shouldOfferRuntimeMigrationRetry(
+        profile: AppProfile,
+        receipt: PostAppUpdateReceipt,
+        serviceInstalled: Bool,
+        retainedManagedNode: Bool) -> Bool
+    {
+        profile.isActive && receipt.hasPendingRuntimeMigration && serviceInstalled && retainedManagedNode
     }
 
     func close() {
@@ -463,7 +590,147 @@ final class PostUpdateController: NSObject, NSWindowDelegate {
         }
     }
 
+    private func finishNodeMigrationIfNeeded(
+        receipt: PostAppUpdateReceipt,
+        connectionMode: AppState.ConnectionMode) async -> Bool
+    {
+        guard BundledRuntime.isBundledApp else { return false }
+        await GatewayProcessManager.shared.waitForStartupAttempt()
+        let pendingSetup = PostAppUpdateReceiptStore.pendingSetupRecovery()
+        var currentReceipt = pendingSetup ?? PostAppUpdateReceiptStore
+            .pending(currentVersion: receipt.toVersion) ?? receipt
+        self.receipt = currentReceipt
+        let manager = GatewayProcessManager.shared
+        let retained = try? manager.nodeMigrationRetainedCLI()
+        let absentManagedService = connectionMode == .local &&
+            GatewayLaunchAgentManager.launchdProgramArguments()?.isEmpty == true &&
+            retained?.prefix.first.map {
+                GatewayLaunchAgentManager.isManagedNode($0, stateDirectory: AppProfile.current.stateDirectoryURL())
+            } == true
+        let coreRepair = Self.coreRepairAction(
+            receipt: currentReceipt,
+            absentManagedService: absentManagedService,
+            migrationNeedsCoreRepair: manager.nodeMigrationNeedsCoreRepair,
+            migrationFailed: manager.nodeMigrationFailure != nil,
+            explicitRetry: self.retryCoreRepair)
+        self.retryCoreRepair = false
+        if coreRepair == .repair {
+            self.retryNodeMigration = false
+            self.migrationOnlyLaunchCheck = false
+            return false
+        }
+        if coreRepair == .reportFailure, let failure = manager.nodeMigrationFailure {
+            self.setGatewayUpdateIncomplete(true, receipt: currentReceipt)
+            self.show()
+            self.fail(message: String(localized: "The Gateway runtime migration could not finish."), details: failure)
+            return true
+        }
+        guard Self.allowsNodeMigration(
+            paused: AppStateStore.shared.isPaused,
+            canActivate: GatewayProcessManager.shared.desiredActive && !GatewayProcessManager.shared.isTerminating,
+            receipt: currentReceipt)
+        else {
+            self.retryNodeMigration = false
+            if pendingSetup != nil || currentReceipt.gatewayUpdateIncomplete { self.migrationOnlyLaunchCheck = false }
+            return false
+        }
+        if self.retryNodeMigration {
+            self.retryNodeMigration = false
+            self.model.phase = .updating
+            self.model.message = String(localized: "Switching the Gateway to the bundled runtime…")
+            self.show()
+            do { try await GatewayProcessManager.shared.retryManagedNodeMigration() } catch {
+                currentReceipt = PostAppUpdateReceiptStore.pendingSetupRecovery() ??
+                    PostAppUpdateReceiptStore.pending(currentVersion: receipt.toVersion) ?? currentReceipt
+                self.receipt = PostAppUpdateReceiptStore.recordMigrationFailure(receipt: currentReceipt)
+                self.fail(
+                    message: String(localized: "The Gateway runtime migration could not finish."),
+                    details: error.localizedDescription)
+                return true
+            }
+            currentReceipt = PostAppUpdateReceiptStore.pendingSetupRecovery() ??
+                PostAppUpdateReceiptStore.pending(currentVersion: receipt.toVersion) ?? currentReceipt
+        }
+        if let failure = GatewayProcessManager.shared.nodeMigrationFailure {
+            self.receipt = PostAppUpdateReceiptStore.recordMigrationFailure(receipt: currentReceipt)
+            self.show()
+            self.fail(
+                message: String(localized: "The Gateway runtime migration could not finish."),
+                details: failure)
+            return true
+        }
+        if !manager.nodeMigrationCompleted, Self.shouldOfferRuntimeMigrationRetry(
+            profile: .current,
+            receipt: currentReceipt,
+            serviceInstalled: GatewayLaunchAgentManager.launchdProgramArguments()?.isEmpty == false,
+            retainedManagedNode: retained?.hadRuntimePin == false && retained?.prefix.first.map {
+                GatewayLaunchAgentManager.isManagedNode($0, stateDirectory: AppProfile.current.stateDirectoryURL())
+            } == true)
+        {
+            self.show()
+            self.fail(
+                message: String(localized: "The Gateway runtime migration could not finish."),
+                details: "The restored Node Gateway is still running. Choose Retry to finish switching it to Bun.")
+            return true
+        }
+        if GatewayProcessManager.shared.nodeMigrationVersionUpdated {
+            self.setGatewayUpdateIncomplete(true, receipt: currentReceipt)
+            self.show()
+            self.fail(
+                message: String(localized: "The Gateway version is updated and still running on Node."),
+                details: String(
+                    localized: """
+                    Choose Retry or relaunch OpenClaw to switch this same-version Gateway to the bundled runtime.
+                    """))
+            return true
+        }
+        if GatewayProcessManager.shared.nodeMigrationCompleted {
+            // This migration verified the local companion, not a remote-primary Mac node service.
+            guard connectionMode != .remote else { return false }
+            return await self.finishNotificationIfReady(
+                receipt: currentReceipt, connectionMode: connectionMode, runtimeVerified: true)
+        }
+        return false
+    }
+
+    private func finishNotificationIfReady(
+        receipt: PostAppUpdateReceipt,
+        connectionMode: AppState.ConnectionMode,
+        runtimeVerified: Bool = false,
+        readyConnectionMode: AppState.ConnectionMode? = nil) async -> Bool
+    {
+        let continuation = Self.notificationContinuation(
+            receipt: receipt,
+            runtimeVerified: runtimeVerified,
+            migrationOnlyLaunchCheck: self.migrationOnlyLaunchCheck)
+        guard continuation != .waitForRuntime else { return false }
+        if runtimeVerified { self.setGatewayUpdateIncomplete(false, receipt: receipt) }
+        switch continuation {
+        case .waitForRuntime:
+            return false
+        case .notify:
+            await self.finishNotification(
+                receipt: receipt, connectionMode: connectionMode, readyConnectionMode: readyConnectionMode)
+        case .deliveryUnconfirmed:
+            self.finishNotification(
+                outcome: .deliveryUnconfirmed,
+                receipt: receipt,
+                connectionMode: readyConnectionMode ?? self.notificationReadyConnectionMode(connectionMode))
+        case .completeSilently:
+            self.model.phase = .complete
+            self.model.message = String(localized: "The Gateway is ready on the bundled runtime.")
+            self.model.details = nil
+            PostAppUpdateReceiptStore.clear()
+            self.receipt = nil
+        }
+        return true
+    }
+
     private func finishUpdate(receipt: PostAppUpdateReceipt) async {
+        if BundledRuntime.isBundledApp { await GatewayProcessManager.shared.waitForStartupAttempt() }
+        var receipt = PostAppUpdateReceiptStore.pendingSetupRecovery() ??
+            PostAppUpdateReceiptStore.pending(currentVersion: receipt.toVersion) ?? receipt
+        self.receipt = receipt
         guard !AppProfile.current.isActive || BundledRuntime.isBundledApp else {
             self.finishSilently()
             return
@@ -473,18 +740,19 @@ final class PostUpdateController: NSObject, NSWindowDelegate {
             self.finishSilently()
             return
         }
-
-        // Resume a definitely uncommitted notification before the Gateway action
-        // gate; a ready runtime must not discard it as an app-only receipt.
-        if Self.isNotificationOnlyRetry(receipt) {
-            await self.finishNotification(receipt: receipt, connectionMode: connectionMode)
+        if self.shouldDeferPausedLegacyRuntime(receipt: receipt, connectionMode: connectionMode) {
+            self.deferRuntimeVerification()
             return
         }
-        if receipt.notificationInFlight, !receipt.gatewayUpdateIncomplete {
-            self.finishNotification(
-                outcome: .deliveryUnconfirmed,
-                receipt: receipt,
-                connectionMode: self.notificationReadyConnectionMode(connectionMode))
+
+        // Pending notification work precedes migration status, including same-version startup migrations.
+        if await self.finishNotificationIfReady(receipt: receipt, connectionMode: connectionMode) { return }
+        if await self.finishNodeMigrationIfNeeded(receipt: receipt, connectionMode: connectionMode) { return }
+        receipt = self.receipt ?? receipt
+
+        let verifiedCompanion = connectionMode == .remote && GatewayProcessManager.shared.nodeMigrationCompleted
+        if self.migrationOnlyLaunchCheck, !verifiedCompanion {
+            self.finishSilently()
             return
         }
 
@@ -499,103 +767,54 @@ final class PostUpdateController: NSObject, NSWindowDelegate {
             self.fail(message: String(localized: "Gateway verification failed."), details: error.localizedDescription)
             return
         }
-        let restartGateway = connectionMode == .local && !AppStateStore.shared.isPaused
-
-        // App-only relaunches stay invisible. The window belongs only to
-        // confirmed managed Gateway work and its recovery path.
-        switch resolution.action {
-        case .managedRuntimeUnavailable:
-            self.setGatewayUpdateIncomplete(true, receipt: receipt)
-            self.show()
-            self.fail(
-                message: String(localized: "Gateway verification failed."),
-                details: String(localized: "The managed runtime does not match the updated Mac app."))
-            return
-        case .none:
-            if !resolution.prepareLocalCompanion {
-                self.finishSilently()
-                return
-            }
-        case .ownershipFailure:
-            if resolution.prepareLocalCompanion { self.setGatewayUpdateIncomplete(true, receipt: receipt) }
-            self.finishAfterOwnershipCheckFailure(
-                connectionMode: connectionMode,
-                receipt: self.receipt ?? receipt)
-            return
-        case .prepareBundledRuntime:
-            guard await self.prepareBundledRuntime(receipt: receipt) else { return }
-        case .repair:
-            self.model.phase = .updating
-            self.show()
-            let outcome = await CLIInstaller.updateManaged(
-                targetVersion: receipt.toVersion,
-                restartGateway: restartGateway,
-                repair: true,
-                installedCLI: resolution.installedCLI)
-            { [weak self] message in
-                self?.model.message = message
-            }
-            guard self.consume(outcome) else { return }
-        case .update:
-            self.setGatewayUpdateIncomplete(true, receipt: receipt)
-            self.model.phase = .updating
-            self.show()
-            let outcome = await CLIInstaller.updateManaged(
-                targetVersion: receipt.toVersion,
-                restartGateway: restartGateway,
-                installedCLI: resolution.installedCLI)
-            { [weak self] message in
-                self?.model.message = message
-            }
-            guard self.consume(outcome) else { return }
-        case .install:
-            self.setGatewayUpdateIncomplete(true, receipt: receipt)
-            self.model.phase = .updating
-            self.show()
-            let installed = await CLIInstaller.install(target: .exact(receipt.toVersion)) { [weak self] message in
-                self?.model.message = message
-            }
-            guard installed else {
-                self.fail(
-                    message: String(localized: "Gateway recovery failed."),
-                    details: String(localized: "The managed OpenClaw runtime could not be reinstalled."))
-                return
-            }
-        }
-
-        guard await self.verifyRuntimeUpdates(
-            resolution: resolution, connectionMode: connectionMode, receipt: receipt)
-        else { return }
-        // Verification owns the persistence boundary: clearing earlier would
-        // turn a failed health check into a silent app-only completion on retry.
-        self.setGatewayUpdateIncomplete(false, receipt: receipt)
-
-        await self.finishNotification(
-            receipt: receipt,
+        guard await self.performGatewayUpdate(
+            resolution: resolution,
             connectionMode: connectionMode,
-            readyConnectionMode: resolution.prepareLocalCompanion && resolution
+            receipt: receipt,
+            verifiedCompanion: verifiedCompanion)
+        else { return }
+
+        switch await self.verifyRuntimeUpdates(
+            resolution: resolution, connectionMode: connectionMode, receipt: receipt)
+        {
+        case .failed:
+            return
+        case .deferred:
+            self.deferRuntimeVerification()
+            return
+        case .verified:
+            break
+        }
+        // Verification owns the persistence boundary, including a possibly delivered notification.
+        _ = await self.finishNotificationIfReady(
+            receipt: self.receipt ?? receipt,
+            connectionMode: connectionMode,
+            runtimeVerified: true,
+            readyConnectionMode: (resolution.prepareLocalCompanion || verifiedCompanion) && resolution
                 .action == .none ? .local : connectionMode)
     }
 
     private func verifyRuntimeUpdates(
         resolution: PostUpdateGatewayResolution,
         connectionMode: AppState.ConnectionMode,
-        receipt: PostAppUpdateReceipt) async -> Bool
+        receipt: PostAppUpdateReceipt) async -> PostUpdateRuntimeVerification
     {
         self.model.phase = .verifying
         self.model.message = connectionMode == .local
             ? String(localized: "Restarting and verifying the Gateway…")
             : String(localized: "Verifying the Mac node runtime…")
         if resolution.needsManagedVerification {
-            guard await self.verifyRuntime(
+            let verification = await self.verifyRuntime(
                 connectionMode: connectionMode,
-                installedCLI: resolution.installedCLI)
-            else { return false }
+                installedCLI: resolution.installedCLI,
+                serviceInstalled: resolution.serviceInstalled,
+                receipt: receipt)
+            guard verification == .verified else { return verification }
         }
         if resolution.prepareLocalCompanion {
-            guard await self.prepareBundledRuntime(receipt: self.receipt ?? receipt) else { return false }
+            guard await self.prepareBundledRuntime(receipt: self.receipt ?? receipt) else { return .failed }
         }
-        return true
+        return .verified
     }
 
     private func prepareBundledRuntime(receipt: PostAppUpdateReceipt) async -> Bool {
@@ -626,14 +845,20 @@ final class PostUpdateController: NSObject, NSWindowDelegate {
             }
         }
         let usesSeededGateway = GatewayProcessManager.shared.usesSeededGateway
-        let prepareCompanion = connectionMode == .remote && bundled && usesSeededGateway
-        let context: PostUpdateRuntimeContext
+        let companionVerified = GatewayProcessManager.shared.nodeMigrationCompleted
+        let prepareCompanion = connectionMode == .remote && bundled && usesSeededGateway && !companionVerified
+        var context: PostUpdateRuntimeContext
         do {
             context = try Self.captureRuntimeContext(
                 connectionMode: connectionMode, bundledApp: bundled, usesSeededGateway: usesSeededGateway)
         } catch {
-            return .init(action: .ownershipFailure, installedCLI: nil, prepareLocalCompanion: prepareCompanion)
+            return .init(
+                action: .ownershipFailure,
+                installedCLI: nil,
+                prepareLocalCompanion: prepareCompanion,
+                serviceInstalled: true)
         }
+        context.localCompanionVerified = companionVerified
         return await Self.resolveGatewayAction(
             context: context, gatewayUpdateIncomplete: gatewayUpdateIncomplete)
         {
@@ -648,6 +873,7 @@ final class PostUpdateController: NSObject, NSWindowDelegate {
     {
         let programArguments: [String]
         let installedCLI: GatewayLaunchAgentManager.InstalledServiceCLI?
+        let hasService: Bool
         switch connectionMode {
         case .local:
             guard let arguments = GatewayLaunchAgentManager.launchdProgramArguments() else {
@@ -657,21 +883,24 @@ final class PostUpdateController: NSObject, NSWindowDelegate {
                 ? try GatewayProcessManager.shared.serviceCLIForResume()
                 : GatewayLaunchAgentManager.installedServiceCLI()
             programArguments = arguments.isEmpty ? installedCLI.map { $0.prefix + ["gateway"] } ?? [] : arguments
+            hasService = !arguments.isEmpty
         case .remote:
             guard let arguments = NodeServiceManager.launchdProgramArguments() else {
                 throw GatewayHostingError(message: GatewayProcessManager.Installation.ownershipFailure)
             }
             programArguments = arguments
             installedCLI = NodeServiceManager.installedServiceCLI()
+            hasService = !arguments.isEmpty
         case .unconfigured:
             programArguments = []
             installedCLI = nil
+            hasService = false
         }
         return PostUpdateRuntimeContext(
             connectionMode: connectionMode,
             bundledApp: bundledApp,
             usesSeededGateway: usesSeededGateway,
-            hasService: !programArguments.isEmpty,
+            hasService: hasService,
             installedCLI: installedCLI,
             ownsManagedRuntime: Self.ownsManagedRuntime(
                 connectionMode: connectionMode,
@@ -709,7 +938,9 @@ final class PostUpdateController: NSObject, NSWindowDelegate {
         return PostUpdateGatewayResolution(
             action: action,
             installedCLI: context.installedCLI,
-            prepareLocalCompanion: remote && context.bundledApp && context.usesSeededGateway)
+            prepareLocalCompanion: remote && context.bundledApp && context.usesSeededGateway &&
+                !context.localCompanionVerified,
+            serviceInstalled: context.hasService)
     }
 
     private func finishNotification(
@@ -717,10 +948,6 @@ final class PostUpdateController: NSObject, NSWindowDelegate {
         connectionMode: AppState.ConnectionMode,
         readyConnectionMode: AppState.ConnectionMode? = nil) async
     {
-        if receipt.setupRecovery {
-            self.finishSilently()
-            return
-        }
         self.model.phase = .notifying
         self.model.message = String(localized: "Letting your agent know you’re back…")
         let notification = connectionMode == .local && AppStateStore.shared.isPaused
@@ -816,60 +1043,6 @@ final class PostUpdateController: NSObject, NSWindowDelegate {
             receipt: receipt)
     }
 
-    private func verifyRuntime(
-        connectionMode: AppState.ConnectionMode,
-        installedCLI: GatewayLaunchAgentManager.InstalledServiceCLI?) async -> Bool
-    {
-        guard case .ready = await CLIInstaller.managedStatus(
-            installedCLI: installedCLI, usesBundledRuntime: false)
-        else {
-            self.fail(
-                message: String(localized: "Gateway verification failed."),
-                details: String(localized: "The managed runtime does not match the updated Mac app."))
-            return false
-        }
-        if connectionMode == .remote {
-            if let error = await NodeServiceManager.restart() {
-                self.fail(
-                    message: String(localized: "The Mac node did not restart."),
-                    details: error)
-                return false
-            }
-            guard await NodeServiceManager.waitUntilRunning() else {
-                self.fail(
-                    message: String(localized: "The Mac node did not become ready."),
-                    details: String(localized: "The node service restarted but did not remain running."))
-                return false
-            }
-            return true
-        }
-
-        await GatewayConnection.shared.shutdown()
-        let activation = await CLIInstaller.activateLocalGateway()
-        switch activation {
-        case .failed:
-            self.fail(
-                message: String(localized: "The Gateway did not start."),
-                details: String(localized: "The update is installed, but Gateway health did not become ready."))
-            return false
-        case .deferred:
-            // A paused Gateway stays paused. On-disk version verification above
-            // is sufficient; reconnecting would violate the user's pause state.
-            return true
-        case .ready:
-            break
-        }
-        await ControlChannel.shared.refreshEndpoint(reason: "post-app-update")
-        guard ControlChannel.shared.state == .connected else {
-            self.fail(
-                message: String(localized: "The Gateway could not reconnect."),
-                details: String(
-                    localized: "OpenClaw installed the update but could not verify the Gateway connection."))
-            return false
-        }
-        return true
-    }
-
     private func notifyMostRecentSession(
         version: String,
         connectionMode: AppState.ConnectionMode,
@@ -953,6 +1126,19 @@ final class PostUpdateController: NSObject, NSWindowDelegate {
         return !CLIInstallPrompter.isManagedUpgrade(
             found: gatewayVersion,
             required: appVersion)
+    }
+
+    static func notificationContinuation(
+        receipt: PostAppUpdateReceipt,
+        runtimeVerified: Bool,
+        migrationOnlyLaunchCheck: Bool) -> PostUpdateNotificationContinuation
+    {
+        if receipt.setupRecovery { return runtimeVerified ? .completeSilently : .waitForRuntime }
+        if self.isNotificationOnlyRetry(receipt) { return .notify }
+        if receipt.notificationInFlight && !receipt.gatewayUpdateIncomplete { return .deliveryUnconfirmed }
+        guard runtimeVerified else { return .waitForRuntime }
+        guard !migrationOnlyLaunchCheck else { return .completeSilently }
+        return receipt.notificationInFlight ? .deliveryUnconfirmed : .notify
     }
 
     static func isNotificationOnlyRetry(_ receipt: PostAppUpdateReceipt) -> Bool {
@@ -1099,6 +1285,186 @@ final class PostUpdateController: NSObject, NSWindowDelegate {
     }
 }
 
+extension PostUpdateController {
+    private func deferRuntimeVerification() {
+        self.model.phase = .deferred
+        self.model.message = String(localized: "The Gateway remains paused, so OpenClaw did not wake your agent.")
+        self.model.details = String(localized: "Resume OpenClaw to finish starting and verifying the Gateway.")
+    }
+
+    private func shouldDeferPausedLegacyRuntime(
+        receipt: PostAppUpdateReceipt,
+        connectionMode: AppState.ConnectionMode) -> Bool
+    {
+        guard connectionMode == .local, AppStateStore.shared.isPaused, receipt.hasPendingRuntimeMigration,
+              GatewayLaunchAgentManager.launchdProgramArguments()?.isEmpty == true,
+              let cli = try? GatewayProcessManager.shared.serviceCLIForResume(),
+              let executable = cli.prefix.first else { return false }
+        return GatewayLaunchAgentManager.isManagedNode(
+            executable, stateDirectory: AppProfile.current.stateDirectoryURL())
+    }
+
+    private func performGatewayUpdate(
+        resolution: PostUpdateGatewayResolution,
+        connectionMode: AppState.ConnectionMode,
+        receipt: PostAppUpdateReceipt,
+        verifiedCompanion: Bool) async -> Bool
+    {
+        let restartGateway = resolution.shouldRestartGateway(
+            connectionMode: connectionMode, paused: AppStateStore.shared.isPaused)
+
+        // App-only relaunches stay invisible. The window belongs only to
+        // confirmed managed Gateway work and its recovery path.
+        switch resolution.action {
+        case .managedRuntimeUnavailable:
+            self.setGatewayUpdateIncomplete(true, receipt: receipt)
+            self.show()
+            self.fail(
+                message: String(localized: "Gateway verification failed."),
+                details: String(localized: "The managed runtime does not match the updated Mac app."))
+            return false
+        case .none:
+            if !resolution.prepareLocalCompanion, !verifiedCompanion {
+                self.finishSilently()
+                return false
+            }
+        case .ownershipFailure:
+            if resolution.prepareLocalCompanion || verifiedCompanion {
+                self.setGatewayUpdateIncomplete(true, receipt: receipt)
+            }
+            self.finishAfterOwnershipCheckFailure(
+                connectionMode: connectionMode,
+                receipt: self.receipt ?? receipt)
+            return false
+        case .prepareBundledRuntime:
+            guard await self.prepareBundledRuntime(receipt: receipt) else { return false }
+        case .repair:
+            self.model.phase = .updating
+            self.show()
+            let outcome = await CLIInstaller.updateManaged(
+                targetVersion: receipt.toVersion,
+                restartGateway: restartGateway,
+                repair: true,
+                installedCLI: resolution.installedCLI)
+            { [weak self] message in
+                self?.model.message = message
+            }
+            guard self.consume(outcome) else { return false }
+        case .update:
+            self.setGatewayUpdateIncomplete(true, receipt: receipt)
+            self.model.phase = .updating
+            self.show()
+            let outcome = await CLIInstaller.updateManaged(
+                targetVersion: receipt.toVersion,
+                restartGateway: restartGateway,
+                installedCLI: resolution.installedCLI)
+            { [weak self] message in
+                self?.model.message = message
+            }
+            guard self.consume(outcome) else { return false }
+        case .install:
+            self.setGatewayUpdateIncomplete(true, receipt: receipt)
+            self.model.phase = .updating
+            self.show()
+            let installed = await CLIInstaller.install(target: .exact(receipt.toVersion)) { [weak self] message in
+                self?.model.message = message
+            }
+            guard installed else {
+                self.fail(
+                    message: String(localized: "Gateway recovery failed."),
+                    details: String(localized: "The managed OpenClaw runtime could not be reinstalled."))
+                return false
+            }
+        }
+        return true
+    }
+
+    private func verifyRuntime(
+        connectionMode: AppState.ConnectionMode,
+        installedCLI: GatewayLaunchAgentManager.InstalledServiceCLI?,
+        serviceInstalled: Bool,
+        receipt: PostAppUpdateReceipt) async -> PostUpdateRuntimeVerification
+    {
+        let reconstructService = connectionMode == .local && BundledRuntime.isBundledApp && !serviceInstalled
+        var verifiedCLI = installedCLI
+        if reconstructService, let installedCLI {
+            do {
+                verifiedCLI = try GatewayProcessManager.shared.refreshLegacyNodeCLI(afterCoreUpdate: installedCLI)
+            } catch {
+                self.fail(
+                    message: String(localized: "Gateway verification failed."),
+                    details: error.localizedDescription)
+                return .failed
+            }
+        }
+        guard case .ready = await CLIInstaller.managedStatus(
+            expectedVersion: receipt.toVersion, installedCLI: verifiedCLI, usesBundledRuntime: false)
+        else {
+            self.fail(
+                message: String(localized: "Gateway verification failed."),
+                details: String(localized: "The managed runtime does not match the updated Mac app."))
+            return .failed
+        }
+        if connectionMode == .remote {
+            if let error = await NodeServiceManager.restart() {
+                self.fail(
+                    message: String(localized: "The Mac node did not restart."),
+                    details: error)
+                return .failed
+            }
+            guard await NodeServiceManager.waitUntilRunning() else {
+                self.fail(
+                    message: String(localized: "The Mac node did not become ready."),
+                    details: String(localized: "The node service restarted but did not remain running."))
+                return .failed
+            }
+            return .verified
+        }
+
+        if reconstructService, let verifiedCLI {
+            self.receipt = PostAppUpdateReceiptStore.completeCoreRepair(currentVersion: receipt.toVersion) ?? receipt
+            if AppStateStore.shared.isPaused { return .deferred }
+            do {
+                try await GatewayProcessManager.shared.retryManagedNodeMigration(coreRepairVerifiedCLI: verifiedCLI)
+                guard GatewayProcessManager.shared.nodeMigrationCompleted else {
+                    throw GatewayHostingError(message: "The repaired Gateway could not finish switching to Bun. Retry.")
+                }
+            } catch {
+                self.receipt = PostAppUpdateReceiptStore.recordMigrationFailure(receipt: self.receipt ?? receipt)
+                self.fail(
+                    message: String(localized: "The Gateway runtime migration could not finish."),
+                    details: error.localizedDescription)
+                return .failed
+            }
+        } else {
+            await GatewayConnection.shared.shutdown()
+            let activation = await CLIInstaller.activateLocalGateway()
+            switch activation {
+            case .failed:
+                self.fail(
+                    message: String(localized: "The Gateway did not start."),
+                    details: String(localized: "The update is installed, but Gateway health did not become ready."))
+                return .failed
+            case .deferred:
+                // A paused Gateway stays paused. On-disk version verification above
+                // is sufficient; reconnecting would violate the user's pause state.
+                return .verified
+            case .ready:
+                break
+            }
+        }
+        await ControlChannel.shared.refreshEndpoint(reason: "post-app-update")
+        guard ControlChannel.shared.state == .connected else {
+            self.fail(
+                message: String(localized: "The Gateway could not reconnect."),
+                details: String(
+                    localized: "OpenClaw installed the update but could not verify the Gateway connection."))
+            return .failed
+        }
+        return .verified
+    }
+}
+
 private struct PostUpdateView: View {
     @Bindable var model: PostUpdateModel
 
@@ -1156,7 +1522,7 @@ private struct PostUpdateView: View {
                 Button("Retry") { PostUpdateController.shared.retry() }
                     .buttonStyle(.borderedProminent)
             }
-        case .complete:
+        case .deferred, .complete:
             HStack {
                 Spacer()
                 Button("Continue") { PostUpdateController.shared.close() }
