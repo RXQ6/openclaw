@@ -99,7 +99,6 @@ export async function reactivateCompletedSubagentSession(params: {
         nextRunId: runId,
         fallback: source,
         runTimeoutSeconds: source.runTimeoutSeconds ?? 0,
-        persistenceFailure: "throw",
         ...(hasTask ? { task } : {}),
         ...gatewayBinding,
       });

@@ -1,9 +1,4 @@
 import { hasSqliteWorkerOutcomeUnknown } from "../../../infra/sqlite-worker-contract.js";
-/**
- * Subagent run completion helpers.
- * Compares outcomes, maps them to lifecycle events, and emits completion hooks
- * exactly once per completed child run.
- */
 import { createSubsystemLogger } from "../../../logging/subsystem.js";
 import { getGlobalHookRunner } from "../../../plugins/hook-runner-global.js";
 import type { SubagentRunOutcome } from "../subagent-run-outcome.types.js";
@@ -88,7 +83,6 @@ export function resolveKilledSubagentTaskEndedAt(entry: SubagentRunRecord): numb
     : endedAt;
 }
 
-/** Maps registry run outcome to lifecycle event outcome. */
 export function resolveLifecycleOutcomeFromRunOutcome(
   outcome: SubagentRunOutcome | undefined,
 ): SubagentLifecycleEndedOutcome {
@@ -101,7 +95,6 @@ export function resolveLifecycleOutcomeFromRunOutcome(
   return SUBAGENT_ENDED_OUTCOME_OK;
 }
 
-/** Emits the transient presentation event for a newly terminal child run. */
 export async function emitSubagentProgressEndedHook(entry: SubagentRunRecord): Promise<void> {
   const hookRunner = getGlobalHookRunner();
   if (!hookRunner?.hasHooks("subagent_progress")) {
@@ -135,7 +128,6 @@ export async function emitSubagentProgressEndedHook(entry: SubagentRunRecord): P
   }
 }
 
-/** Emits the subagent_ended hook once per completed run. */
 export async function emitSubagentEndedHookOnce(params: {
   entry: SubagentRunRecord;
   reason: SubagentLifecycleEndedReason;

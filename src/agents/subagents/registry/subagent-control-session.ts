@@ -87,7 +87,6 @@ export async function persistSubagentAbortedLastRun(params: {
   abortedLastRun: boolean;
   isCurrent?: (current: SessionEntry) => boolean;
   assertCommitAllowed?: () => void;
-  strict?: boolean;
 }): Promise<boolean> {
   if (!params.hasSessionEntry) {
     return true;
@@ -134,9 +133,6 @@ export async function persistSubagentAbortedLastRun(params: {
     return true;
   } catch (error) {
     if (hasSqliteWorkerOutcomeUnknown(error)) {
-      throw error;
-    }
-    if (params.strict) {
       throw error;
     }
     logVerbose(

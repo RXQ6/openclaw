@@ -8,10 +8,8 @@ import {
   type SessionDepthEntry,
 } from "./subagent-depth-policy.js";
 import {
-  asSessionCapabilityLookup,
   createSubagentSessionStore,
   type SessionCapabilityLookup,
-  type SessionCapabilityStore,
 } from "./subagent-session-store.js";
 
 function buildKeyCandidates(
@@ -88,12 +86,12 @@ export function getSubagentDepthFromSessionStore(
   sessionKey: string | undefined | null,
   opts?: {
     cfg?: OpenClawConfig;
-    store?: SessionCapabilityStore;
+    store?: SessionCapabilityLookup;
     agentId?: string;
   },
 ): number {
   const cache = new Map<string, SessionCapabilityLookup>();
-  const store = opts?.store ? asSessionCapabilityLookup(opts.store) : undefined;
+  const store = opts?.store;
   if (store?.scope) {
     cache.set(`${store.scope.storePath}\0${normalizeAgentId(store.scope.agentId)}`, store);
   }

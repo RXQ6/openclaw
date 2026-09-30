@@ -333,7 +333,6 @@ export function resolveSandboxedSessionToolContext(params: {
     ? resolveInternalSessionKey({
         key: requesterSessionKey,
         alias,
-        mainKey,
       })
     : undefined;
   const effectiveRequesterKey = requesterInternalKey ?? alias;

@@ -365,65 +365,17 @@ export function registerRequiredQueuedSubagent(params: {
         params.activate();
         return;
       }
-      if (intentAcknowledged) {
-        break;
-      }
-      let observedClaim = false;
-      const stopObservingClaim = onSubagentRegistryPersisted(() => {
-        if (exactEntry() && entry.killIntent) {
-          observedClaim = true;
-        }
-      });
+      const intentPhase = !intentAcknowledged;
       try {
-        await manager.persistAsyncOrThrow(
-          context,
-          {
-            assertCurrent: assertRegistrationCurrent,
-          },
-          runId,
-          ...Array.from(originals.keys(), (previous) => previous.runId),
-        );
-        intentAcknowledged = true;
-      } catch (error) {
-        const refused =
-          error instanceof SubagentRegistryWriteError && error.outcome === "not-committed";
-        if (
-          refused &&
-          registryCurrent() &&
-          exactEntry() &&
-          (observedClaim || pendingClaim() || (ownsSession() && confirmedTakeover()))
-        ) {
-          continue;
-        }
-        if (refused) {
-          if (!rollbackMemory()) {
-            await failIncompleteRegistration(error);
-          }
-        } else {
-          persistenceUncertain = true;
-          recoveryPending = { kind: "restore", error };
-        }
-        throw error;
-      } finally {
-        stopObservingClaim();
-      }
-    }
-    for (;;) {
-      for (let claim = waitForClaim(); claim; claim = waitForClaim()) {
-        await claim;
-      }
-      if (registryCurrent() && exactEntry() && ownsSession() && confirmedTakeover()) {
-        params.activate();
-        return;
-      }
-      try {
-        if (!registrationAcknowledged) {
+        if (!intentPhase && !registrationAcknowledged) {
           params.assertCurrent?.();
           if (!gatewayCurrent()) {
             throw new Error("Queued registration lost its original Gateway owner");
           }
         }
-        assertLaunchCurrent();
+        if (!intentPhase) {
+          assertLaunchCurrent();
+        }
       } catch (error) {
         await failIncompleteRegistration(error);
         throw error;
@@ -439,6 +391,16 @@ export function registerRequiredQueuedSubagent(params: {
         }
       });
       try {
+        if (intentPhase) {
+          await manager.persistAsyncOrThrow(
+            context,
+            { assertCurrent: assertRegistrationCurrent },
+            runId,
+            ...Array.from(originals.keys(), (previous) => previous.runId),
+          );
+          intentAcknowledged = true;
+          continue;
+        }
         entry.queuedLaunch = queuedLaunch;
         // Snapshot synchronously, then hide the descriptor until authoritative publication.
         let publication: Promise<void>;
@@ -473,8 +435,14 @@ export function registerRequiredQueuedSubagent(params: {
         ) {
           continue;
         }
-        persistenceUncertain = !refused;
-        recoveryPending = { kind: "restore", error };
+        if (intentPhase && refused) {
+          if (!rollbackMemory()) {
+            await failIncompleteRegistration(error);
+          }
+        } else {
+          persistenceUncertain = !refused;
+          recoveryPending = { kind: "restore", error };
+        }
         throw error;
       } finally {
         stopObservingClaim();

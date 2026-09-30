@@ -23,7 +23,7 @@ import {
   resolvePersistedSubagentToolPolicyEnvelope,
   resolveSubagentCapabilityStore,
   type PreparedSessionCapabilityEntry,
-  type SessionCapabilityStore,
+  type SessionCapabilityLookup,
 } from "./subagents/spawn/subagent-capabilities.js";
 
 const MAX_DELEGATION_LINEAGE_DEPTH = 32;
@@ -38,7 +38,7 @@ type RequesterToolPolicyResolution = {
   senderPolicy?: SandboxToolPolicy;
   subagentPolicy?: SandboxToolPolicy;
   inheritedToolPolicy?: SandboxToolPolicy;
-  subagentStore?: SessionCapabilityStore;
+  subagentStore?: SessionCapabilityLookup;
 };
 
 type SenderPolicyMode = "always" | "when-sender-id" | "never";
@@ -49,7 +49,7 @@ type RequesterToolPolicyParams = {
   sessionKey?: string;
   subagentSessionKey?: string;
   preparedSessionEntry?: PreparedSessionCapabilityEntry;
-  preparedSessionCapabilityStore?: SessionCapabilityStore;
+  preparedSessionCapabilityStore?: SessionCapabilityLookup;
   spawnedBy?: string | null;
   messageProvider?: string | null;
   groupId?: string | null;
@@ -90,7 +90,7 @@ function policyFromEnvelope(
 
 function resolveDelegatedPolicy(
   params: RequesterToolPolicyParams,
-  subagentStore: SessionCapabilityStore | undefined,
+  subagentStore: SessionCapabilityLookup | undefined,
 ):
   | { delegated: false }
   | {

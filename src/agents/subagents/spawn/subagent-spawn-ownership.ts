@@ -16,7 +16,6 @@ export function resolveSubagentSpawnOwnership(params: {
     ? resolveInternalSessionKey({
         key: params.agentSessionKey,
         alias,
-        mainKey,
       })
     : alias;
   const completionOwnerKey = params.completionOwnerKey?.trim();
@@ -24,7 +23,6 @@ export function resolveSubagentSpawnOwnership(params: {
     ? resolveInternalSessionKey({
         key: completionOwnerKey,
         alias,
-        mainKey,
       })
     : controllerSessionKey;
   // Completion ownership can differ from control ownership when a parent proxies the spawn.

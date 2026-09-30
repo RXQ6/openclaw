@@ -436,7 +436,7 @@ export function getSubagentSessionListRunsSnapshotForChildSessions(
   if (shouldReadPersistedSubagentRuns()) {
     const snapshot = loadPersistedSubagentRunsForRead(cache);
     const lookup = getSessionListLookup(cache, snapshot);
-    for (const runId of lookup?.selectChildren(keys) ?? []) {
+    for (const runId of lookup.selectChildren(keys)) {
       // A live row can have moved out of a persisted child bucket.
       const persisted = snapshot.get(runId);
       const live = persisted && subagentRuns.get(persisted.runId);
@@ -547,8 +547,7 @@ export function getSubagentSessionListRunsSnapshotForRead(
     const cached = shouldReadPersistedSubagentRuns()
       ? getPersistedSubagentRunsSnapshot(cache)
       : null;
-    const lookup = cached ? getSessionListLookup(cache, cached) : undefined;
-    if (!cached || !lookup) {
+    if (!cached) {
       if (!shouldReadPersistedSubagentRuns()) {
         return getSubagentRunsSnapshot(inMemoryRuns, cache, {
           matches,
@@ -556,6 +555,7 @@ export function getSubagentSessionListRunsSnapshotForRead(
       }
       throw new Error("Subagent session-list facts must be prepared before synchronous reads");
     }
+    const lookup = getSessionListLookup(cache, cached);
     return getSubagentRunsSnapshot(inMemoryRuns, cache, {
       fresh: true,
       load: () => indexedSnapshotRows(cached, lookup.selectControllers(keys)),
@@ -565,14 +565,15 @@ export function getSubagentSessionListRunsSnapshotForRead(
   return getSubagentRunsSnapshot(inMemoryRuns, persistedSubagentSessionListRunsReadCache);
 }
 
-function getSubagentSessionTreeSnapshot<T extends SubagentRunReadRecord>(
+/** Exact rows share the owner snapshot while projecting only their complete requester trees. */
+export function getSubagentSessionListRunsSnapshotForSessions(
   inMemoryRuns: Map<string, SubagentRunRecord>,
   sessionKeys: readonly string[],
-  cache: SubagentRunsCache<T>,
-): Map<string, T> {
+): Map<string, SubagentRunReadRecord> {
   if (!sessionKeys.some((key) => key.trim())) {
     return new Map();
   }
+  const cache = persistedSubagentSessionListRunsReadCache;
   const cached = shouldReadPersistedSubagentRuns() ? getPersistedSubagentRunsSnapshot(cache) : null;
   const lookup = cached ? getSessionListLookup(cache, cached) : undefined;
   const indexed = lookup?.selectSessions(sessionKeys, inMemoryRuns.values());
@@ -592,18 +593,6 @@ function getSubagentSessionTreeSnapshot<T extends SubagentRunReadRecord>(
     },
     matches: (entry) => selected.has(entry.childSessionKey.trim()),
   });
-}
-
-/** Exact rows share the owner snapshot while projecting only their complete requester trees. */
-export function getSubagentSessionListRunsSnapshotForSessions(
-  inMemoryRuns: Map<string, SubagentRunRecord>,
-  sessionKeys: readonly string[],
-): Map<string, SubagentRunReadRecord> {
-  return getSubagentSessionTreeSnapshot(
-    inMemoryRuns,
-    sessionKeys,
-    persistedSubagentSessionListRunsReadCache,
-  );
 }
 
 export function getSubagentRunsSnapshotForController(

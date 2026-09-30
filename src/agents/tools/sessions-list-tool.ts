@@ -529,7 +529,6 @@ export function createSessionsListTool(opts?: {
             sessionKey: resolveInternalSessionKey({
               key,
               alias,
-              mainKey,
             }),
             agentId: resolvedAgentId,
           });
@@ -538,7 +537,6 @@ export function createSessionsListTool(opts?: {
           const resolvedKey = resolveInternalSessionKey({
             key,
             alias,
-            mainKey,
           });
           historyTargets.push({ row, resolvedKey });
         }

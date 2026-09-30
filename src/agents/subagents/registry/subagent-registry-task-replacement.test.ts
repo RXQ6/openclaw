@@ -332,7 +332,6 @@ it.each(["successor", "source retirement"] as const)(
             expected: previous,
             allowEndedSource: true,
             lifecycleGeneration: getAgentEventLifecycleGeneration(),
-            persistenceFailure: "return-false",
           }),
         )
         .toBe(false);
@@ -393,7 +392,6 @@ it("rearms native execution for an interrupted run's successor", async () => {
         nextRunId: "interrupted-task-new",
         expected: previous,
         allowEndedSource: true,
-        persistenceFailure: "throw",
       }),
     ).toBe(true);
   } finally {
@@ -422,7 +420,6 @@ it("rearms native execution for an interrupted run's successor", async () => {
       previousRunId: successor.runId,
       nextRunId: "interrupted-task-newer",
       expected: successor,
-      persistenceFailure: "throw",
     }),
   ).toBe(true);
 });

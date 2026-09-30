@@ -44,7 +44,7 @@ import {
   resolveStoredSubagentInheritedToolAllowlist,
   resolveStoredSubagentInheritedToolDenylist,
   resolveStoredSubagentCapabilities,
-  type SessionCapabilityStore,
+  type SessionCapabilityLookup,
   type SubagentSessionRole,
 } from "./subagents/spawn/subagent-capabilities.js";
 import { createToolPolicyMatcher } from "./tool-policy-match.js";
@@ -96,7 +96,7 @@ export function resolveSubagentToolPolicyForSession(
   cfg: OpenClawConfig | undefined,
   sessionKey: string,
   opts?: {
-    store?: SessionCapabilityStore;
+    store?: SessionCapabilityLookup;
   },
 ): SandboxToolPolicy {
   const configured = cfg?.tools?.subagents?.tools;
@@ -123,7 +123,7 @@ export function resolveInheritedToolPolicyForSession(
   cfg: OpenClawConfig | undefined,
   sessionKey: string | undefined | null,
   opts?: {
-    store?: SessionCapabilityStore;
+    store?: SessionCapabilityLookup;
   },
 ): SandboxToolPolicy | undefined {
   const inheritedToolAllow = resolveStoredSubagentInheritedToolAllowlist(sessionKey, {

@@ -1,8 +1,3 @@
-/**
- * Subagent list builder.
- *
- * Combines live registry runs and persisted session metadata for sessions_list/subagents views.
- */
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import { resolveSubagentLabel } from "../../../auto-reply/reply/subagents-utils.js";
 import { resolveSessionStorePathCore } from "../../../config/sessions/paths.js";
@@ -32,34 +27,6 @@ import type { SubagentRunRecord } from "./subagent-registry.types.js";
 import { shouldKeepSubagentRunChildLink } from "./subagent-run-liveness.js";
 import { buildSubagentRunView } from "./subagent-run-view.js";
 import { resolveSubagentDisplayStatus } from "./subagent-session-metrics.js";
-
-type SubagentListItem = {
-  index: number;
-  line: string;
-  runId: string;
-  sessionKey: string;
-  taskName?: string;
-  label: string;
-  task: string;
-  status: string;
-  pendingDescendants: number;
-  runtime: string;
-  runtimeMs: number;
-  childSessions?: string[];
-  model?: string;
-  totalTokens?: number;
-  startedAt?: number;
-  endedAt?: number;
-  execution: SubagentExecutionObservation;
-  deliveryStatus?: NonNullable<SubagentRunRecord["delivery"]>["status"];
-};
-
-type BuiltSubagentList = {
-  total: number;
-  active: SubagentListItem[];
-  recent: SubagentListItem[];
-  text: string;
-};
 
 export type SubagentListReadContext = {
   now: number;
@@ -147,7 +114,6 @@ export async function readSubagentListSessionEntries(
   return entries;
 }
 
-/** Build child-session indexes from the latest run associated with each child key. */
 function buildChildSessionIndex(
   readIndex: SubagentRunReadIndex<SubagentRunReadRecord>,
   now: number,
@@ -183,26 +149,11 @@ function buildChildSessionIndex(
   return childSessionsByController;
 }
 
-function buildListText(params: {
-  active: Array<{ line: string }>;
-  recent: Array<{ line: string }>;
-  recentMinutes: number;
-}) {
-  return [
-    "active subagents:",
-    ...(params.active.length ? params.active.map((entry) => entry.line) : ["(none)"]),
-    "",
-    `recent (last ${params.recentMinutes}m):`,
-    ...(params.recent.length ? params.recent.map((entry) => entry.line) : ["(none)"]),
-  ].join("\n");
-}
-
-/** Build structured and text views for active and recent subagent runs. */
 export function buildSubagentList(params: {
   context: SubagentListReadContext;
   sessionEntries: ReadonlyMap<string, SessionEntry>;
   taskMaxChars?: number;
-}): BuiltSubagentList {
+}) {
   const { now, view: runView, childSessionsByController } = params.context;
   let index = 1;
   const buildListEntry = (entry: SubagentRunRecord, runtimeMs: number) => {
@@ -229,7 +180,7 @@ export function buildSubagentList(params: {
     const taskName = entry.taskName?.trim();
     const taskNamePrefix = taskName ? `${taskName}: ` : "";
     const line = `${index}. ${taskNamePrefix}${label} (${resolveModelDisplayName(modelSelection)}, ${runtime}${usageText ? `, ${usageText}` : ""}) ${status}${normalizeLowercaseStringOrEmpty(task) !== normalizeLowercaseStringOrEmpty(label) ? ` - ${task}` : ""}`;
-    const view: SubagentListItem = {
+    const view = {
       index,
       line,
       runId: entry.runId,
@@ -262,6 +213,12 @@ export function buildSubagentList(params: {
     total: runView.latest.length,
     active,
     recent,
-    text: buildListText({ active, recent, recentMinutes: params.context.recentMinutes }),
+    text: [
+      "active subagents:",
+      ...(active.length ? active.map((entry) => entry.line) : ["(none)"]),
+      "",
+      `recent (last ${params.context.recentMinutes}m):`,
+      ...(recent.length ? recent.map((entry) => entry.line) : ["(none)"]),
+    ].join("\n"),
   };
 }

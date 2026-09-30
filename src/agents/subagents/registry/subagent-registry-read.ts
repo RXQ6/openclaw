@@ -9,7 +9,6 @@ import {
   getSubagentRunByChildSessionKeyFromRuns,
   listRunsForControllerFromRuns,
   listRunsForRequesterFromRuns,
-  resolveRequesterForChildSessionFromRuns,
   shouldIgnorePostCompletionAnnounceForSessionFromRuns,
   type LatestSubagentRunReadIndex,
   type SubagentRunReadIndex,
@@ -119,7 +118,7 @@ export function resolveRequesterForChildSession(childSessionKey: string): {
   requesterAgentId?: string;
   requesterOrigin?: DeliveryContext;
 } | null {
-  const resolved = resolveRequesterForChildSessionFromRuns(
+  const resolved = getLatestSubagentRunByChildSessionKeyFromRuns(
     getSubagentRunsSnapshotForChildSession(subagentRuns, childSessionKey),
     childSessionKey,
   );
@@ -160,9 +159,6 @@ export function listSubagentRunsForRequester(
 /** Returns the preferred child-session run from its scoped readable snapshot. */
 export function getSubagentRunByChildSessionKey(childSessionKey: string): SubagentRunRecord | null {
   const key = childSessionKey.trim();
-  if (!key) {
-    return null;
-  }
   return getSubagentRunByChildSessionKeyFromRuns(
     getSubagentRunsSnapshotForChildSession(subagentRuns, key),
     key,
@@ -174,10 +170,6 @@ export function getLatestSubagentRunByChildSessionKey(
   childSessionKey: string,
 ): SubagentRunRecord | null {
   const key = childSessionKey.trim();
-  if (!key) {
-    return null;
-  }
-
   return (
     getLatestSubagentRunByChildSessionKeyFromRuns(
       getSubagentRunsSnapshotForChildSession(subagentRuns, key),
@@ -197,9 +189,6 @@ export function getLatestLiveSubagentRunByChildSessionKey(
   matches?: (entry: SubagentRunRecord) => boolean,
 ): SubagentRunRecord | null {
   const key = childSessionKey.trim();
-  if (!key) {
-    return null;
-  }
   // Mutation ownership is process-local; persisted rows can be stale after a replacement.
   return (
     getLatestSubagentRunByChildSessionKeyFromRuns(

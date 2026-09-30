@@ -3,10 +3,7 @@
  *
  * Separates timer-safe delays from duration/deadline values because setTimeout has stricter bounds.
  */
-import {
-  asDateTimestampMs,
-  finiteSecondsToTimerSafeMilliseconds,
-} from "@openclaw/normalization-core/number-coercion";
+import { asDateTimestampMs } from "@openclaw/normalization-core/number-coercion";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 
 type SubagentRunDeadlineRecord = Pick<
@@ -15,11 +12,6 @@ type SubagentRunDeadlineRecord = Pick<
 > & {
   execution: Pick<SubagentRunRecord["execution"], "startedAt">;
 };
-
-/** Convert subagent timeout seconds to a timer-safe delay. */
-export function resolveSubagentRunTimerDelayMs(timeoutSeconds: unknown): number | undefined {
-  return finiteSecondsToTimerSafeMilliseconds(timeoutSeconds, { floorSeconds: true });
-}
 
 /** Convert subagent timeout seconds to a finite millisecond duration. */
 export function resolveSubagentRunDurationMs(timeoutSeconds: unknown): number | undefined {

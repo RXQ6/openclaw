@@ -155,7 +155,6 @@ describe("pending ACP spawn authority", () => {
     ["runtime", "admission close"],
     ["runtime", "live"],
     ["row", "admission close"],
-    ["transcript", "admission close"],
     ["thread", "admission close"],
     ["thread", "live"],
     ["actor", "admission close"],
@@ -224,16 +223,7 @@ describe("pending ACP spawn authority", () => {
         }
         return entry;
       });
-      if (stage === "transcript") {
-        const resolve = sessionAccessor.resolveSessionTranscriptRuntimeTarget;
-        vi.spyOn(sessionAccessor, "resolveSessionTranscriptRuntimeTarget").mockImplementation(
-          async (...args) => {
-            const target = await resolve(...args);
-            await pause(target.sessionKey);
-            return target;
-          },
-        );
-      } else if (stage === "actor") {
+      if (stage === "actor") {
         const run = vi.spyOn(SessionActorQueue.prototype, "run");
         run.mockImplementationOnce(function (this: SessionActorQueue, key, op) {
           run.mockRestore();

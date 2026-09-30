@@ -29,7 +29,7 @@ import { resolveSessionPlacementSandboxToolPolicy } from "./session-placement-co
 import type { TrustedSubagentCompletionHandoff } from "./subagents/announce/subagent-announce-handoff.js";
 import type {
   PreparedSessionCapabilityEntry,
-  SessionCapabilityStore,
+  SessionCapabilityLookup,
 } from "./subagents/spawn/subagent-capabilities.js";
 import type { PromptMode } from "./system-prompt.types.js";
 import {
@@ -68,7 +68,7 @@ export type ConversationCapabilityProfileParams = {
   /** Owner-read session metadata consumed synchronously during policy preparation. */
   preparedSessionEntry?: PreparedSessionCapabilityEntry;
   /** Complete owner-prepared lineage; no database reads during policy projection. */
-  preparedSessionCapabilityStore?: SessionCapabilityStore;
+  preparedSessionCapabilityStore?: SessionCapabilityLookup;
   sessionId?: string;
   runId?: string;
   agentId?: string;

@@ -105,12 +105,8 @@ type GatewaySearchHit = Partial<Record<keyof SanitizedSearchHit, unknown>>;
 
 type SearchSessionCandidate = {
   key: string;
-  access: "authorized" | "row";
   agentId?: string;
   expectedSessionId?: string;
-  ownerSessionKey?: string;
-  parentSessionKey?: string;
-  spawnedBy?: string;
 };
 
 function sanitizeHit(params: {
@@ -187,7 +183,6 @@ async function listVisibleSearchSessions(params: {
   ) {
     const requesterCandidate = {
       key: params.effectiveRequesterKey,
-      access: "row",
       ...(params.effectiveRequesterAgentId ? { agentId: params.effectiveRequesterAgentId } : {}),
     } satisfies SearchSessionCandidate;
     candidates.set(candidateId(requesterCandidate), requesterCandidate);
@@ -244,9 +239,8 @@ async function listVisibleSearchSessions(params: {
           if (params.rowGuard.check(visibilityRow).allowed) {
             const id = candidateId(visibilityRow);
             candidates.set(id, {
-              ...candidates.get(id),
-              ...visibilityRow,
-              access: "row",
+              key: visibilityRow.key,
+              agentId: visibilityRow.agentId,
             });
           }
         }
@@ -464,7 +458,6 @@ export function createSessionsSearchTool(opts?: {
           ? [
               {
                 key: sessionTarget.key,
-                access: "authorized" as const,
                 ...(sessionTarget.expectedSessionId
                   ? { expectedSessionId: sessionTarget.expectedSessionId }
                   : {}),
@@ -549,13 +542,6 @@ export function createSessionsSearchTool(opts?: {
             }
             const candidate = matchHit(hit.sessionKey);
             if (!candidate) {
-              continue;
-            }
-            const access =
-              candidate.access === "authorized"
-                ? { allowed: true as const }
-                : rowGuard.check(candidate);
-            if (!access.allowed) {
               continue;
             }
             const sanitized = sanitizeHit({

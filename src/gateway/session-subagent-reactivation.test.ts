@@ -84,7 +84,6 @@ describe("reactivateCompletedSubagentSession", () => {
       nextRunId: "run-next",
       fallback: latestEndedRun,
       runTimeoutSeconds: 0,
-      persistenceFailure: "throw",
       gatewayContextResolver: resolveGatewayContext,
     });
   });
@@ -138,7 +137,6 @@ describe("reactivateCompletedSubagentSession", () => {
       nextRunId: "run-next",
       fallback: latestEndedRun,
       runTimeoutSeconds: 0,
-      persistenceFailure: "throw",
       task: "  follow-up prompt text  ",
     });
   });

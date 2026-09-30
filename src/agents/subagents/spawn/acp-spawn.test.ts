@@ -88,7 +88,6 @@ const hoisted = vi.hoisted(() => {
   const loadSessionStoreMock = vi.fn();
   const readAcpSessionMetaMock = vi.fn();
   const resolveStorePathMock = vi.fn();
-  const resolveSessionTranscriptFileMock = vi.fn();
   const areHeartbeatsEnabledMock = vi.fn();
   const normalizeChannelIdMock = vi.fn((channelId: string) => {
     const normalized = channelId.trim().toLowerCase();
@@ -116,7 +115,6 @@ const hoisted = vi.hoisted(() => {
     loadSessionStoreMock,
     readAcpSessionMetaMock,
     resolveStorePathMock,
-    resolveSessionTranscriptFileMock,
     areHeartbeatsEnabledMock,
     normalizeChannelIdMock,
     cleanupFailedAcpSpawnMock,
@@ -174,10 +172,6 @@ vi.mock("../../../gateway/session-utils-store-worker.js", async () => {
 
 vi.mock("../../../config/config.js", () => ({
   getRuntimeConfig: () => hoisted.state.cfg,
-}));
-
-vi.mock("../../../config/sessions/transcript.js", () => ({
-  resolveSessionTranscriptFile: hoisted.resolveSessionTranscriptFileMock,
 }));
 
 vi.mock("../../../gateway/call.js", () => ({
@@ -763,22 +757,6 @@ describe("spawnAcpDirect", () => {
         },
       });
     });
-    hoisted.resolveSessionTranscriptFileMock
-      .mockReset()
-      .mockImplementation(async (params: unknown) => {
-        const typed = params as { threadId?: string };
-        const sessionFile = typed.threadId
-          ? `/tmp/agents/codex/sessions/sess-123-topic-${typed.threadId}.jsonl`
-          : "/tmp/agents/codex/sessions/sess-123.jsonl";
-        return {
-          sessionFile,
-          sessionEntry: {
-            sessionId: "sess-123",
-            updatedAt: Date.now(),
-            sessionFile,
-          },
-        };
-      });
   });
 
   afterEach(() => {
@@ -860,12 +838,6 @@ describe("spawnAcpDirect", () => {
       mode: "persistent",
     });
     expect(initInput.sessionKey).toMatch(/^agent:codex:acp:/);
-    const transcriptCalls = hoisted.resolveSessionTranscriptFileMock.mock.calls.map(
-      (call: unknown[]) => call[0] as { threadId?: string },
-    );
-    expect(transcriptCalls).toHaveLength(2);
-    expect(transcriptCalls[0]?.threadId).toBeUndefined();
-    expect(transcriptCalls[1]?.threadId).toBe("child-thread");
   });
 
   it("reconciles a transport-ambiguous ACP dispatch so an accepted run is surfaced instead of misreported as dispatch_failed", async () => {
@@ -2335,32 +2307,6 @@ describe("spawnAcpDirect", () => {
     });
   });
 
-  it("keeps ACP spawn running when session-file persistence fails", async () => {
-    hoisted.resolveSessionTranscriptFileMock.mockRejectedValueOnce(new Error("disk full"));
-
-    const result = await spawnAcpDirect(
-      {
-        task: "Investigate flaky tests",
-        agentId: "codex",
-        mode: "run",
-      },
-      {
-        agentSessionKey: "agent:main:main",
-        agentChannel: "telegram",
-        agentAccountId: "default",
-        agentTo: "telegram:6098642967",
-        agentThreadId: "1",
-      },
-    );
-
-    expect(result.status).toBe("accepted");
-    expect(result.childSessionKey).toMatch(/^agent:codex:acp:/);
-    const agentCall = hoisted.callGatewayMock.mock.calls
-      .map((call: unknown[]) => call[0] as { method?: string; params?: Record<string, unknown> })
-      .find((request) => request.method === "agent");
-    expect(agentCall?.params?.sessionKey).toBe(result.childSessionKey);
-  });
-
   it("includes cwd in ACP thread intro banner when provided at spawn time", async () => {
     const result = await spawnAcpDirect(
       {
@@ -2542,7 +2488,6 @@ describe("spawnAcpDirect", () => {
       parentSessionKey: "agent:main:main",
       agentId: "codex",
       childSessionId: "sess-123",
-      emitStartNotice: false,
     });
     const relayRuns = hoisted.startAcpSpawnParentStreamRelayMock.mock.calls.map(
       (call: unknown[]) => (call[0] as { runId?: string }).runId,
@@ -2631,7 +2576,6 @@ describe("spawnAcpDirect", () => {
         to: "channel:parent-channel",
         accountId: "default",
       },
-      emitStartNotice: false,
     });
     expect(firstHandle.dispose).toHaveBeenCalledTimes(1);
     expect(secondHandle.notifyStarted).toHaveBeenCalledTimes(1);

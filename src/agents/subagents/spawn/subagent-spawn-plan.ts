@@ -145,6 +145,7 @@ export async function resolveSubagentModelAndThinkingPlan(params: {
   return {
     status: "ok" as const,
     resolvedModel,
+    modelRef: choice.ref,
     ...(inheritedModel ? { inheritedModel: choice.ref } : {}),
     modelApplied: true,
     thinkingOverride: thinkingPlan.thinkingOverride,
