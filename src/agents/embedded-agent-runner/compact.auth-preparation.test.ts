@@ -1,8 +1,7 @@
-import { realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
-import { afterEach, expect, it, onTestFinished, vi } from "vitest";
-import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
+import { afterAll, expect, it, onTestFinished, vi } from "vitest";
+import { useSessionStoreTempDirs } from "../../test-utils/session-state-cleanup.js";
 import { createApiKeyCredential } from "../auth-profiles/credential-fixtures.test-support.js";
 import {
   acquireAgentRunPreparedModelRuntimeMock,
@@ -32,15 +31,17 @@ const [
   import("../../shared/async-work-scope.js"),
   import("../../plugins/provider-runtime.js"),
 ]);
-const tempDirs = useAutoCleanupTempDirTracker((cleanup) =>
-  afterEach(() => {
-    closeOpenClawAgentDatabasesForTest();
-    cleanup();
-  }),
+const tempDirs = useSessionStoreTempDirs(
+  (cleanup) =>
+    afterAll(async () => {
+      await cleanup();
+      closeOpenClawAgentDatabasesForTest();
+    }),
+  "openclaw-compaction-auth-",
 );
 
 async function prepareCompactionParams() {
-  const workspaceDir = await realpath(tempDirs.make("openclaw-compaction-auth-"));
+  const workspaceDir = tempDirs.make();
   resetCompactHooksHarnessMocks(workspaceDir);
   const sessionTarget = {
     agentId: "main",

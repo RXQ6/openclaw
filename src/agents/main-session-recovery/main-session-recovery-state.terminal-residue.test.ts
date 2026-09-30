@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -148,7 +149,10 @@ describe("main session recovery terminal-only residue", () => {
       expect(entry?.mainRestartRecovery).toBeUndefined();
       expect(entry?.restartRecoveryRuns).toBeUndefined();
     } finally {
-      await cleanupSessionStateForTest({ stateDir: tempDir });
+      await cleanupSessionStateForTest({
+        stateDir: tempDir,
+        rootPath: realpathSync.native(tempDir),
+      });
       await fs.rm(tempDir, { force: true, recursive: true });
     }
   });
@@ -201,7 +205,10 @@ describe("main session recovery terminal-only residue", () => {
         restartRecoveryRuns: [{ runId: "live-run" }],
       });
     } finally {
-      await cleanupSessionStateForTest({ stateDir: tempDir });
+      await cleanupSessionStateForTest({
+        stateDir: tempDir,
+        rootPath: realpathSync.native(tempDir),
+      });
       await fs.rm(tempDir, { force: true, recursive: true });
     }
   });

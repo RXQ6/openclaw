@@ -2,8 +2,7 @@ import path from "node:path";
 import { SessionManager } from "openclaw/plugin-sdk/agent-sessions";
 import { upsertSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
 import { closeOpenClawAgentDatabasesForTest } from "openclaw/plugin-sdk/sqlite-runtime-testing";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { makeUserMessage } from "../../test/helpers/user-message.js";
 import { applyInputProvenanceToUserMessage } from "../sessions/input-provenance.js";
 import {
@@ -12,21 +11,28 @@ import {
 } from "../sessions/transcript-events.js";
 import { attachRuntimeUserTurnTranscriptContext } from "../sessions/user-turn-transcript-runtime-context.js";
 import type { UserTurnTranscriptRecorder } from "../sessions/user-turn-transcript.js";
+import { useSessionStoreTempDirs } from "../test-utils/session-state-cleanup.js";
 import { guardSessionManager } from "./session-tool-result-guard-wrapper.js";
 import { makeAgentAssistantMessage } from "./test-helpers/agent-message-fixtures.js";
 
 const listeners: Array<() => void> = [];
-const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+const sessionDirs = useSessionStoreTempDirs(
+  (cleanup) =>
+    afterAll(async () => {
+      await cleanup();
+      closeOpenClawAgentDatabasesForTest();
+    }),
+  "openclaw-transcript-visibility-",
+);
 
 afterEach(() => {
   for (const unsubscribe of listeners.splice(0)) {
     unsubscribe();
   }
-  closeOpenClawAgentDatabasesForTest();
 });
 
 async function openPersistedSessionManager() {
-  const root = tempDirs.make("openclaw-transcript-visibility-");
+  const root = sessionDirs.make();
   const target = {
     agentId: "main",
     sessionId: "visibility-session",

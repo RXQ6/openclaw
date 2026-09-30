@@ -1,16 +1,14 @@
 // Settlement liveness: a wedged block-reply flush must not park the turn.
-import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { setImmediate } from "node:timers/promises";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { createPluginMetadataSnapshot } from "../../../config/plugin-auto-enable.test-helpers.js";
 import { upsertSessionEntryCore } from "../../../config/sessions/session-accessor.js";
 import { withPluginRuntimeGenerationScope } from "../../../plugins/runtime/generation-scope.js";
 import { createDeferredCore } from "../../../shared/deferred.js";
-import { closeOpenClawAgentDatabasesAsync } from "../../../state/openclaw-agent-db.js";
 import { runOpenClawAgentWorkerWrite } from "../../../state/openclaw-agent-write-admission.js";
 import { withOpenClawTestState } from "../../../test-utils/openclaw-test-state.js";
+import { useSessionStoreTempDirs } from "../../../test-utils/session-state-cleanup.js";
 import {
   createMediaGenerationOperation,
   findMediaGenerationOperation,
@@ -40,6 +38,7 @@ import { settleEmbeddedAttemptStream } from "./attempt-stream-settle.js";
 import { prepareEmbeddedAttemptTranscriptLifecycle } from "./attempt-transcript-lifecycle-prepare.js";
 
 type SettleInput = Parameters<typeof settleEmbeddedAttemptStream>[0];
+const sessionDirs = useSessionStoreTempDirs(afterAll, "openclaw-projection-settle-");
 
 function createSettleFixture(overrides?: Partial<SettleInput>): SettleInput {
   const sessionManager = SessionManager.inMemory();
@@ -392,7 +391,7 @@ describe("attempt projection persistence through settlement", () => {
   registerAgentSessionLoopTestLifecycle();
 
   it("keeps one snapshot across unchanged dispatch, TTL settlement, and reopen", async () => {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-projection-settle-"));
+    const dir = sessionDirs.make();
     const scope = {
       agentId: "main",
       sessionId: "projection-settle",
@@ -513,8 +512,6 @@ describe("attempt projection persistence through settlement", () => {
       }
     } finally {
       clearEmbeddedSessionPromptStates([scope.sessionId]);
-      await closeOpenClawAgentDatabasesAsync(dir);
-      await fs.rm(dir, { recursive: true, force: true });
     }
   });
 });

@@ -219,7 +219,10 @@ describe("context engine transcript cursor contract", () => {
       expect(resetCount).toBe(1);
       expect(projectedMessages.map(readMessageContent)).toEqual(["replacement"]);
     } finally {
-      await cleanupSessionStateForTest({ stateDir: tempDir });
+      await cleanupSessionStateForTest({
+        stateDir: tempDir,
+        rootPath: fs.realpathSync.native(tempDir),
+      });
       fs.rmSync(tempDir, { force: true, recursive: true });
     }
   });

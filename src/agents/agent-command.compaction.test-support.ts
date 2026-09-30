@@ -298,7 +298,10 @@ export function registerAgentCommandCompactionTestHooks(): void {
         return { deliverySucceeded: true };
       },
     );
-    const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-rotation-e2e-"));
+    // openclaw-temp-dir: allow root must match canonical agent database paths during cleanup
+    const tmpDir = await fs.realpath(
+      await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-rotation-e2e-")),
+    );
     compactionTestState.workspaceDir = path.join(tmpDir, "workspace");
     compactionTestState.agentDir = path.join(tmpDir, "agent");
     await fs.mkdir(compactionTestState.workspaceDir, { recursive: true });

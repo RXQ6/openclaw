@@ -38,7 +38,10 @@ type ContextEngineTurnOutboxPayload = Parameters<
 
 afterEach(async () => {
   for (const tempDir of tempDirs.splice(0)) {
-    await cleanupSessionStateForTest({ stateDir: tempDir });
+    await cleanupSessionStateForTest({
+      stateDir: tempDir,
+      rootPath: fs.realpathSync.native(tempDir),
+    });
     fs.rmSync(tempDir, { recursive: true, force: true });
   }
 });

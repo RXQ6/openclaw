@@ -1,7 +1,5 @@
-import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { createDeferred } from "../../test/helpers/promise.js";
 import {
   configureExecutionIdentityAdmissionSink,
@@ -11,6 +9,7 @@ import { loadSessionEntry, replaceSessionEntry } from "../config/sessions/sessio
 import { getAgentEventLifecycleGeneration } from "../infra/agent-events.js";
 import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.js";
 import { withEnvAsync } from "../test-utils/env.js";
+import { useSessionStoreTempDirs } from "../test-utils/session-state-cleanup.js";
 import { attachAgentCommandAdmissionFacts } from "./agent-command-admission-facts.js";
 import {
   readAgentCommandExecutionIdentitySpawnFacts,
@@ -24,6 +23,14 @@ import { createAgentAttemptLifecycleCallbacks } from "./command/attempt-callback
 import type { AgentCommandIngressOpts } from "./command/types.js";
 
 let cleanupSink: (() => void) | undefined;
+const sessionDirs = useSessionStoreTempDirs(
+  (cleanup) =>
+    afterAll(async () => {
+      await cleanup();
+      closeOpenClawAgentDatabasesForTest();
+    }),
+  "openclaw-recovery-admission-",
+);
 
 afterEach(() => {
   cleanupSink?.();
@@ -85,9 +92,7 @@ describe("Gateway agent command execution identity", () => {
       ].map((outcome) => ({ audit, outcome })),
     ),
   )("registers a real recovery turn without a foreground lease: %j", async ({ audit, outcome }) => {
-    const stateDir = await fs.realpath(
-      await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-recovery-admission-")),
-    );
+    const stateDir = sessionDirs.make();
     const admittedCallback = createDeferred();
     const releaseCallback = createDeferred();
     const lifecycleGeneration = getAgentEventLifecycleGeneration();
@@ -209,8 +214,6 @@ describe("Gateway agent command execution identity", () => {
     } finally {
       prepared?.close();
       releaseCallback.resolve();
-      closeOpenClawAgentDatabasesForTest();
-      await fs.rm(stateDir, { recursive: true, force: true });
     }
   });
 

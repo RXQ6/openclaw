@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { AgentMessage } from "openclaw/plugin-sdk/agent-core";
 import { createRequireRecord } from "openclaw/plugin-sdk/test-fixtures";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   appendTranscriptMessage,
   createSessionEntryWithTranscript,
@@ -12,6 +12,7 @@ import type { OpenClawConfig } from "../../../config/types.js";
 import type { ContextEngine } from "../../../context-engine/types.js";
 import { clearMemoryPluginState } from "../../../plugins/memory-state.test-fixtures.js";
 import { createUserTurnTranscriptRecorder } from "../../../sessions/user-turn-transcript.js";
+import { closeOpenClawAgentDatabasesAsync } from "../../../state/openclaw-agent-db.js";
 import { projectAgentRunAttemptTerminal } from "../../agent-run-terminal-outcome.js";
 import { sumToolResultTextChars } from "../tool-result-context-guard.test-support.js";
 import {
@@ -34,6 +35,7 @@ const orphanMarker =
   "[Queued user message from a previous active turn; preserved as context only. Continue with the active prompt below.]";
 const sessionKey = "agent:main:guildchat:channel:test-ctx-engine";
 const tempPaths: string[] = [];
+const suiteTempPaths: string[] = [];
 type AttemptOptions = Parameters<typeof createContextEngineAttemptRunner>[0];
 function runAttempt(
   options: Omit<AttemptOptions, "sessionKey" | "tempPaths" | "contextEngine"> &
@@ -165,10 +167,15 @@ beforeEach(() => {
   hoisted.runContextEngineMaintenanceMock.mockReset().mockResolvedValue(undefined);
   hoisted.detectAndLoadPromptImagesMock.mockClear();
 });
-afterEach(async () => {
-  await cleanupTempPaths(tempPaths);
+afterEach(() => {
+  suiteTempPaths.push(...tempPaths.splice(0));
   clearMemoryPluginState();
   vi.restoreAllMocks();
+});
+
+afterAll(async () => {
+  await closeOpenClawAgentDatabasesAsync();
+  await cleanupTempPaths(suiteTempPaths);
 });
 
 beforeAll(async () => {
