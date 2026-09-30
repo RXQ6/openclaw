@@ -11,6 +11,7 @@ import { drainFileLockStateForTest } from "../infra/file-lock.js";
 import { closeOpenClawAgentDatabasesAsync } from "../state/openclaw-agent-db-lifecycle.js";
 import { closeOpenClawStateDatabaseByPathAsync } from "../state/openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
+import { closeStateDatabaseForTest } from "./database-cleanup.js";
 
 /** Settle case-owned work while a suite fixture retains its database workers. */
 export async function drainSessionStateForTest(
@@ -61,6 +62,8 @@ export function useSessionStoreTempDirs(
     const currentRoot = root;
     root = undefined;
     await closeOpenClawAgentDatabasesAsync(currentRoot);
+    // Releasing agent leases can reopen shared state, which cases may keep under the root.
+    await closeStateDatabaseForTest();
     await fs.rm(currentRoot, { recursive: true, force: true });
   });
   return {
