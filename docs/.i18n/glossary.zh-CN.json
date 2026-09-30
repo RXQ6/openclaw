@@ -808,6 +808,10 @@
     "target": "Kubernetes"
   },
   {
+    "source": "Cloudflare",
+    "target": "Cloudflare"
+  },
+  {
     "source": "Cloudflare Containers",
     "target": "Cloudflare Containers"
   },

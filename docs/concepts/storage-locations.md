@@ -19,6 +19,10 @@ external disk or a mounted network filesystem. Additional providers come from
 plugins. Referencing a bundled provider in config enables its owner plugin through
 the normal plugin policy; an explicit disable still applies.
 
+For Cloudflare R2 object storage, follow the
+[Cloudflare plugin setup](/plugins/cloudflare) to create a bucket, configure
+SecretRefs, and initialize an `r2` location.
+
 ## Configure and initialize a directory
 
 Mount the intended disk and create the destination directory on it before
