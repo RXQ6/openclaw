@@ -61,7 +61,14 @@ automatically enables its bundled owner, subject to explicit plugin disablement
 and deny rules. External plugins still require explicit enablement.
 
 A provider has an `id`, a `label`, optional synchronous `validateSettings(settings)`
-returning a user-facing error, and asynchronous `open(params)`. Core passes the
+returning a user-facing error, optional `describeTarget(settings)`, and asynchronous
+`open(params)`. `describeTarget` returns a non-secret display target or `undefined`.
+It must be pure and synchronous: derive the target from settings without I/O or
+secret resolution. Configuration listings call it only for the built-in provider
+or a provider already present in the supplied registry; they never activate a
+plugin or open a backend to describe a target. Otherwise, `displayTarget` is omitted.
+
+Core passes `open` the
 location name, read-only settings, optional abort signal, and `resolveSecret(ref)`.
 Resolve credentials through that callback; secret-bearing settings must contain
 SecretRefs. Return a backend with a non-secret `displayTarget` and these methods:

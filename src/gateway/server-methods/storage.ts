@@ -15,7 +15,10 @@ export const storageHandlers: GatewayRequestHandlers = {
     validateStorageLocationsListParams,
     ({ context, respond }) => {
       const result: StorageLocationsListResult = {
-        locations: listStorageLocations(context.getRuntimeConfig()),
+        locations: listStorageLocations(
+          context.getRuntimeConfig(),
+          getLoadedRuntimePluginRegistry() ?? undefined,
+        ),
       };
       respond(true, result, undefined);
     },

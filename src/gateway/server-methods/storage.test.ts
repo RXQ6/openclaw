@@ -3,15 +3,17 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import type { StorageRegistry } from "../../storage/provider.js";
 import { authorizeOperatorScopesForMethod } from "../method-scopes.js";
 import { createDirectChatContext } from "../server-chat.agent-events.test-helpers.js";
 import { coreGatewayHandlers } from "./core-handlers.js";
 import type { RespondFn } from "./types.js";
 
 const pluginInspection = vi.hoisted(() => vi.fn());
+const loadedRegistry = vi.hoisted(() => vi.fn<() => StorageRegistry | undefined>());
 vi.mock("../../plugins/active-runtime-registry.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../plugins/active-runtime-registry.js")>()),
-  getLoadedRuntimePluginRegistry: () => undefined,
+  getLoadedRuntimePluginRegistry: loadedRegistry,
 }));
 vi.mock("../../plugins/loader.js", () => ({
   acquirePluginRegistryForInspection: pluginInspection,
@@ -21,6 +23,7 @@ vi.mock("../../plugins/manifest-contract-runtime.js", () => ({
 }));
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+afterEach(() => loadedRegistry.mockReset());
 
 async function invoke(
   method: "storage.locations.list" | "storage.locations.probe",
@@ -44,6 +47,66 @@ async function invoke(
 }
 
 describe("storage Gateway methods", () => {
+  it("describes loaded providers without opening or activating providers", async () => {
+    const open = vi.fn();
+    loadedRegistry.mockReturnValue({
+      storageProviders: new Map([
+        [
+          "memory",
+          {
+            pluginId: "fixture-storage",
+            source: "test",
+            provider: {
+              id: "memory",
+              label: "Memory",
+              open,
+              describeTarget: (settings) => `memory://${settings.bucket}`,
+            },
+          },
+        ],
+        [
+          "opaque",
+          {
+            pluginId: "fixture-storage",
+            source: "test",
+            provider: { id: "opaque", label: "Opaque", open },
+          },
+        ],
+      ]),
+    });
+    const respond = await invoke(
+      "storage.locations.list",
+      {
+        storage: {
+          locations: {
+            archive: { provider: "memory", settings: { bucket: "example" }, encryption: "none" },
+            opaque: { provider: "opaque", settings: {}, encryption: "none" },
+            unavailable: { provider: "unloaded", settings: {}, encryption: "none" },
+          },
+        },
+      },
+      {},
+    );
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      {
+        locations: [
+          {
+            name: "archive",
+            provider: "memory",
+            displayTarget: "memory://example",
+            encrypted: false,
+          },
+          { name: "opaque", provider: "opaque", encrypted: false },
+          { name: "unavailable", provider: "unloaded", encrypted: false },
+        ],
+      },
+      undefined,
+    );
+    expect(open).not.toHaveBeenCalled();
+    expect(pluginInspection).not.toHaveBeenCalled();
+  });
+
   it("does not activate an unavailable provider through CLI plugin inspection", async () => {
     const respond = await invoke(
       "storage.locations.probe",

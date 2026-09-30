@@ -1,6 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { decryptStorageObject, encryptedStorageSize, encryptStorageObject } from "./encryption.js";
+import {
+  decryptStorageObject,
+  encryptedStorageSize,
+  encryptStorageObject,
+  plaintextStorageSize,
+} from "./encryption.js";
 
 const STORAGE_SEGMENT_BYTES = 1_048_576;
 
@@ -20,18 +25,38 @@ async function* chunks(bytes: Uint8Array) {
 }
 
 describe("OCSTOR1 encryption", () => {
-  it.each([0, 1, STORAGE_SEGMENT_BYTES, STORAGE_SEGMENT_BYTES + 1, 3 * STORAGE_SEGMENT_BYTES + 37])(
+  it.each([0, 1, STORAGE_SEGMENT_BYTES, STORAGE_SEGMENT_BYTES + 1, 3 * STORAGE_SEGMENT_BYTES + 17])(
     "round trips %i plaintext bytes with exact ciphertext size",
     async (size) => {
       const key = randomBytes(32);
       const plaintext = Buffer.alloc(size, 0x67);
       const ciphertext = await collect(encryptStorageObject(chunks(plaintext), key));
       expect(ciphertext.length).toBe(encryptedStorageSize(size));
+      expect(plaintextStorageSize(ciphertext.length)).toBe(size);
       expect(plaintext.equals(await collect(decryptStorageObject(chunks(ciphertext), key)))).toBe(
         true,
       );
     },
   );
+
+  it("rejects impossible stored sizes", () => {
+    const emptySize = encryptedStorageSize(0);
+    const fullSegmentSize = encryptedStorageSize(STORAGE_SEGMENT_BYTES);
+    for (const size of [
+      -1,
+      0,
+      NaN,
+      Infinity,
+      Number.MAX_SAFE_INTEGER + 1,
+      emptySize + 0.5,
+      emptySize - 1,
+      fullSegmentSize - 16,
+      fullSegmentSize - 1,
+      (STORAGE_SEGMENT_BYTES + 16) * 0x100000000 + emptySize,
+    ]) {
+      expect(() => plaintextStorageSize(size)).toThrow();
+    }
+  });
 
   it("rejects truncation, reordering, header tampering, trailing bytes and the wrong key", async () => {
     const key = randomBytes(32);

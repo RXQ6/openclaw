@@ -4,6 +4,8 @@ export type StorageProvider = {
   label: string;
   /** Return a user-facing settings error, or undefined when valid. */
   validateSettings?: (settings: Readonly<Record<string, unknown>>) => string | undefined;
+  /** Pure, synchronous, non-secret display target from settings; no I/O or secret resolution. */
+  describeTarget?: (settings: Readonly<Record<string, unknown>>) => string | undefined;
   open: (params: StorageProviderOpenParams) => Promise<StorageBackend>;
 };
 

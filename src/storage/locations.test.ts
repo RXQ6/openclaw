@@ -102,6 +102,7 @@ function memoryFixture(encryption: StorageLocationConfig["encryption"] = "none")
     storageProviders: new Map([[provider.id, { pluginId: "example", source: "test", provider }]]),
   };
   return {
+    backend,
     objects,
     calls,
     params: {
@@ -113,6 +114,66 @@ function memoryFixture(encryption: StorageLocationConfig["encryption"] = "none")
 }
 
 describe("storage locations", () => {
+  it("lists and stats encrypted object sizes without GET requests", async () => {
+    const fixture = memoryFixture({ passphrase: "example-storage-passphrase-not-real" });
+    const location = await initStorageLocation(fixture.params);
+    try {
+      const scoped = location.scope("snapshots");
+      const expected = [];
+      for (const size of [0, 1, 1_048_576, 1_048_577, 3 * 1_048_576 + 17]) {
+        const key = `${size}.bin`;
+        await scoped.putObject(key, bytes(Buffer.alloc(size)), { sizeBytes: size });
+        expected.push({ key, sizeBytes: size });
+      }
+      fixture.calls.length = 0;
+      await expect(list(scoped.list())).resolves.toEqual(
+        expected.toSorted((left, right) => left.key.localeCompare(right.key)),
+      );
+      for (const object of expected) {
+        await expect(scoped.stat(object.key)).resolves.toEqual(object);
+      }
+      expect(fixture.calls.filter((call) => call === "get")).toEqual([]);
+      await location.close();
+      await expect(scoped.stat("0.bin")).rejects.toMatchObject({ state: "unavailable" });
+      await expect(list(scoped.list())).rejects.toMatchObject({ state: "unavailable" });
+    } finally {
+      await location.close();
+    }
+  });
+
+  it("skips foreign keys within the requested listing prefix", async () => {
+    const fixture = memoryFixture();
+    const location = await initStorageLocation(fixture.params);
+    try {
+      fixture.objects.set("snapshots/foreign object", Buffer.from("foreign"));
+      fixture.objects.set("snapshots/../foreign", Buffer.from("foreign"));
+      await location.scope("snapshots").putObject("valid.bin", bytes("valid"), {});
+      await expect(list(location.scope("snapshots").list())).resolves.toEqual([
+        { key: "valid.bin", sizeBytes: 5 },
+      ]);
+    } finally {
+      await location.close();
+    }
+  });
+
+  it.each(["elsewhere/valid.bin", "elsewhere/foreign object"])(
+    "rejects a provider listing outside the requested prefix: %s",
+    async (key) => {
+      const fixture = memoryFixture();
+      const location = await initStorageLocation(fixture.params);
+      try {
+        fixture.backend.listObjects = async function* () {
+          yield { key, sizeBytes: 0 };
+        };
+        await expect(list(location.scope("snapshots").list())).rejects.toThrow(
+          "outside the requested prefix",
+        );
+      } finally {
+        await location.close();
+      }
+    },
+  );
+
   it("refuses runtime access to an uninitialized directory without creating anything", async () => {
     const directory = tempDirs.make("openclaw-storage-location-");
     const params = filesystemParams(directory);

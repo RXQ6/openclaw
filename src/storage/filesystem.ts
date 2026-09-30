@@ -26,6 +26,7 @@ export const filesystemStorageProvider: StorageProvider = {
   id: "filesystem",
   label: "Filesystem",
   validateSettings,
+  describeTarget: (settings) => (typeof settings.path === "string" ? settings.path : undefined),
   async open({ settings, signal }) {
     const settingsError = validateSettings(settings);
     if (settingsError || typeof settings.path !== "string") {

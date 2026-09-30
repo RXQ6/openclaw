@@ -54,6 +54,8 @@ function headerBytes(objSalt: Buffer, noncePrefix: Buffer): Buffer {
   return Buffer.concat([MAGIC, length, json]);
 }
 
+const HEADER_BYTES = headerBytes(Buffer.alloc(32), Buffer.alloc(7)).length;
+
 export function encryptedStorageSize(plaintextBytes: number): number {
   if (!Number.isSafeInteger(plaintextBytes) || plaintextBytes < 0) {
     throw new Error("Storage size must be a nonnegative safe integer.");
@@ -62,9 +64,7 @@ export function encryptedStorageSize(plaintextBytes: number): number {
   if (segments > 0x100000000) {
     throw new Error("Storage object exceeds the encryption segment limit.");
   }
-  return (
-    headerBytes(Buffer.alloc(32), Buffer.alloc(7)).length + plaintextBytes + segments * TAG_BYTES
-  );
+  return HEADER_BYTES + plaintextBytes + segments * TAG_BYTES;
 }
 
 function nonce(prefix: Buffer, index: number, last: boolean): Buffer {
@@ -185,22 +185,19 @@ export async function* decryptStorageObject(
   }
 }
 
-/** Object metadata exposes plaintext sizes without downloading the payload. */
-export async function plaintextStorageSize(
-  body: AsyncIterable<Uint8Array>,
-  storedBytes: number,
-): Promise<number> {
-  const reader = new StreamReader(body);
-  try {
-    const { header } = await readHeader(reader);
-    const payloadBytes = storedBytes - header.length;
-    const complete = Math.floor(payloadBytes / (STORAGE_SEGMENT_BYTES + TAG_BYTES));
-    const finalBytes = payloadBytes % (STORAGE_SEGMENT_BYTES + TAG_BYTES);
-    if (payloadBytes < TAG_BYTES || finalBytes < TAG_BYTES) {
-      throw new Error("Truncated storage object: missing final segment.");
-    }
-    return payloadBytes - (complete + 1) * TAG_BYTES;
-  } finally {
-    await reader.close();
+/** The fixed v1 header and segment tags make plaintext size a metadata-only calculation. */
+export function plaintextStorageSize(storedBytes: number): number {
+  if (!Number.isSafeInteger(storedBytes) || storedBytes < 0) {
+    throw new Error("Storage size must be a nonnegative safe integer.");
   }
+  const payloadBytes = storedBytes - HEADER_BYTES;
+  const complete = Math.floor(payloadBytes / (STORAGE_SEGMENT_BYTES + TAG_BYTES));
+  const finalBytes = payloadBytes % (STORAGE_SEGMENT_BYTES + TAG_BYTES);
+  if (payloadBytes < TAG_BYTES || finalBytes < TAG_BYTES) {
+    throw new Error("Truncated storage object: missing final segment.");
+  }
+  if (complete + 1 > 0x100000000) {
+    throw new Error("Storage object exceeds the encryption segment limit.");
+  }
+  return payloadBytes - (complete + 1) * TAG_BYTES;
 }

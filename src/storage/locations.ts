@@ -3,12 +3,14 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { coerceSecretRef } from "../config/types.secrets.js";
 import type { StorageLocationConfig } from "../config/types.storage.js";
 import { hasErrnoCode, isMissingPathError } from "../infra/errno.js";
+import { resolveStorageProvider } from "../plugins/storage-provider-registry.js";
 import {
   decryptStorageObject,
   encryptedStorageSize,
   encryptStorageObject,
   plaintextStorageSize,
 } from "./encryption.js";
+import { filesystemStorageProvider } from "./filesystem.js";
 import { validateStorageKey, validateStoragePrefix } from "./keys.js";
 import {
   createStorageMarker,
@@ -173,11 +175,14 @@ async function makeLocation(
   const masterKey = await verifyStorageMarker(params.name, marker, passphrase);
   let closed = false;
   const markerIdentity = JSON.stringify(marker);
-  const check = async (signal?: AbortSignal) => {
+  const assertOpen = (signal?: AbortSignal) => {
     signal?.throwIfAborted();
     if (closed) {
       throw new StorageLocationError("unavailable", "Storage location is closed.");
     }
+  };
+  const check = async (signal?: AbortSignal) => {
+    assertOpen(signal);
     const current = await readStorageMarker(backend, signal);
     if (!current) {
       throw unavailable(params.name);
@@ -188,24 +193,10 @@ async function makeLocation(
         `Storage location "${params.name}" identity changed; reopen the location before using it.`,
       );
     }
-    signal?.throwIfAborted();
-    if (closed) {
-      throw new StorageLocationError("unavailable", "Storage location is closed.");
-    }
+    assertOpen(signal);
   };
-  const info = async (object: StorageObjectInfo, signal?: AbortSignal) => {
-    if (!masterKey) {
-      return object;
-    }
-    const body = await backend.getObject(object.key, { signal });
-    if (!body) {
-      throw new StorageLocationError(
-        "unavailable",
-        "Storage object disappeared while reading its metadata.",
-      );
-    }
-    return { ...object, sizeBytes: await plaintextStorageSize(body, object.sizeBytes) };
-  };
+  const info = (object: StorageObjectInfo) =>
+    masterKey ? { ...object, sizeBytes: plaintextStorageSize(object.sizeBytes) } : object;
   const scoped = (namespace: string): StorageLocation => {
     const keyFor = (key: string) => {
       validateStorageKey(key);
@@ -282,9 +273,10 @@ async function makeLocation(
       stat: async (key, opts) => {
         const fullKey = keyFor(key);
         const operation = options(opts);
-        await check(operation.signal);
+        assertOpen(operation.signal);
         const object = await backend.statObject(fullKey, operation);
-        return object ? { ...(await info(object, operation.signal)), key } : undefined;
+        assertOpen(operation.signal);
+        return object ? { ...info(object), key } : undefined;
       },
       async *list(prefix, opts) {
         const requestedPrefix = prefix ?? "";
@@ -292,15 +284,20 @@ async function makeLocation(
         const fullPrefix = namespace + requestedPrefix;
         validateStoragePrefix(fullPrefix);
         const operation = options(opts);
-        await check(operation.signal);
+        assertOpen(operation.signal);
         for await (const object of backend.listObjects(fullPrefix, operation)) {
-          validateStorageKey(object.key);
+          assertOpen(operation.signal);
           if (!object.key.startsWith(fullPrefix)) {
             throw new Error("Storage provider returned an object outside the requested prefix.");
           }
+          try {
+            validateStorageKey(object.key);
+          } catch {
+            continue;
+          }
           if (object.key !== STORAGE_MARKER_KEY) {
             yield {
-              ...(await info(object, operation.signal)),
+              ...info(object),
               key: object.key.slice(namespace.length),
             };
           }
@@ -389,16 +386,23 @@ export async function probeStorageLocation(
 /** Configuration projection only; no provider activation or destination I/O. */
 export function listStorageLocations(
   config: OpenClawConfig,
+  registry?: StorageRegistry,
 ): Array<{ name: string; provider: string; encrypted: boolean; displayTarget?: string }> {
   return Object.entries(config.storage?.locations ?? {})
     .toSorted(([a], [b]) => a.localeCompare(b))
-    .map(([name, location]) => ({
-      name,
-      provider: location.provider,
-      encrypted: location.encryption !== "none",
-      displayTarget:
-        location.provider === "filesystem" && typeof location.settings.path === "string"
-          ? location.settings.path
-          : undefined,
-    }));
+    .map(([name, location]) => {
+      const provider =
+        location.provider === "filesystem"
+          ? filesystemStorageProvider
+          : registry
+            ? resolveStorageProvider(registry, location.provider)
+            : undefined;
+      const displayTarget = provider?.describeTarget?.(location.settings);
+      return {
+        name,
+        provider: location.provider,
+        encrypted: location.encryption !== "none",
+        ...(displayTarget === undefined ? {} : { displayTarget }),
+      };
+    });
 }
