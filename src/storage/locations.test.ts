@@ -123,7 +123,11 @@ describe("storage locations", () => {
       for (const size of [0, 1, 1_048_576, 1_048_577, 3 * 1_048_576 + 17]) {
         const key = `${size}.bin`;
         await scoped.putObject(key, bytes(Buffer.alloc(size)), { sizeBytes: size });
-        expected.push({ key, sizeBytes: size });
+        expected.push({
+          key,
+          sizeBytes: size,
+          storedBytes: fixture.objects.get(`snapshots/${key}`)!.length,
+        });
       }
       fixture.calls.length = 0;
       await expect(list(scoped.list())).resolves.toEqual(
@@ -149,7 +153,7 @@ describe("storage locations", () => {
       fixture.objects.set("snapshots/../foreign", Buffer.from("foreign"));
       await location.scope("snapshots").putObject("valid.bin", bytes("valid"), {});
       await expect(list(location.scope("snapshots").list())).resolves.toEqual([
-        { key: "valid.bin", sizeBytes: 5 },
+        { key: "valid.bin", sizeBytes: 5, storedBytes: 5 },
       ]);
     } finally {
       await location.close();
@@ -241,7 +245,7 @@ describe("storage locations", () => {
       const payload = Buffer.alloc(1_048_577, 0x5a);
       await expect(
         scoped.putObject("data.bin", bytes(payload), { sizeBytes: payload.length }),
-      ).resolves.toEqual({ sizeBytes: payload.length });
+      ).resolves.toMatchObject({ sizeBytes: payload.length, storedBytes: expect.any(Number) });
       await scoped.putObject("empty.bin", bytes(Buffer.alloc(0)), { sizeBytes: 0 });
       await location.scope("snapshots/second").putObject("other.bin", bytes("other"), {});
       const stored = fixture.objects.get("snapshots/first/data.bin");
@@ -252,10 +256,15 @@ describe("storage locations", () => {
       await expect(scoped.stat("data.bin")).resolves.toEqual({
         key: "data.bin",
         sizeBytes: payload.length,
+        storedBytes: stored!.length,
       });
       await expect(list(scoped.list())).resolves.toEqual([
-        { key: "data.bin", sizeBytes: payload.length },
-        { key: "empty.bin", sizeBytes: 0 },
+        { key: "data.bin", sizeBytes: payload.length, storedBytes: stored!.length },
+        {
+          key: "empty.bin",
+          sizeBytes: 0,
+          storedBytes: fixture.objects.get("snapshots/first/empty.bin")!.length,
+        },
       ]);
       expect((await list(location.list())).map((object) => object.key)).not.toContain(markerKey);
       await scoped.delete("data.bin");

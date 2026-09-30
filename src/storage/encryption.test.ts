@@ -45,7 +45,7 @@ describe("OCSTOR1 encryption", () => {
     for (const size of [
       -1,
       0,
-      NaN,
+      Number.NaN,
       Infinity,
       Number.MAX_SAFE_INTEGER + 1,
       emptySize + 0.5,

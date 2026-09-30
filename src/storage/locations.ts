@@ -45,6 +45,7 @@ export type StorageProbeResult = {
   message?: string;
 };
 type OperationOptions = { signal?: AbortSignal };
+export type StorageLocationObjectInfo = StorageObjectInfo & { storedBytes: number };
 export type StorageLocation = {
   describe(): StorageLocationDescription;
   probe(opts?: OperationOptions): Promise<StorageProbeResult>;
@@ -52,10 +53,13 @@ export type StorageLocation = {
     key: string,
     body: AsyncIterable<Uint8Array>,
     opts: OperationOptions & { sizeBytes?: number },
-  ): Promise<{ sizeBytes: number }>;
+  ): Promise<{ sizeBytes: number; storedBytes: number }>;
   getObject(key: string, opts?: OperationOptions): Promise<AsyncIterable<Uint8Array> | undefined>;
-  stat(key: string, opts?: OperationOptions): Promise<StorageObjectInfo | undefined>;
-  list(prefix?: string, opts?: OperationOptions): AsyncIterable<StorageObjectInfo>;
+  stat(key: string, opts?: OperationOptions): Promise<StorageLocationObjectInfo | undefined>;
+  list(
+    prefix?: string,
+    opts?: OperationOptions & { acceptKey?: (key: string) => boolean },
+  ): AsyncIterable<StorageLocationObjectInfo>;
   delete(key: string, opts?: OperationOptions): Promise<void>;
   scope(prefix: string): StorageLocation;
   close(): Promise<void>;
@@ -195,8 +199,11 @@ async function makeLocation(
     }
     assertOpen(signal);
   };
-  const info = (object: StorageObjectInfo) =>
-    masterKey ? { ...object, sizeBytes: plaintextStorageSize(object.sizeBytes) } : object;
+  const info = (object: StorageObjectInfo): StorageLocationObjectInfo => ({
+    ...object,
+    storedBytes: object.sizeBytes,
+    sizeBytes: masterKey ? plaintextStorageSize(object.sizeBytes) : object.sizeBytes,
+  });
   const scoped = (namespace: string): StorageLocation => {
     const keyFor = (key: string) => {
       validateStorageKey(key);
@@ -248,7 +255,7 @@ async function makeLocation(
           // Recheck identity after consuming a potentially long producer, before publication.
           await check(operation.signal);
         }
-        await backend.putObject(
+        const stored = await backend.putObject(
           fullKey,
           masterKey ? encryptStorageObject(counted(), masterKey) : counted(),
           {
@@ -261,7 +268,7 @@ async function makeLocation(
                   : opts.sizeBytes,
           },
         );
-        return { sizeBytes: plaintextBytes };
+        return { sizeBytes: plaintextBytes, storedBytes: stored.sizeBytes };
       },
       getObject: async (key, opts) => {
         const fullKey = keyFor(key);
@@ -295,10 +302,12 @@ async function makeLocation(
           } catch {
             continue;
           }
-          if (object.key !== STORAGE_MARKER_KEY) {
+          const key = object.key.slice(namespace.length);
+          // Consumers can ignore foreign objects before interpreting encrypted sizes.
+          if (object.key !== STORAGE_MARKER_KEY && (!opts?.acceptKey || opts.acceptKey(key))) {
             yield {
               ...info(object),
-              key: object.key.slice(namespace.length),
+              key,
             };
           }
         }
@@ -398,11 +407,13 @@ export function listStorageLocations(
             ? resolveStorageProvider(registry, location.provider)
             : undefined;
       const displayTarget = provider?.describeTarget?.(location.settings);
-      return {
+      const description = {
         name,
         provider: location.provider,
         encrypted: location.encryption !== "none",
-        ...(displayTarget === undefined ? {} : { displayTarget }),
       };
+      return displayTarget === undefined
+        ? description
+        : Object.assign(description, { displayTarget });
     });
 }

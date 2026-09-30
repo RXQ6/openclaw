@@ -49,31 +49,24 @@ async function invoke(
 describe("storage Gateway methods", () => {
   it("describes loaded providers without opening or activating providers", async () => {
     const open = vi.fn();
-    loadedRegistry.mockReturnValue({
-      storageProviders: new Map([
-        [
-          "memory",
-          {
-            pluginId: "fixture-storage",
-            source: "test",
-            provider: {
-              id: "memory",
-              label: "Memory",
-              open,
-              describeTarget: (settings) => `memory://${settings.bucket}`,
-            },
-          },
-        ],
-        [
-          "opaque",
-          {
-            pluginId: "fixture-storage",
-            source: "test",
-            provider: { id: "opaque", label: "Opaque", open },
-          },
-        ],
-      ]),
+    const storageProviders: StorageRegistry["storageProviders"] = new Map();
+    storageProviders.set("memory", {
+      pluginId: "fixture-storage",
+      source: "test",
+      provider: {
+        id: "memory",
+        label: "Memory",
+        open,
+        describeTarget: (settings) =>
+          typeof settings.bucket === "string" ? `memory://${settings.bucket}` : undefined,
+      },
     });
+    storageProviders.set("opaque", {
+      pluginId: "fixture-storage",
+      source: "test",
+      provider: { id: "opaque", label: "Opaque", open },
+    });
+    loadedRegistry.mockReturnValue({ storageProviders });
     const respond = await invoke(
       "storage.locations.list",
       {
