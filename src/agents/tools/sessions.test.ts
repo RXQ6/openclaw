@@ -830,17 +830,12 @@ describe("sessions_send gating", () => {
     expect(callGatewayMock).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { name: "canonical message", args: { message: "    indented body" } },
-    { name: "formatted text alias", args: { text: "Thinking\n_summary_\n    indented body" } },
-    { name: "snake-case alias", args: { send_message: "    indented body" } },
-    { name: "blank earlier alias", args: { SendMessage: " \n\t ", text: "    indented body" } },
-  ])("forwards substantive indentation through $name", async ({ args }) => {
+  it("forwards substantive indentation through the canonical message", async () => {
     callGatewayMock.mockResolvedValue({ runId: "body-whitespace" });
     const result = await createMainSessionsSendTool().execute("body-whitespace", {
       sessionKey: MAIN_AGENT_SESSION_KEY,
       timeoutSeconds: 0,
-      ...args,
+      message: "    indented body",
     });
     expect(requireDetails(result).status).toBe("accepted");
     const call = callGatewayMock.mock.calls.find(([request]) => request.method === "agent");
@@ -848,6 +843,20 @@ describe("sessions_send gating", () => {
     const forwarded = requireRecord(request.params, "agent params");
     expect(forwarded.message).toMatch(/\n {4}indented body$/u);
   });
+
+  it.each(["SendMessage", "send_message", "content", "text"])(
+    "requires canonical message instead of hidden alias %s",
+    async (alias) => {
+      await expect(
+        createMainSessionsSendTool().execute("alias-body", {
+          sessionKey: MAIN_AGENT_SESSION_KEY,
+          [alias]: "hidden message",
+          timeoutSeconds: 0,
+        }),
+      ).rejects.toThrow("message required");
+      expect(callGatewayMock).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([" \n\t "])("rejects blank message %j before forwarding", async (message) => {
     await expect(

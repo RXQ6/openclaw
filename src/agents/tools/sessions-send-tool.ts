@@ -73,7 +73,6 @@ import {
 } from "./sessions-send-followup.js";
 import { startSessionsSendReplyFlow } from "./sessions-send-reply-flow.js";
 import { captureSessionsSendResumeCaller, resumeSessionsSendTask } from "./sessions-send-resume.js";
-import { normalizeSessionsSendArguments } from "./sessions-send-tool.arguments.js";
 import {
   createConfiguredAgentMainSession,
   notifySessionsSendSession,
@@ -148,9 +147,8 @@ export function createSessionsSendTool(opts?: SessionsSendToolOptions): AnyAgent
     description: describeSessionsSendTool(),
     parameters: SessionsSendToolSchema,
     outputSchema: SessionsSendOutputSchema,
-    prepareArguments: normalizeSessionsSendArguments,
     execute: wrapGatewayPersonalToolExecution(async (_toolCallId, args) => {
-      const params = normalizeSessionsSendArguments(args);
+      const params = args as Record<string, unknown>;
       const promptedAt = Date.now();
       const gatewayCall = opts?.callGateway ?? callAgentToolGatewayRequest;
       const message = readToolStringParam(params, "message", { required: true, trim: false });

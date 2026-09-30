@@ -322,27 +322,6 @@ describe("sessions tools", () => {
     expect(peekSystemEventEntries(targetKey)).toEqual([]);
   });
 
-  it("sessions_send prepares sanitized aliases without exposing alias keys", () => {
-    const tool = getSessionTool("sessions_send");
-    if (!tool.prepareArguments) {
-      throw new Error("missing sessions_send prepareArguments");
-    }
-
-    const prepared = tool.prepareArguments({
-      sessionKey: "main",
-      SendMessage: " ",
-      content: "Reasoning:\n_internal plan_\n\nVisible answer",
-      text: "ignored lower-priority alias",
-      timeoutSeconds: 0,
-    }) as Record<string, unknown>;
-
-    expect(prepared.message).toBe("Visible answer");
-    for (const alias of ["SendMessage", "content", "text"]) {
-      expect(prepared).not.toHaveProperty(alias);
-      expect(tool.parameters).not.toHaveProperty(`properties.${alias}`);
-    }
-  });
-
   it("sessions_list filters visibility before hydrating mailbox previews and messages", async () => {
     const session = (key: string, classification: string, extra = {}) => ({
       key: `agent:main:${key}`,
