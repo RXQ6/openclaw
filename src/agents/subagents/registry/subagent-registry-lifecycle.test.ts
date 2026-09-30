@@ -59,7 +59,6 @@ import * as sessionEntryRuntime from "../announce/subagent-announce-delivery.run
 import { readSubagentRunAnnounceResultUsing } from "../announce/subagent-announce-result.js";
 import {
   consumeRequesterCronAuthorityAdmission,
-  prepareRequesterCronAuthority,
   revokeRequesterCronAuthority,
   withRequesterCronAuthority,
 } from "../requester-cron-authority.js";
@@ -96,11 +95,11 @@ import type {
 } from "./subagent-registry-lifecycle.js";
 import { subagentRuns } from "./subagent-registry-memory.js";
 import { getLatestLiveSubagentRunByChildSessionKey } from "./subagent-registry-read.js";
+import { settleRequesterTurnAfterSessionSpawns } from "./subagent-registry-requester-yield.js";
 import {
-  markRequesterTurnYieldedInRuns,
-  settleRequesterTurnAfterSessionSpawns,
-} from "./subagent-registry-requester-yield.js";
-import { createRequesterInitialTransferFixture } from "./subagent-registry-requester-yield.test-support.js";
+  createRequesterInitialTransferFixture,
+  markRequesterTurnYieldedWithAuthority,
+} from "./subagent-registry-requester-yield.test-support.js";
 import { markSubagentRunPausedAfterYield } from "./subagent-registry-run-pause.js";
 import { registerTerminalStateSignalAuthorityTests } from "./subagent-registry-terminal-state.test-support.js";
 import { observeRootWork } from "./subagent-registry.browser-cleanup.test-support.js";
@@ -5055,24 +5054,15 @@ describe("requester settle wake trigger", () => {
               approvalAuthority: authority,
             },
             async () => {
-              const requester = {
-                requesterSessionKey,
-                requesterAgentId: "main",
-                requesterTurnRunId,
-              };
-              const preparedAuthority = prepareRequesterCronAuthority(requester);
-              try {
-                expect(
-                  await markRequesterTurnYieldedInRuns({
-                    ...requester,
-                    preparedAuthority: preparedAuthority ?? null,
-                    runs,
-                    transfer: createRequesterInitialTransferFixture(runs, () => undefined),
-                  }),
-                ).toBe(1);
-              } finally {
-                await preparedAuthority?.release();
-              }
+              expect(
+                await markRequesterTurnYieldedWithAuthority({
+                  requesterSessionKey,
+                  requesterAgentId: "main",
+                  requesterTurnRunId,
+                  runs,
+                  transfer: createRequesterInitialTransferFixture(runs, () => undefined),
+                }),
+              ).toBe(1);
             },
           ),
         );

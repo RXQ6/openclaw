@@ -24,15 +24,14 @@ import {
   getGatewayToolCallerIdentity,
   withGatewayToolCallerIdentity,
 } from "../tools/gateway-caller-context.js";
+import { settleRequesterTurnAfterSessionSpawns } from "./registry/subagent-registry-requester-yield.js";
 import {
-  markRequesterTurnYieldedInRuns,
-  settleRequesterTurnAfterSessionSpawns,
-} from "./registry/subagent-registry-requester-yield.js";
-import { createRequesterInitialTransferFixture } from "./registry/subagent-registry-requester-yield.test-support.js";
+  createRequesterInitialTransferFixture,
+  markRequesterTurnYieldedWithAuthority,
+} from "./registry/subagent-registry-requester-yield.test-support.js";
 import type { SubagentRunRecord } from "./registry/subagent-registry.types.js";
 import {
   consumeRequesterCronAuthorityAdmission,
-  prepareRequesterCronAuthority,
   replaceRequesterCronAuthorityEntry,
   revokeRequesterCronAuthority,
   withRequesterCronAuthority,
@@ -163,22 +162,13 @@ async function inAdminRun<T>(
 }
 
 async function mark(batch: SubagentRunRecord[], persistOrThrow: () => void = () => {}) {
-  const requester = {
+  return await markRequesterTurnYieldedWithAuthority({
     requesterSessionKey: SESSION,
     requesterAgentId: "main",
     requesterTurnRunId: batch[0]!.requesterTurnRunId!,
-  };
-  const preparedAuthority = prepareRequesterCronAuthority(requester);
-  try {
-    return await markRequesterTurnYieldedInRuns({
-      ...requester,
-      preparedAuthority: preparedAuthority ?? null,
-      runs,
-      transfer: createRequesterInitialTransferFixture(runs, persistOrThrow),
-    });
-  } finally {
-    await preparedAuthority?.release();
-  }
+    runs,
+    transfer: createRequesterInitialTransferFixture(runs, persistOrThrow),
+  });
 }
 
 function settle(batch: SubagentRunRecord[]) {

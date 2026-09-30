@@ -339,11 +339,10 @@ async function executeFireAndForgetA2AFrom(
     }),
   );
   const flowParams = vi.mocked(runSessionsSendA2AFlow).mock.calls[0]?.[0];
-  if (!flowParams && options?.expectReplyFlow !== false) {
-    throw new Error("expected A2A flow");
-  }
   if (options?.expectReplyFlow === false) {
     expect(requireDetails(result)).toMatchObject({ delivery: { status: "skipped" } });
+  } else if (!flowParams) {
+    throw new Error("expected A2A flow");
   }
   return flowParams!;
 }

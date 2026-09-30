@@ -646,6 +646,7 @@ describe("message tool gateway timeout", () => {
       const delivery = readEmbeddedMessageDeliveryFact(
         (result.details as { messageDelivery?: unknown }).messageDelivery,
       );
+      expect(delivery?.sourceReplyDelivered).toBe(mode === "final" ? true : undefined);
       if (mode === "final") {
         const visible = [marker];
         const gateway = vi.fn();
@@ -664,15 +665,10 @@ describe("message tool gateway timeout", () => {
           displayKey: sessionKey,
           runId: "source-reply",
           replyTimeoutMs: 10_000,
-          reply: {
-            status: "ok",
-            replyText: marker,
-            sourceReplyDelivered: delivery?.sourceReplyDelivered,
-          },
+          reply: { status: "ok", replyText: marker, sourceReplyDelivered: true },
         });
         expect(visible).toEqual([marker]);
       }
-      expect(delivery?.sourceReplyDelivered).toBe(mode === "final" ? true : undefined);
     },
   );
 
