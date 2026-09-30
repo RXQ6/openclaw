@@ -20571,6 +20571,54 @@ public struct StateVersion: Codable, Sendable {
     }
 }
 
+public struct StorageLocationsListParams: Codable, Sendable {}
+
+public struct StorageLocationsListResult: Codable, Sendable {
+    public let locations: [[String: AnyCodable]]
+
+    public init(
+        locations: [[String: AnyCodable]])
+    {
+        self.locations = locations
+    }
+}
+
+public struct StorageLocationsProbeParams: Codable, Sendable {
+    public let name: String
+
+    public init(
+        name: String)
+    {
+        self.name = name
+    }
+}
+
+public struct StorageLocationsProbeResult: Codable, Sendable {
+    public let state: AnyCodable
+    public let freebytes: Double?
+    public let totalbytes: Double?
+    public let message: String?
+
+    public init(
+        state: AnyCodable,
+        freebytes: Double? = nil,
+        totalbytes: Double? = nil,
+        message: String? = nil)
+    {
+        self.state = state
+        self.freebytes = freebytes
+        self.totalbytes = totalbytes
+        self.message = message
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case state
+        case freebytes = "freeBytes"
+        case totalbytes = "totalBytes"
+        case message
+    }
+}
+
 public struct SystemAgentApprovalPresentation: Codable, Sendable {
     public let kind: String
     public let title: String

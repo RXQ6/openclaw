@@ -1646,6 +1646,7 @@
                 "pages": [
                   "concepts/agent-workspace",
                   "concepts/managed-worktrees",
+                  "concepts/storage-locations",
                   "concepts/oauth",
                   "start/bootstrapping",
                   "concepts/experimental-features"
@@ -2756,6 +2757,7 @@
                       "cli/openclaw",
                       "cli/reset",
                       "cli/setup",
+                      "cli/storage",
                       "cli/uninstall",
                       "cli/update",
                       {

@@ -980,6 +980,8 @@ enum class GatewayMethod(
   UsersMerge("users.merge"),
   GatewayStopRequest("gateway.stop.request"),
   DiagnosticsHeapSnapshot("diagnostics.heapSnapshot"),
+  StorageLocationsList("storage.locations.list"),
+  StorageLocationsProbe("storage.locations.probe"),
 }
 
 enum class GatewayEvent(

@@ -4352,6 +4352,14 @@
     "target": "存储变更与发布预检"
   },
   {
+    "source": "storage",
+    "target": "storage"
+  },
+  {
+    "source": "Storage locations",
+    "target": "存储位置"
+  },
+  {
     "source": "Agent schema history",
     "target": "Agent 数据库 schema 历史"
   },
