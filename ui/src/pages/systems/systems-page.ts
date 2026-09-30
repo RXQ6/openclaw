@@ -20,6 +20,7 @@ import {
 import { OpenClawLightDomElement } from "../../lit/openclaw-element.ts";
 import { PollController } from "../../lit/poll-controller.ts";
 import { SubscriptionsController } from "../../lit/subscriptions-controller.ts";
+import { renderSystemsBackups } from "./systems-backups.ts";
 import { SystemsController } from "./systems-controller.ts";
 import type { SystemsRouteData } from "./systems-controller.ts";
 import type { SystemsInventoryRow } from "./systems-data.ts";
@@ -148,6 +149,9 @@ class SystemsPage extends OpenClawLightDomElement {
         void controller.refresh();
       } else if (controller.showStats || controller.showDetails) {
         void controller.refreshTelemetry();
+      }
+      if (controller.selectedId === "gateway" && !controller.needsInventoryRefresh) {
+        void controller.refreshBackups();
       }
     },
     true,
@@ -419,6 +423,7 @@ class SystemsPage extends OpenClawLightDomElement {
           : nothing
       }
       ${controller.showStats && row ? renderMeasurements(row, controller) : nothing}
+      ${row?.environment.id === "gateway" ? renderSystemsBackups(controller) : nothing}
       <div class="systems-body">
         <div class="systems-desktop">
           ${

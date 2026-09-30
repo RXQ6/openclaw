@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { BackupStatusResult } from "@openclaw/gateway-protocol";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import type { Page } from "playwright";
 import { expect, it } from "vitest";
@@ -73,12 +74,106 @@ function installSystemsGateway(
         memoryTotalBytes: 8192,
         memoryFreeBytes: 4096,
       },
+      "backup.status": { targets: [], schedules: [], locations: [] },
       ...methodResponses,
     },
   });
 }
 
 suite.define(() => {
+  it("shows backup health and probes configured storage from the Gateway host", async () => {
+    const artifacts = createControlUiE2eArtifactDir("systems-backups");
+    await suite.withPage(
+      { locale: "en-US", serviceWorkers: "block", viewport: { width: 1440, height: 900 } },
+      async ({ page }) => {
+        const now = Date.now();
+        const success = {
+          id: "backup-ok",
+          createdAt: now - 3_600_000,
+          archivePath: "/scratch/backup.tar.gz",
+          kind: "archive" as const,
+          status: "ok" as const,
+          target: "offsite",
+          location: {
+            name: "offsite",
+            provider: "filesystem",
+            locationId: "synthetic-location",
+            namespace: "gateway",
+            key: "20260930T110000Z-12345678.tar.gz",
+            plaintextBytes: 24 * 1024 ** 2,
+            storedBytes: 25 * 1024 ** 2,
+          },
+        };
+        const status: BackupStatusResult = {
+          targets: [{ kind: "archive", target: "offsite", latest: success, latestOk: success }],
+          schedules: [
+            {
+              id: "backup-schedule",
+              mode: "offsite",
+              target: "offsite",
+              enabled: true,
+              everyMs: 86_400_000,
+              nextRunAtMs: now + 3_600_000,
+            },
+          ],
+          locations: [
+            {
+              name: "offsite",
+              provider: "filesystem",
+              displayTarget: "/Volumes/Archive/openclaw",
+              encrypted: true,
+            },
+          ],
+        };
+        const gateway = await installSystemsGateway(page, 0, {
+          "backup.status": status,
+          "storage.locations.probe": { state: "ok", freeBytes: 256 * 1024 ** 3 },
+        });
+        await page.goto(suite.server.baseUrl + "systems");
+        const backups = page.getByRole("region", { name: "Backups" });
+        await backups.getByText("Last success:", { exact: false }).waitFor();
+        expect(await backups.textContent()).toContain("Next run:");
+        expect(await gateway.getRequests("storage.locations.probe")).toHaveLength(0);
+        await page.screenshot({ path: path.join(artifacts, "backups-ok.png") });
+        await backups.getByRole("button", { name: "Check offsite" }).click();
+        const probe = await gateway.waitForRequest("storage.locations.probe");
+        expect(probe.params).toEqual({ name: "offsite" });
+        await backups.getByRole("status").filter({ hasText: "Available" }).waitFor();
+        await gateway.setMethodResponse("backup.status", {
+          ...status,
+          targets: [
+            {
+              ...status.targets[0],
+              latest: {
+                ...success,
+                status: "failed",
+                error: "Archive disk disconnected. Run openclaw storage test offsite.",
+              },
+            },
+          ],
+        });
+        await page.getByRole("button", { name: "Refresh machines" }).click();
+        await backups
+          .getByText("Archive disk disconnected. Run openclaw storage test offsite.", {
+            exact: true,
+          })
+          .waitFor();
+        await page.screenshot({ path: path.join(artifacts, "backups-failed.png") });
+        await gateway.setMethodResponse("backup.status", {
+          targets: [],
+          schedules: [],
+          locations: [],
+        });
+        await page.getByRole("button", { name: "Refresh machines" }).click();
+        await backups.getByText("No backups recorded —", { exact: false }).waitFor();
+        await page.emulateMedia({ reducedMotion: "reduce" });
+        await page.setViewportSize({ width: 640, height: 900 });
+        await page.locator(".systems-mobile-picker").waitFor({ state: "visible" });
+        await page.screenshot({ path: path.join(artifacts, "backups-empty-mobile.png") });
+      },
+    );
+  });
+
   it("names Macs consistently and enables a discovered desktop without reconnecting", async () => {
     const artifacts = createControlUiE2eArtifactDir("systems-platform-labels");
     await suite.withPage(
