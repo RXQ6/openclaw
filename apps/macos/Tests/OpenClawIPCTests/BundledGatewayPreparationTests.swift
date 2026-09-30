@@ -316,6 +316,49 @@ struct BundledGatewayPreparationTests {
         }
     }
 
+    @Test(arguments: ["install", "uninstall", "restart"], ["unchanged", "service", "environment", "wrapper"])
+    func `daemon dispatch preserves the originally selected service authority`(
+        verb: String, replacement: String) async throws
+    {
+        let home = try makeTempDirForTests()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let state = home.appendingPathComponent("state")
+        try await TestIsolation.withIsolatedState(
+            launchAgentHomeDirectory: home, env: ["OPENCLAW_STATE_DIR": state.path])
+        {
+            let fixture = try Fixture(home: home, stateDirectory: state)
+            defer { fixture.remove() }
+            let artifacts = GatewayLaunchAgentManager.generatedEnvironmentArtifacts(
+                directory: state.appendingPathComponent("service-env"), profile: .current)
+            try FileManager.default.createDirectory(
+                at: artifacts.environment.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
+            try Data("export FIXTURE='original'\n".utf8).write(to: artifacts.environment)
+            try Data("#!/bin/sh\n".utf8).write(to: artifacts.wrapper)
+            let cli = try #require(GatewayLaunchAgentManager.installedServiceCLI())
+            let original = try #require(cli.serviceAuthority)
+            switch replacement {
+            case "service": try Data("operator replacement".utf8).write(to: fixture.plist)
+            case "environment": try Data("export FIXTURE='replacement'\n".utf8).write(to: artifacts.environment)
+            case "wrapper": try Data("#!/bin/sh\nexit 1\n".utf8).write(to: artifacts.wrapper)
+            default: break
+            }
+            let effect = fixture.root.appendingPathComponent("daemon-effect")
+            GatewayLaunchAgentManager.clearTestingDaemonCommandCalls()
+            GatewayLaunchAgentManager.setTestingInterceptDaemonCommands(true, beforeReturning: { _ in
+                do { try Data().write(to: effect) } catch { Issue.record(error) }
+            })
+            defer {
+                GatewayLaunchAgentManager.setTestingInterceptDaemonCommands(false)
+                GatewayLaunchAgentManager.clearTestingDaemonCommandCalls()
+            }
+            let error = await GatewayLaunchAgentManager.runDaemonCommand(
+                [verb], installedCLI: cli, expectedServiceAuthority: original)
+            #expect((error == nil) == (replacement == "unchanged"))
+            #expect(FileManager.default.fileExists(atPath: effect.path) == (replacement == "unchanged"))
+        }
+    }
+
     @Test func `saved concrete runtime identity is not recaptured through a replacement alias`() async throws {
         let home = try makeTempDirForTests()
         defer { try? FileManager.default.removeItem(at: home) }

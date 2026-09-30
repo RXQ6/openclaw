@@ -194,7 +194,8 @@ enum GatewayLaunchAgentManager {
         enabled: Bool,
         port: Int,
         allowUnconfigured: Bool = false,
-        whenMissingCLI: InstalledServiceCLI? = nil) async -> String?
+        whenMissingCLI: InstalledServiceCLI? = nil,
+        expectedServiceAuthority: ServiceAuthority? = nil) async -> String?
     {
         if enabled, CommandResolver.connectionModeIsRemote(), !allowUnconfigured {
             self.logger.info("launchd change skipped (remote mode)")
@@ -206,7 +207,9 @@ enum GatewayLaunchAgentManager {
         }
 
         let custody: ServiceAuthority
-        do { custody = try self.gatewayServiceAuthority() } catch { return error.localizedDescription }
+        do { custody = try expectedServiceAuthority ?? self.gatewayServiceAuthority() } catch {
+            return error.localizedDescription
+        }
         if enabled {
             self.logger.info("launchd enable requested via CLI port=\(port)")
             let existing = self.launchdConfigSnapshot()
@@ -268,11 +271,12 @@ enum GatewayLaunchAgentManager {
                     arguments += ["--runtime-path", preserved.sourcePrefix?.first ?? executable]
                 }
             }
-            return await self.runDaemonCommand(arguments, runtime: runtime, installedCLI: installedCLI)
+            return await self.runDaemonCommand(
+                arguments, runtime: runtime, installedCLI: installedCLI, expectedServiceAuthority: custody)
         }
 
         self.logger.info("launchd disable requested via CLI")
-        return await self.runDaemonCommand(["uninstall"])
+        return await self.runDaemonCommand(["uninstall"], expectedServiceAuthority: custody)
     }
 
     static func installArguments(
@@ -314,11 +318,14 @@ enum GatewayLaunchAgentManager {
     static func reinstallBundledRuntime(
         runtime: BundledRuntime,
         port: Int,
-        allowUnconfigured: Bool = false) async -> String?
+        allowUnconfigured: Bool = false,
+        expectedServiceAuthority: ServiceAuthority? = nil) async -> String?
     {
         guard !self.isLaunchAgentWriteDisabled() else { return "Gateway service changes are disabled" }
         let custody: ServiceAuthority
-        do { custody = try self.gatewayServiceAuthority() } catch { return error.localizedDescription }
+        do { custody = try expectedServiceAuthority ?? self.gatewayServiceAuthority() } catch {
+            return error.localizedDescription
+        }
         let snapshot = self.launchdConfigSnapshot()
         let exists = FileManager.default.fileExists(atPath: self.plistURL.path)
         if let snapshot {
@@ -364,7 +371,8 @@ enum GatewayLaunchAgentManager {
                 runtime: runtime,
                 launchAgentExists: exists,
                 replaceRuntime: true),
-            runtime: runtime)
+            runtime: runtime,
+            expectedServiceAuthority: custody)
     }
 
     static func installedGatewayCommand(
@@ -556,7 +564,8 @@ extension GatewayLaunchAgentManager {
         quiet: Bool = false,
         runtime: BundledRuntime? = nil,
         installedCLI: InstalledServiceCLI? = nil,
-        legacyAuthority: InstalledServiceCLI? = nil) async -> String?
+        legacyAuthority: InstalledServiceCLI? = nil,
+        expectedServiceAuthority: ServiceAuthority? = nil) async -> String?
     {
         let result = await self.runDaemonCommandResult(
             args,
@@ -564,7 +573,8 @@ extension GatewayLaunchAgentManager {
             quiet: quiet,
             runtime: runtime,
             installedCLI: installedCLI,
-            legacyAuthority: legacyAuthority)
+            legacyAuthority: legacyAuthority,
+            expectedServiceAuthority: expectedServiceAuthority)
         if result.success { return nil }
         return result.message ?? "Gateway daemon command failed"
     }
@@ -575,12 +585,13 @@ extension GatewayLaunchAgentManager {
         quiet: Bool,
         runtime: BundledRuntime? = nil,
         installedCLI: InstalledServiceCLI? = nil,
-        legacyAuthority: InstalledServiceCLI? = nil) async -> CommandResult
+        legacyAuthority: InstalledServiceCLI? = nil,
+        expectedServiceAuthority: ServiceAuthority? = nil) async -> CommandResult
     {
         let beforeSpawn: (@Sendable () -> String?)?
         if args.first.map(["install", "uninstall", "restart"].contains) == true {
             let custody: ServiceAuthority
-            do { custody = try self.gatewayServiceAuthority() } catch {
+            do { custody = try expectedServiceAuthority ?? self.gatewayServiceAuthority() } catch {
                 return CommandResult(success: false, payload: nil, message: error.localizedDescription)
             }
             let authority = legacyAuthority ?? installedCLI

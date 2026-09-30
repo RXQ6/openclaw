@@ -533,7 +533,8 @@ struct GatewayProcessManagerTests {
         }
     }
 
-    @Test func `pause preserves a service whose command cannot be restored after relaunch`() async throws {
+    @Test(arguments: ["outside-entrypoint", "unsupported-command", "malformed-plist", "absent"])
+    func `pause preserves unretainable services and distinguishes absence`(_ definition: String) async throws {
         try await self.withLaunchAgentEnvironment(port: AppProfile.current.defaultGatewayPort) {
             let manager = self.manager
             let state = AppProfile.current.stateDirectoryURL()
@@ -548,14 +549,17 @@ struct GatewayProcessManagerTests {
             try FileManager.default.createDirectory(
                 at: plist.deletingLastPathComponent(),
                 withIntermediateDirectories: true)
-            let original = try PropertyListSerialization.data(fromPropertyList: [
-                "ProgramArguments": [
+            let prefix = definition == "unsupported-command"
+                ? [state.appendingPathComponent("bin/openclaw").path]
+                : [
                     state.appendingPathComponent("tools/node-version/bin/node").path,
                     LaunchAgentPlist.homeDirectoryURL.appendingPathComponent("outside-package/openclaw.mjs").path,
-                    "gateway", "--port", String(AppProfile.current.defaultGatewayPort),
-                ],
-            ], format: .xml, options: 0)
-            try original.write(to: plist)
+                ]
+            let original = try definition == "malformed-plist" ? Data("invalid plist".utf8) :
+                PropertyListSerialization.data(fromPropertyList: [
+                    "ProgramArguments": prefix + ["gateway", "--port", String(AppProfile.current.defaultGatewayPort)],
+                ], format: .xml, options: 0)
+            if definition != "absent" { try original.write(to: plist) }
             GatewayLaunchAgentManager.setTestingInterceptDaemonCommands(true, beforeReturning: { arguments in
                 if arguments.first == "uninstall" { try? FileManager.default.removeItem(at: plist) }
             })
@@ -563,6 +567,11 @@ struct GatewayProcessManagerTests {
             manager.stop()
             await manager.waitForStartupAttempt()
 
+            if definition == "absent" {
+                #expect(manager.status == .stopped)
+                #expect(AppDefaults.standard.object(forKey: GatewayLaunchAgentManager.resumeCommandKey) == nil)
+                return
+            }
             #expect((try? Data(contentsOf: plist)) == original)
             #expect(!GatewayLaunchAgentManager.testingDaemonCommandCallsSnapshot().contains { $0.first == "uninstall" })
             #expect(AppDefaults.standard.object(forKey: GatewayLaunchAgentManager.resumeCommandKey) == nil)

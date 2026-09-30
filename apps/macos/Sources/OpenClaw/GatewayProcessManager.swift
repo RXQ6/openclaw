@@ -559,26 +559,25 @@ final class GatewayProcessManager {
                     self.launchAgentDisableGeneration = nil
                 }
             }
-            if self.launchAgentDisableGeneration == stopGeneration {
-                // A service can be installed while our child still runs. Pause owns both teardowns.
-                await self.childSupervisor.stop()
-                if hosting == .service, self.launchAgentDisableGeneration == stopGeneration {
-                    do {
-                        // A published paused installation has no plist or resume record. Keep
-                        // its always-on intent without probing, capturing credentials, or uninstalling.
-                        if try self.shouldDeferLegacyServiceWhilePaused() { return }
-                        if self.installation == .external { return }
-                        try await self.retainManagedServiceForResume()
-                        if self.launchAgentDisableGeneration == stopGeneration {
-                            _ = await GatewayLaunchAgentManager.set(
-                                enabled: false, port: GatewayEnvironment.gatewayPort())
-                        }
-                    } catch {
-                        if self.launchAgentDisableGeneration == stopGeneration {
-                            self.lastFailureReason = error.localizedDescription
-                            self.status = .failed(error.localizedDescription)
-                        }
-                    }
+            guard self.launchAgentDisableGeneration == stopGeneration else { return }
+            // A service can be installed while our child still runs. Pause owns both teardowns.
+            await self.childSupervisor.stop()
+            guard hosting == .service, self.launchAgentDisableGeneration == stopGeneration else { return }
+            do {
+                // A published paused installation has no plist or resume record. Keep
+                // its always-on intent without probing, capturing credentials, or uninstalling.
+                if try self.shouldDeferLegacyServiceWhilePaused() { return }
+                if self.installation == .external { return }
+                let custody = try await self.retainManagedServiceForResume()
+                if self.launchAgentDisableGeneration == stopGeneration {
+                    let error = await GatewayLaunchAgentManager.set(
+                        enabled: false, port: GatewayEnvironment.gatewayPort(), expectedServiceAuthority: custody)
+                    if let error { throw GatewayHostingError(message: error) }
+                }
+            } catch {
+                if self.launchAgentDisableGeneration == stopGeneration {
+                    self.lastFailureReason = error.localizedDescription
+                    self.status = .failed(error.localizedDescription)
                 }
             }
         }

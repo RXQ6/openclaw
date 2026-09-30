@@ -141,21 +141,32 @@ extension GatewayProcessManager {
         if let cli = try self.serviceCLIForResume() { self.retainedServiceCLI = cli }
     }
 
-    func retainManagedServiceForResume() async throws {
+    func retainManagedServiceForResume() async throws -> GatewayLaunchAgentManager.ServiceAuthority {
+        let custody = try GatewayLaunchAgentManager.gatewayServiceAuthority()
+        // A missing plist is a known state; a present record that cannot be captured must survive Pause.
+        if custody.definition.plist == nil {
+            if let error = custody.currentError() { throw GatewayHostingError(message: error) }
+            return custody
+        }
         guard self.installation == .managed,
-              let snapshot = GatewayLaunchAgentManager.launchdConfigSnapshot()
-        else { return }
+              let snapshot = GatewayLaunchAgentManager.launchdConfigSnapshot(),
+              var cli = GatewayLaunchAgentManager.installedServiceCLI()
+        else {
+            throw GatewayHostingError(
+                message: "The Gateway service command could not be retained. " +
+                    "The service was preserved; repair its LaunchAgent before pausing.")
+        }
         let state = AppProfile.current.stateDirectoryURL()
-        guard var cli = GatewayLaunchAgentManager.installedServiceCLI()
-        else { return }
         let pin = try await GatewayLaunchAgentManager.runtimePinRecord(stateDirectory: state, profile: .current)
         guard try await GatewayLaunchAgentManager.runtimePinRecord(stateDirectory: state, profile: .current) == pin,
-              GatewayLaunchAgentManager.launchdConfigSnapshot() == snapshot
+              GatewayLaunchAgentManager.launchdConfigSnapshot() == snapshot,
+              custody.currentError() == nil
         else { throw GatewayHostingError(message: "The Gateway service changed before pausing; retry.") }
         cli.hadRuntimePin = pin != nil
         _ = try GatewayLaunchAgentManager.retainedServiceIntent(
             from: GatewayLaunchAgentManager.resumeData(for: cli), stateDirectory: state)
         self.retainedServiceCLI = cli
+        return custody
     }
 
     struct PausedServiceUpdate {
