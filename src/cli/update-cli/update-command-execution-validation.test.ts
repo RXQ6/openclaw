@@ -241,7 +241,7 @@ export function prepareBundledPluginRuntime({ repoRoot }) {
       failureFacts: [{ check: "readyz", code: "candidate-readiness-probe-failed", message }],
     };
     mocks.validateCanary.mockImplementation(async ({ onStep }) => {
-      onStep(step);
+      await onStep(step);
       return {
         status: "ok",
         phase: "readiness",
