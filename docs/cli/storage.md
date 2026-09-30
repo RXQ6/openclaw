@@ -28,7 +28,8 @@ openclaw storage test archive --json
 
 ## List
 
-`storage list` shows each configured location, its provider, and its probe state.
+`storage list` shows each configured location, its provider, its display target
+when available, and its probe state.
 Probing reads the location marker and checks access and the encryption key. It
 does not initialize locations or write test objects. Providers that report
 capacity include free and total bytes in JSON output.
@@ -45,14 +46,17 @@ external disk is mounted before initializing its location.
 
 Initialization is explicit so a disconnected disk or an empty mount point cannot
 silently become a new destination. If a runtime operation reports a missing
-marker, reconnect the disk, or initialize the location only if it is new.
+marker, reconnect the disk or check the bucket and prefix. Initialize the location
+only if it is new. For example:
+
+> Storage location "r2test" (r2://bucket/prefix) has no initialization marker. If this is a new location, run `openclaw storage init r2test`; otherwise reconnect the disk or check the bucket and prefix.
 
 ## Test
 
-`storage test <name>` writes a small, unique object under `.openclaw-probe/`, reads
+`storage test <name>` writes a small, unique `.openclaw-probe-<uuid>` object at the location root, reads
 it back through the configured encryption layer, verifies every byte, and deletes
 the object. It requires an initialized location and never initializes one.
-An empty probe directory may remain on filesystem locations.
+No probe directory is created on filesystem locations.
 
 A successful JSON result includes `state: "ok"` and `sizeBytes`. A failed write,
 read-back verification, or cleanup fails the command. If a provider is unreachable

@@ -24,7 +24,6 @@ describe("offsite backup CLI", () => {
       const scratchRoot = state.path("scratch");
       await fs.mkdir(scratchRoot);
       vi.spyOn(os, "tmpdir").mockReturnValue(scratchRoot);
-      await fs.mkdir(destination);
       await state.writeConfig({
         agents: { entries: { main: { workspace: state.workspaceDir } } },
         storage: {
@@ -60,6 +59,20 @@ describe("offsite backup CLI", () => {
       await closeOpenClawStateDatabaseAsync();
       expect((await fs.stat(resolveOpenClawStateSqlitePath())).isFile()).toBe(true);
       const localCopy = state.path("retained.tar.gz");
+      await expect(
+        run("backup", "create", "--to", "archive", "--output", localCopy),
+      ).rejects.toThrow();
+      const unavailableMessage =
+        "Storage directory is unavailable. Reconnect the disk and check the configured path; storage init requires an existing directory.";
+      expect(errors.mock.calls.flat().join(" ")).toContain(unavailableMessage);
+      expect((await readBackupRuns(process.env))[0]).toMatchObject({
+        kind: "archive",
+        target: "archive",
+        status: "failed",
+        error: unavailableMessage,
+      });
+      errors.mockClear();
+      await fs.mkdir(destination);
       await expect(
         run("backup", "create", "--to", "archive", "--output", localCopy),
       ).rejects.toThrow();

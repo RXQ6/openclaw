@@ -76,30 +76,33 @@ function configuredLocation(params: StorageLocationParams): StorageLocationConfi
   return location;
 }
 
-function unavailable(name: string): StorageLocationError {
+function unavailable(name: string, displayTarget?: string): StorageLocationError {
   return new StorageLocationError(
     "unavailable",
-    `Storage location "${name}" has no initialization marker; reconnect the disk, or run \`openclaw storage init ${name}\` if this is a new location.`,
+    `Storage location "${name}"${displayTarget ? ` (${displayTarget})` : ""} has no initialization marker. If this is a new location, run \`openclaw storage init ${name}\`; otherwise reconnect the disk or check the bucket and prefix.`,
+  );
+}
+
+export function storageLocationError(error: unknown): StorageLocationError {
+  if (error instanceof StorageLocationError) {
+    return error;
+  }
+  if (isMissingPathError(error) || hasErrnoCode(error, "path-mismatch")) {
+    return new StorageLocationError(
+      "unavailable",
+      "Storage directory is unavailable. Reconnect the disk and check the configured path; storage init requires an existing directory.",
+    );
+  }
+  // Provider errors may contain credentials or signed URLs; do not project them into RPC/CLI output.
+  return new StorageLocationError(
+    "error",
+    "Storage could not be accessed. Check its provider settings, credentials, and connection.",
   );
 }
 
 function probeFailure(error: unknown): StorageProbeResult {
-  if (error instanceof StorageLocationError) {
-    return { state: error.state, message: error.message };
-  }
-  if (isMissingPathError(error) || hasErrnoCode(error, "path-mismatch")) {
-    return {
-      state: "unavailable",
-      message:
-        "Storage directory is unavailable. Reconnect the disk and check the configured path; storage init requires an existing directory.",
-    };
-  }
-  // Provider errors may contain credentials or signed URLs; do not project them into RPC/CLI output.
-  return {
-    state: "error",
-    message:
-      "Storage could not be accessed. Check its provider settings, credentials, and connection.",
-  };
+  const { state, message } = storageLocationError(error);
+  return { state, message };
 }
 
 async function prepare(params: StorageLocationParams) {
@@ -114,6 +117,8 @@ async function prepare(params: StorageLocationParams) {
     config: params.config,
     registry: params.registry,
     env: params.env,
+  }).catch((error: unknown) => {
+    throw storageLocationError(error);
   });
   try {
     const message = acquired.provider.validateSettings?.(location.settings);
@@ -158,15 +163,21 @@ async function prepare(params: StorageLocationParams) {
       }
       closed = true;
       try {
-        await backend.close?.();
-      } finally {
-        await acquired.release();
+        try {
+          await backend.close?.();
+        } finally {
+          await acquired.release();
+        }
+      } catch (error) {
+        throw storageLocationError(error);
       }
     };
     return { backend, passphrase, provider: location.provider, close };
   } catch (error) {
-    await acquired.release();
-    throw error;
+    await acquired.release().catch((releaseError: unknown) => {
+      throw storageLocationError(releaseError);
+    });
+    throw storageLocationError(error);
   }
 }
 
@@ -187,9 +198,11 @@ async function makeLocation(
   };
   const check = async (signal?: AbortSignal) => {
     assertOpen(signal);
-    const current = await readStorageMarker(backend, signal);
+    const current = await readStorageMarker(backend, signal).catch((error: unknown) => {
+      throw storageLocationError(error);
+    });
     if (!current) {
-      throw unavailable(params.name);
+      throw unavailable(params.name, backend.displayTarget);
     }
     if (JSON.stringify(current) !== markerIdentity) {
       throw new StorageLocationError(
@@ -337,12 +350,12 @@ export async function openStorageLocation(params: StorageLocationParams): Promis
   try {
     const marker = await readStorageMarker(prepared.backend, params.signal);
     if (!marker) {
-      throw unavailable(params.name);
+      throw unavailable(params.name, prepared.backend.displayTarget);
     }
     return await makeLocation(params, prepared, marker);
   } catch (error) {
     await prepared.close();
-    throw error;
+    throw storageLocationError(error);
   }
 }
 
@@ -373,7 +386,7 @@ export async function initStorageLocation(params: StorageLocationParams): Promis
     return await makeLocation(params, prepared, marker);
   } catch (error) {
     await prepared.close();
-    throw error;
+    throw storageLocationError(error);
   }
 }
 

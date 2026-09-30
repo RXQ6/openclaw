@@ -150,6 +150,22 @@ async function mount(controller: SystemsController) {
 }
 
 describe("Systems workspace", () => {
+  it("shows and refreshes backup health on the landing view without machines", async () => {
+    vi.useFakeTimers();
+    const { controller, request } = harness(
+      async () => [],
+      () => [],
+    );
+    const { page } = await mount(controller);
+    expect(page.querySelector(".systems-heading h1")?.textContent).toBe("Systems");
+    expect(page.querySelectorAll(".systems-backups")).toHaveLength(1);
+    expect(page.querySelector(".systems-backups")?.textContent).toContain("No backups recorded —");
+    const backupReads = () => request.mock.calls.filter(([method]) => method === "backup.status");
+    expect(backupReads()).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(backupReads()).toHaveLength(2);
+  });
+
   it("shows backup success, failure and schedule facts, and checks a location only on request", async () => {
     const now = Date.UTC(2026, 8, 30, 12);
     vi.spyOn(Date, "now").mockReturnValue(now);

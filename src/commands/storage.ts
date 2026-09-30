@@ -6,7 +6,10 @@ import {
   listStorageLocations,
   openStorageLocation,
   probeStorageLocation,
+  storageLocationError,
+  type StorageProbeResult,
 } from "../storage/locations.js";
+import { acquireStorageProvider } from "../storage/provider.js";
 
 type StorageCommandOptions = { json?: boolean };
 
@@ -14,9 +17,31 @@ export async function storageListCommand(runtime: RuntimeEnv, opts: StorageComma
   const config = getRuntimeConfig();
   const locations = [];
   for (const location of listStorageLocations(config)) {
+    let displayTarget = location.displayTarget;
+    let probe: StorageProbeResult;
+    try {
+      const acquired = await acquireStorageProvider({ providerId: location.provider, config });
+      try {
+        const settings = config.storage?.locations?.[location.name]?.settings;
+        if (settings) {
+          displayTarget = acquired.provider.describeTarget?.(settings);
+        }
+        probe = await probeStorageLocation({
+          name: location.name,
+          config,
+          registry: acquired.registry,
+        });
+      } finally {
+        await acquired.release();
+      }
+    } catch (error) {
+      const { state, message } = storageLocationError(error);
+      probe = { state, message };
+    }
     locations.push({
       ...location,
-      ...(await probeStorageLocation({ name: location.name, config })),
+      ...(displayTarget === undefined ? {} : { displayTarget }),
+      ...probe,
     });
   }
   if (opts.json) {
@@ -58,10 +83,9 @@ export async function storageTestCommand(
 ) {
   const location = await openStorageLocation({ name, config: getRuntimeConfig() });
   try {
-    const probe = location.scope(".openclaw-probe");
-    const key = randomUUID();
+    const key = `.openclaw-probe-${randomUUID()}`;
     const payload = randomBytes(256);
-    await probe.putObject(
+    await location.putObject(
       key,
       (async function* () {
         yield payload;
@@ -69,7 +93,7 @@ export async function storageTestCommand(
       { sizeBytes: payload.length },
     );
     try {
-      const body = await probe.getObject(key);
+      const body = await location.getObject(key);
       if (!body) {
         throw new Error(`Storage test for "${name}" failed: the written object is missing.`);
       }
@@ -87,7 +111,7 @@ export async function storageTestCommand(
         throw new Error(`Storage test for "${name}" failed: read-back bytes are truncated.`);
       }
     } finally {
-      await probe.delete(key);
+      await location.delete(key);
     }
     if (opts.json) {
       writeRuntimeJson(runtime, { ...location.describe(), state: "ok", sizeBytes: payload.length });

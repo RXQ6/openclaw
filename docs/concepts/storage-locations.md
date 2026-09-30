@@ -109,7 +109,7 @@ storage encryption, anyone who can read the destination can read the stored byte
 ## Diagnose a location
 
 `openclaw storage list` probes configured locations. `openclaw storage test <name>`
-also writes a temporary object under `.openclaw-probe/`, reads and verifies it, then
+also writes a temporary `.openclaw-probe-<uuid>` object at the location root, reads and verifies it, then
 deletes it. Every storage command supports `--json`; see the
 [CLI reference](/cli/storage).
 

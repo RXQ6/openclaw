@@ -11,7 +11,11 @@ export async function acquireStorageProvider(params: {
   config: OpenClawConfig;
   registry?: StorageRegistry;
   env?: NodeJS.ProcessEnv;
-}): Promise<{ provider: StorageProvider; release: () => Promise<void> }> {
+}): Promise<{
+  provider: StorageProvider;
+  registry?: StorageRegistry;
+  release: () => Promise<void>;
+}> {
   if (params.providerId === "filesystem") {
     return { provider: filesystemStorageProvider, release: async () => {} };
   }
@@ -22,7 +26,7 @@ export async function acquireStorageProvider(params: {
         `Storage provider "${params.providerId}" is not loaded; check its plugin configuration.`,
       );
     }
-    return { provider, release: async () => {} };
+    return { provider, registry: params.registry, release: async () => {} };
   }
   const { applyPluginAutoEnable } = await import("../config/plugin-auto-enable.js");
   const enabled = applyPluginAutoEnable({ config: params.config, env: params.env ?? process.env });
@@ -49,7 +53,7 @@ export async function acquireStorageProvider(params: {
     if (!provider) {
       throw new Error(`Plugin did not register storage provider "${params.providerId}".`);
     }
-    return { provider, release: acquisition.release };
+    return { provider, registry: acquisition.registry, release: acquisition.release };
   } catch (error) {
     await acquisition.release();
     throw error;

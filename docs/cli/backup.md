@@ -96,7 +96,8 @@ local copy as well, add `--output <path>`; that copy is an ordinary plaintext
 `.tar.gz`, even when storage encryption is enabled.
 
 An uninitialized location fails before archive creation and records a failed
-attempt with the next step. Reconnect a missing disk, or run `openclaw storage
+attempt with the next step. Reconnect a missing disk or check the bucket and prefix,
+or run `openclaw storage
 init <name>` only when the destination is new. Backups never initialize storage
 implicitly. Keep the encryption passphrase and root location marker available
 for recovery.
@@ -464,7 +465,7 @@ Gateway RPC `backup.status` requires operator read scope. It returns the newest
 attempt and success per backup kind and target from the bounded recent window,
 configured backup schedules with their next run, and the configured storage
 locations. Listing configuration does not probe storage. The Control UI's
-Backups section uses this status and provides a **Check** action per location
+Backups section on the Systems landing and Gateway host views uses this status and provides a **Check** action per location
 through `storage.locations.probe`.
 
 Recording is best-effort: a record-write failure prints a warning but never

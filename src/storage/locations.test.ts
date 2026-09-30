@@ -1,10 +1,11 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { StorageLocationConfig } from "../config/types.storage.js";
 import { initStorageLocation, openStorageLocation, probeStorageLocation } from "./locations.js";
+import { StorageLocationError } from "./marker.js";
 import type { StorageRegistry } from "./provider.js";
 import type { StorageBackend, StorageObjectInfo, StorageProvider } from "./types.js";
 
@@ -102,6 +103,7 @@ function memoryFixture(encryption: StorageLocationConfig["encryption"] = "none")
     storageProviders: new Map([[provider.id, { pluginId: "example", source: "test", provider }]]),
   };
   return {
+    provider,
     backend,
     objects,
     calls,
@@ -201,11 +203,61 @@ describe("storage locations", () => {
   it("requires an existing root during explicit initialization", async () => {
     const parent = tempDirs.make("openclaw-storage-location-");
     const directory = path.join(parent, "missing");
-    await expect(initStorageLocation(filesystemParams(directory))).rejects.toThrow();
+    await expect(initStorageLocation(filesystemParams(directory))).rejects.toMatchObject({
+      name: "StorageLocationError",
+      state: "unavailable",
+      message:
+        "Storage directory is unavailable. Reconnect the disk and check the configured path; storage init requires an existing directory.",
+    });
     await expect(probeStorageLocation(filesystemParams(directory))).resolves.toMatchObject({
       state: "unavailable",
     });
     await expect(fs.readdir(parent)).resolves.toEqual([]);
+  });
+
+  it.each([
+    { operation: "open", open: openStorageLocation },
+    { operation: "init", open: initStorageLocation },
+  ])("$operation sanitizes provider open and marker-read failures", async ({ open }) => {
+    for (const failure of ["open", "marker-read", "marker-stream"] as const) {
+      const fixture = memoryFixture();
+      const providerError = new Error("provider failure with synthetic-private-credential");
+      const close = vi.fn(async () => {});
+      fixture.backend.close = close;
+      if (failure === "open") {
+        fixture.provider.open = async () => {
+          throw providerError;
+        };
+      } else {
+        fixture.backend.getObject = async () => {
+          if (failure === "marker-read") {
+            throw providerError;
+          }
+          return (async function* () {
+            yield Buffer.from("{");
+            throw providerError;
+          })();
+        };
+      }
+      const error = await open(fixture.params).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(StorageLocationError);
+      expect(error).toMatchObject({
+        state: "error",
+        message:
+          "Storage could not be accessed. Check its provider settings, credentials, and connection.",
+      });
+      expect(close).toHaveBeenCalledTimes(failure === "open" ? 0 : 1);
+    }
+  });
+
+  it("names the display target and recovery options for a missing object-store marker", async () => {
+    const fixture = memoryFixture();
+    fixture.backend.displayTarget = "r2://bucket/prefix";
+    await expect(openStorageLocation(fixture.params)).rejects.toMatchObject({
+      state: "unavailable",
+      message:
+        'Storage location "archive" (r2://bucket/prefix) has no initialization marker. If this is a new location, run `openclaw storage init archive`; otherwise reconnect the disk or check the bucket and prefix.',
+    });
   });
 
   it("initializes idempotently with the same key and reports a wrong passphrase", async () => {

@@ -150,7 +150,10 @@ class SystemsPage extends OpenClawLightDomElement {
       } else if (controller.showStats || controller.showDetails) {
         void controller.refreshTelemetry();
       }
-      if (controller.selectedId === "gateway" && !controller.needsInventoryRefresh) {
+      if (
+        (!controller.selected || controller.selectedId === "gateway") &&
+        !controller.needsInventoryRefresh
+      ) {
         void controller.refreshBackups();
       }
     },
@@ -423,7 +426,7 @@ class SystemsPage extends OpenClawLightDomElement {
           : nothing
       }
       ${controller.showStats && row ? renderMeasurements(row, controller) : nothing}
-      ${row?.environment.id === "gateway" ? renderSystemsBackups(controller) : nothing}
+      ${!row || row.environment.id === "gateway" ? renderSystemsBackups(controller) : nothing}
       <div class="systems-body">
         <div class="systems-desktop">
           ${

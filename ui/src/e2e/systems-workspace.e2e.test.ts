@@ -81,7 +81,7 @@ function installSystemsGateway(
 }
 
 suite.define(() => {
-  it("shows backup health and probes configured storage from the Gateway host", async () => {
+  it("shows backup health on the landing and Gateway host views and probes configured storage", async () => {
     const artifacts = createControlUiE2eArtifactDir("systems-backups");
     await suite.withPage(
       { locale: "en-US", serviceWorkers: "block", viewport: { width: 1440, height: 900 } },
@@ -126,14 +126,32 @@ suite.define(() => {
           ],
         };
         const gateway = await installSystemsGateway(page, 0, {
+          "environments.list": { environments: [] },
           "backup.status": status,
           "storage.locations.probe": { state: "ok", freeBytes: 256 * 1024 ** 3 },
         });
         await page.goto(suite.server.baseUrl + "systems");
         const backups = page.getByRole("region", { name: "Backups" });
+        await page.getByRole("heading", { name: "Systems", exact: true }).waitFor();
         await backups.getByText("Last success:", { exact: false }).waitFor();
         expect(await backups.textContent()).toContain("Next run:");
+        expect(await gateway.getRequests("backup.status")).toHaveLength(1);
         expect(await gateway.getRequests("storage.locations.probe")).toHaveLength(0);
+        await page.screenshot({ path: path.join(artifacts, "backups-landing-ok.png") });
+        await page.emulateMedia({ reducedMotion: "reduce" });
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.locator(".systems-mobile-picker").waitFor({ state: "visible" });
+        await page.screenshot({ path: path.join(artifacts, "backups-landing-ok-mobile.png") });
+        await page.setViewportSize({ width: 1440, height: 900 });
+        await gateway.setMethodResponse("environments.list", {
+          environments: [
+            { id: "gateway", type: "local", label: "Gateway machine", status: "available" },
+          ],
+        });
+        await page.getByRole("button", { name: "Refresh machines" }).click();
+        await page.getByRole("button", { name: "Gateway machine" }).click();
+        await page.getByRole("heading", { name: "Gateway machine", exact: true }).waitFor();
+        await backups.getByText("Last success:", { exact: false }).waitFor();
         await page.screenshot({ path: path.join(artifacts, "backups-ok.png") });
         await backups.getByRole("button", { name: "Check offsite" }).click();
         const probe = await gateway.waitForRequest("storage.locations.probe");
