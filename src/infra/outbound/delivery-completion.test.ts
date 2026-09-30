@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -32,7 +33,10 @@ describe("pending-final delivery completion", () => {
 
   beforeEach(async () => {
     vi.clearAllMocks();
-    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-delivery-completion-"));
+    // openclaw-temp-dir: allow case-owned session cleanup drains before removal
+    tmpDir = realpathSync.native(
+      await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-delivery-completion-")),
+    );
     storePath = path.join(tmpDir, "sessions.json");
     completion.storePath = storePath;
     const entry: InternalSessionEntry = {

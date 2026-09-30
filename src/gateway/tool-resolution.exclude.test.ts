@@ -1,14 +1,15 @@
 /**
  * Gateway tool-resolution exclusion tests.
  */
-import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { prepareSystemAgentRunAdmission } from "../agents/admitted-run-context.js";
 import { replaceSessionEntry } from "../config/sessions/session-accessor.js";
 import type { SessionEntry } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { useSessionStoreTempDirs } from "../test-utils/session-state-cleanup.js";
+
+const sessionDirs = useSessionStoreTempDirs(afterAll, "openclaw-gateway-delegated-policy-");
 
 type CreateOpenClawToolsArg = {
   agentAccountId?: string;
@@ -748,7 +749,7 @@ describe("resolveGatewayScopedTools excludeToolNames", () => {
   });
 
   it("uses persisted delegated policy instead of the sender wildcard", async () => {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-gateway-delegated-policy-"));
+    const tempDir = sessionDirs.make();
     const storePath = path.join(tempDir, "sessions.json");
     const sessionKey = "agent:main:subagent:gateway-child";
     await replaceSessionEntry({ storePath, sessionKey }, {
@@ -761,31 +762,25 @@ describe("resolveGatewayScopedTools excludeToolNames", () => {
       inheritedToolPolicyVersion: 1,
     } as SessionEntry);
 
-    try {
-      const result = resolveNodeExecTools({
-        cfg: {
-          session: { store: storePath },
-          tools: {
-            toolsBySender: {
-              "*": { deny: ["group:runtime", "group:fs"] },
-              "id:alice": {},
-            },
+    const result = resolveNodeExecTools({
+      cfg: {
+        session: { store: storePath },
+        tools: {
+          toolsBySender: {
+            "*": { deny: ["group:runtime", "group:fs"] },
+            "id:alice": {},
           },
-        } as OpenClawConfig,
-        sessionKey,
-        senderIsOwner: false,
-        messageProvider: "discord",
-      });
+        },
+      } as OpenClawConfig,
+      sessionKey,
+      senderIsOwner: false,
+      messageProvider: "discord",
+    });
 
-      expect(result.tools.map((tool) => tool.name)).toEqual(
-        expect.arrayContaining(["read", "exec"]),
-      );
-      expect(readCreateToolsArgs().pluginToolDenylist).not.toEqual(
-        expect.arrayContaining(["read", "exec"]),
-      );
-    } finally {
-      fs.rmSync(tempDir, { recursive: true, force: true });
-    }
+    expect(result.tools.map((tool) => tool.name)).toEqual(expect.arrayContaining(["read", "exec"]));
+    expect(readCreateToolsArgs().pluginToolDenylist).not.toEqual(
+      expect.arrayContaining(["read", "exec"]),
+    );
   });
 
   it("filters node exec through plugin group policy bound to group labels", () => {

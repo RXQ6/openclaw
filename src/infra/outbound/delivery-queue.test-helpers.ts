@@ -3,6 +3,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterAll, afterEach, beforeAll, beforeEach, vi } from "vitest";
+import { closeOpenClawAgentDatabasesAsync } from "../../state/openclaw-agent-db.js";
 import {
   closeOpenClawStateDatabaseAsync,
   closeOpenClawStateDatabaseForTest,
@@ -52,7 +53,10 @@ export function installDeliveryQueueTmpDirHooks(): { readonly tmpDir: () => stri
   let fixtureCount = 0;
 
   beforeAll(() => {
-    fixtureRoot = fs.mkdtempSync(path.join(resolvePreferredOpenClawTmpDir(), "openclaw-dq-suite-"));
+    // openclaw-temp-dir: allow suite-owned queues drain their agent stores before removal
+    fixtureRoot = fs.realpathSync.native(
+      fs.mkdtempSync(path.join(resolvePreferredOpenClawTmpDir(), "openclaw-dq-suite-")),
+    );
   });
 
   beforeEach(() => {
@@ -63,13 +67,13 @@ export function installDeliveryQueueTmpDirHooks(): { readonly tmpDir: () => stri
   afterEach(async () => {
     await closeOpenClawStateDatabaseAsync();
     closeOpenClawStateDatabaseForTest();
-    if (tmpDir) {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-      tmpDir = "";
-    }
+    tmpDir = "";
   });
 
   afterAll(async () => {
+    if (fixtureRoot) {
+      await closeOpenClawAgentDatabasesAsync(fixtureRoot);
+    }
     await closeOpenClawStateDatabaseAsync();
     closeOpenClawStateDatabaseForTest();
     if (!fixtureRoot) {

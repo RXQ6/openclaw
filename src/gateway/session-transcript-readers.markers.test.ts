@@ -1,10 +1,10 @@
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
+import { afterAll, afterEach, beforeEach, describe, expect, test } from "vitest";
 import { replaceTranscriptEvents } from "../config/sessions/session-accessor.js";
 import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.js";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { captureEnv, setTestEnvValue } from "../test-utils/env.js";
+import { useSessionStoreTempDirs } from "../test-utils/session-state-cleanup.js";
 import {
   readRecentSessionMessagesWithStatsAsync,
   readSessionMessageByIdAsync,
@@ -17,7 +17,7 @@ import {
   type SessionTranscriptReadScope,
 } from "./session-transcript-readers.js";
 
-const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+const tempDirs = useSessionStoreTempDirs(afterAll, "openclaw-transcript-markers-");
 const timestamp = "2026-08-11T18:00:00.000Z";
 
 function message(id: string, content: string, role: "user" | "assistant" | "toolResult" = "user") {
@@ -82,7 +82,7 @@ describe("session transcript reader marker projection", () => {
 
   beforeEach(() => {
     envSnapshot = captureEnv(["OPENCLAW_STATE_DIR"]);
-    tempDir = tempDirs.make("openclaw-transcript-markers-");
+    tempDir = tempDirs.make();
     storePath = path.join(tempDir, "sessions.json");
     setTestEnvValue("OPENCLAW_STATE_DIR", tempDir);
   });

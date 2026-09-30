@@ -13,6 +13,7 @@ import {
 } from "../config/sessions/session-accessor.js";
 import type { SessionEntry } from "../config/sessions/types.js";
 import { setRemoteModelCatalogOverlaySourcesForTest } from "../model-catalog/remote-overlay.test-support.js";
+import { closeOpenClawAgentDatabasesAsync } from "../state/openclaw-agent-db.js";
 import { createSuiteTempRootTracker } from "../test-helpers/temp-dir.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import * as usageFormat from "../utils/usage-format.js";
@@ -87,6 +88,7 @@ async function refreshSessionCostUsageForTest(sessionFile: string): Promise<void
 
 describe("session cost usage", () => {
   const suiteRootTracker = createSuiteTempRootTracker({ prefix: "openclaw-session-cost-" });
+  let suiteRoot: string;
   const withStateDir = async <T>(stateDir: string, fn: () => Promise<T>): Promise<T> =>
     await withEnvAsync({ OPENCLAW_STATE_DIR: stateDir }, fn);
   const makeSessionCostRoot = async (prefix: string): Promise<string> =>
@@ -105,7 +107,7 @@ describe("session cost usage", () => {
   };
 
   beforeAll(async () => {
-    await suiteRootTracker.setup();
+    suiteRoot = await suiteRootTracker.setup();
   });
 
   it("prefers a legacy entry marker over a stale JSONL usage artifact", async () => {
@@ -285,6 +287,7 @@ describe("session cost usage", () => {
   });
 
   afterAll(async () => {
+    await closeOpenClawAgentDatabasesAsync(suiteRoot);
     await suiteRootTracker.cleanup();
   });
 

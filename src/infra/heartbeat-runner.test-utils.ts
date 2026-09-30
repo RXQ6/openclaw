@@ -1,4 +1,5 @@
 // Shared heartbeat runner fixtures for infra tests.
+import { realpathSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -183,7 +184,10 @@ export async function withTempHeartbeatSandbox<T>(
     unsetEnvVars?: string[];
   },
 ): Promise<T> {
-  const tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), options?.prefix ?? "openclaw-hb-"));
+  // openclaw-temp-dir: allow callback-owned heartbeat sandbox drains before removal
+  const tmpDir = realpathSync.native(
+    await fs.mkdtemp(path.join(os.tmpdir(), options?.prefix ?? "openclaw-hb-")),
+  );
   const storePath = path.join(tmpDir, "sessions.json");
   const replySpy = createHeartbeatReplySpy();
   const envNames = new Set(["OPENCLAW_STATE_DIR", ...(options?.unsetEnvVars ?? [])]);

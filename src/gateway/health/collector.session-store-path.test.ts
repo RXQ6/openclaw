@@ -1,8 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import * as configRuntime from "../../config/config.js";
 import { resolveSessionStorePathCore } from "../../config/sessions/paths.js";
 import * as sessionAccessor from "../../config/sessions/session-accessor.js";
@@ -13,6 +12,7 @@ import {
   resolveOpenClawAgentSqlitePath,
 } from "../../state/openclaw-agent-db.js";
 import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
+import { useSessionStoreTempDirs } from "../../test-utils/session-state-cleanup.js";
 import {
   buildHealthAgentSummaries,
   collectGatewayHealthSnapshot,
@@ -33,7 +33,7 @@ async function summarizeStore(storePath: string, agentId: string) {
 }
 
 describe("health session store paths", () => {
-  const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+  const tempDirs = useSessionStoreTempDirs(afterAll, "openclaw-health-session-store-");
 
   afterEach(() => {
     vi.restoreAllMocks();
@@ -42,7 +42,7 @@ describe("health session store paths", () => {
   });
 
   it("reports the SQLite database that supplied the session count", async () => {
-    const stateDir = tempDirs.make("openclaw-health-session-store-");
+    const stateDir = tempDirs.make();
     const env = { OPENCLAW_STATE_DIR: stateDir };
     const agentId = "main";
     const storePath = resolveSessionStorePathCore(undefined, { agentId, env });
@@ -64,7 +64,7 @@ describe("health session store paths", () => {
   it.each(["agent", "shared"] as const)(
     "counts and orders bounded %s session projections without cloning full entries",
     async (layout) => {
-      const stateDir = tempDirs.make("openclaw-health-session-projection-");
+      const stateDir = tempDirs.make();
       const env = { OPENCLAW_STATE_DIR: stateDir };
       const agentIds = layout === "shared" ? ["main", "other"] : ["main"];
       const storePath =
@@ -135,7 +135,7 @@ describe("health session store paths", () => {
   it.each(["template", "shared"] as const)(
     "scopes %s stores and recovers from transient reads",
     async (layout) => {
-      const stateDir = tempDirs.make("openclaw-health-session-template-");
+      const stateDir = tempDirs.make();
       const env = { OPENCLAW_STATE_DIR: stateDir };
       const storeTemplate = path.join(
         stateDir,
