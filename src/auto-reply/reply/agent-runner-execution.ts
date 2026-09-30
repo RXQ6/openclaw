@@ -93,6 +93,7 @@ type AppContextTurnParams = AgentTurnParams & {
 
 async function executeAgentTurnInternalLoop(
   inputParams: AppContextTurnParams,
+  runId: string,
   commitTerminalOutcome: () => void,
   commitMcpAppModelContext: () => void,
   preparedRunAdmission: PreparedAgentRunAdmission,
@@ -140,7 +141,6 @@ async function executeAgentTurnInternalLoop(
     liveModelSwitchRuntimeEntry = { agentRuntimeOverride: err.agentRuntimeOverride };
   };
 
-  const runId = params.opts?.runId ?? crypto.randomUUID();
   const agentTurnTiming = createAgentTurnTimingTracker({
     profilerEnabled: isReplyProfilerEnabled({ config: runtimeConfig }),
   });
@@ -149,7 +149,7 @@ async function executeAgentTurnInternalLoop(
       params.sessionCtx.Surface ??
       params.sessionCtx.Provider,
   );
-  let lifecycleGeneration = captureAgentRunLifecycleGeneration(runId);
+  const lifecycleGeneration = captureAgentRunLifecycleGeneration(runId);
   if (params.sessionKey) {
     registerAgentRunContext(runId, {
       sessionKey: params.sessionKey,
@@ -384,7 +384,6 @@ async function executeAgentTurnInternalLoop(
         commitTerminalOutcome,
         clearRecoveredAutoFallbackPrimaryProbe,
       });
-      lifecycleGeneration = fallbackCycleState.lifecycleGeneration;
       if (cycle.kind === "aborted") {
         return cycle;
       }
@@ -517,11 +516,11 @@ async function executeAgentTurnInternalLoop(
 
 async function executeAgentTurnInternal(
   params: AppContextTurnParams,
+  runId: string,
   commitTerminalOutcome: () => void,
   commitMcpAppModelContext: () => void,
   compaction: AgentTurnCompaction,
 ): Promise<AgentTurnInternalResult> {
-  const runId = params.opts?.runId ?? crypto.randomUUID();
   const admittedRunContext: { current?: AdmittedRunContext } = {};
   const gatewayContextResolver =
     readChannelContextGatewayContextResolver(params.sessionCtx) ??
@@ -559,6 +558,7 @@ async function executeAgentTurnInternal(
   try {
     return await executeAgentTurnInternalLoop(
       params,
+      runId,
       commitTerminalOutcome,
       commitMcpAppModelContext,
       preparedRunAdmission,
@@ -579,11 +579,9 @@ async function executeAgentTurnInternal(
 
 /** Runs the agent turn with provider/model fallback, retry, and closed settlement. */
 async function executeAgentTurnOutcome(
-  params: AppContextTurnParams,
+  executionParams: AppContextTurnParams,
+  runId: string,
 ): Promise<AgentTurnExecutionResult> {
-  const runId = params.opts?.runId ?? crypto.randomUUID();
-  const executionParams =
-    params.opts?.runId === runId ? params : { ...params, opts: { ...params.opts, runId } };
   const requester = executionParams.followupRun.operatorAuthority;
   if (requester) {
     assertAdmittedRunOperatorAuthority(requester);
@@ -592,6 +590,7 @@ async function executeAgentTurnOutcome(
   const modelContextLease = executionParams.isHeartbeat
     ? undefined
     : await leaseMcpAppModelContextForSessionTurn({
+        agentId: executionParams.followupRun.run.agentId,
         sessionId: executionParams.followupRun.run.sessionId,
         sessionKey: executionParams.sessionKey ?? executionParams.followupRun.run.sessionKey,
         requesterId: requester?.profileId,
@@ -623,6 +622,7 @@ async function executeAgentTurnOutcome(
       try {
         return await executeAgentTurnInternal(
           turnParams,
+          runId,
           commitTerminalOutcome,
           modelContextLease?.commit ?? (() => undefined),
           compaction,
@@ -713,7 +713,7 @@ export async function executeAgentTurn(params: AgentTurnParams): Promise<AgentTu
   const executionParams =
     params.opts?.runId === runId ? params : { ...params, opts: { ...params.opts, runId } };
   try {
-    const result = await executeAgentTurnOutcome(executionParams);
+    const result = await executeAgentTurnOutcome(executionParams, runId);
     recordAgentTurnExecutionOutcome(executionParams, result);
     return result;
   } catch (error) {

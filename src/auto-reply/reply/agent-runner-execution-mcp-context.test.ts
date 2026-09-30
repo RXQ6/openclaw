@@ -25,7 +25,7 @@ const image = {
   mimeType: "image/png",
   data: "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRz0AAAAASUVORK5CYII=",
 };
-async function prepareView(runtime: SessionMcpRuntime, requesterId?: string) {
+async function prepareView(runtime: SessionMcpRuntime, requesterId?: string, agentId = "main") {
   Object.assign(runtime, {
     sessionKey: "main",
     mcpAppsEnabled: true,
@@ -37,7 +37,7 @@ async function prepareView(runtime: SessionMcpRuntime, requesterId?: string) {
   });
   const descriptor = await fetchMcpAppView({
     runtime,
-    agentId: "main",
+    agentId,
     serverName: "native",
     toolName: "show",
     uiResourceUri: "ui://demo/app",
@@ -80,6 +80,28 @@ describe("executeAgentTurn MCP App context", () => {
       ).toBe(attached);
     },
   );
+  it("keeps another agent's App context isolated when bare keys and session ids coincide", async () => {
+    const runtime = { sessionId: "session" } as SessionMcpRuntime;
+    const view = await prepareView(runtime, "alice", "research");
+    updateMcpAppModelContext(runtime, view, {
+      content: [{ type: "text", text: "foreign project selection" }, image],
+    });
+    const params = createMinimalRunAgentTurnParams();
+    params.followupRun.operatorAuthority = createAdmittedRunOperatorAuthority({
+      profileId: "alice",
+      scopes: ["operator.read", "operator.write"],
+      assertCurrent() {},
+    });
+    expect(params.followupRun.run.agentId).toBe("main");
+    await executeAgentTurn(params);
+    const input = state.runEmbeddedAgentMock.mock.calls[0]?.[0];
+    expect(input?.images ?? []).toEqual([]);
+    expect(JSON.stringify(input?.currentInboundContext ?? {})).not.toContain(
+      "foreign project selection",
+    );
+    expect(getMcpAppModelContext(runtime, view)).not.toBeNull();
+  });
+
   it("never attaches another requester’s App context", async () => {
     const runtime = { sessionId: "session" } as SessionMcpRuntime;
     const view = await prepareView(runtime, "bob");

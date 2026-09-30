@@ -61,6 +61,43 @@ function decodeForm(
 }
 
 describe("structured input compiler", () => {
+  it("preserves bounded multiline reference text in negotiated rich informational forms", () => {
+    const message =
+      Array.from(
+        { length: 36 },
+        (_, index) =>
+          "Part " + index + ": " + "Reference dimensions and manufacturing notes. ".repeat(4),
+      ).join("\r\n\r\n") + "\n\tChoose Allow to continue.";
+    expect(message.length).toBeGreaterThan(1024);
+    const params = {
+      schema: { type: "object", properties: {} },
+      message,
+      fallbackMessage: "Reference",
+      options: { ...baseOptions, allowRichForms: true },
+    };
+    const plan = requirePlan(compileStructuredInputForm(params));
+    expect(plan).toMatchObject({ kind: "form", intro: message, fields: [] });
+    expect(compileStructuredInputForm({ ...params, options: baseOptions }).kind).toBe(
+      "unsupported",
+    );
+    expect(compileStructuredInputForm({ ...params, message: "x".repeat(65_537) }).kind).toBe(
+      "unsupported",
+    );
+  });
+
+  it.each(["\u0000", "\u001b", "\u202e", "\u2066"])(
+    "still rejects unsafe controls in rich display text (%j)",
+    (control) => {
+      expect(
+        compileStructuredInputForm({
+          schema: { type: "object", properties: {} },
+          message: "Reference\n" + control + "hidden text",
+          fallbackMessage: "Reference",
+          options: { ...baseOptions, allowRichForms: true },
+        }).kind,
+      ).toBe("unsupported");
+    },
+  );
   it("projects bounded primitive fields and decodes defaults, choices, and multi-select", () => {
     const result = compile(
       {

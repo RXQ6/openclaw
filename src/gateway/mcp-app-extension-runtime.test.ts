@@ -126,6 +126,18 @@ describe("cold App request admission", () => {
     );
     expect(mocks.direct).not.toHaveBeenCalled();
   });
+  it.each([{ acquireMcpAppRuntime: mocks.native }, { loadMcpToolCatalog: vi.fn() }])(
+    "does not replace a registered native harness missing an App capability (%j)",
+    async (harness) => {
+      mocks.registered.mockReturnValue({ ownerPluginId: "codex", harness });
+      await expect(prepareMcpAppExtensionRuntime(options())).rejects.toThrow(
+        "session harness cannot open MCP Apps",
+      );
+      expect(mocks.direct).not.toHaveBeenCalled();
+      expect(mocks.native).not.toHaveBeenCalled();
+      expect(mocks.prepare).not.toHaveBeenCalled();
+    },
+  );
   it("does not prepare credentials after source authority disappears", async () => {
     mocks.source.mockImplementation(async () => {
       mocks.assert.mockImplementation(() => {

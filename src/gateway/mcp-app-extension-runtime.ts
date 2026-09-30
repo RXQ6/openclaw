@@ -110,8 +110,8 @@ export async function prepareMcpAppExtensionRuntime(options: GatewayRequestHandl
     toolOverrides: target.entry.toolOverrides,
   });
   let lease: SessionMcpRuntimeLease | undefined;
-  if (harness?.loadMcpToolCatalog) {
-    if (!harness.acquireMcpAppRuntime) {
+  if (harnessId !== "openclaw") {
+    if (!harness?.loadMcpToolCatalog || !harness.acquireMcpAppRuntime) {
       throw new Error("The session harness cannot open MCP Apps");
     }
     const preparationOwner: {

@@ -436,17 +436,22 @@ export function getMcpAppViewLeaseForSession(
 export async function leaseMcpAppModelContextForSessionTurn(params: {
   sessionKey?: string;
   sessionId: string;
+  agentId?: string;
   requesterId?: string;
 }) {
   if (!params.sessionKey) {
     return undefined;
   }
+  const agentId = normalizeAgentId(
+    params.agentId ?? parseAgentSessionKey(params.sessionKey)?.agentId,
+  );
   pruneViewStore();
   const byRuntime = new Map<SessionMcpRuntime, Set<object>>();
   for (const view of getViewStore().values()) {
     if (
       view.runtime.sessionKey !== params.sessionKey ||
       view.sessionId !== params.sessionId ||
+      view.agentId !== agentId ||
       (view.requesterId !== undefined && view.requesterId !== params.requesterId) ||
       view.readOnly ||
       view.allowedAppToolNames === undefined

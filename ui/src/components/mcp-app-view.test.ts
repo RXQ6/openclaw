@@ -119,6 +119,8 @@ describe("mcp-app-view localization", () => {
     });
     const themeListeners = new Set<() => void>();
     const gatewayListeners = new Set<(event: GatewayEventFrame) => void>();
+    const gatewayEventsReady = deferred();
+    const gatewayEventsStopped = deferred();
     const unsubscribe = vi.fn();
     const request = vi.fn(async (_method: string, _params: Record<string, unknown>) => ({
       sandboxUrl: "/mcp-app-sandbox?ticket=test",
@@ -137,7 +139,13 @@ describe("mcp-app-view localization", () => {
         connection: { gatewayUrl: "ws://gateway.example:8443/openclaw" },
         subscribeEvents(listener: (event: GatewayEventFrame) => void) {
           gatewayListeners.add(listener);
-          return () => gatewayListeners.delete(listener);
+          gatewayEventsReady.resolve();
+          return () => {
+            gatewayListeners.delete(listener);
+            if (gatewayListeners.size === 0) {
+              gatewayEventsStopped.resolve();
+            }
+          };
         },
       },
       theme: {
@@ -192,6 +200,8 @@ describe("mcp-app-view localization", () => {
       request,
       themeListeners,
       gatewayListeners,
+      gatewayEventsReady: gatewayEventsReady.promise,
+      gatewayEventsStopped: gatewayEventsStopped.promise,
       unsubscribe,
       transport: bridgeMocks.transports[0] as { close: ReturnType<typeof vi.fn> },
       view,
@@ -199,10 +209,9 @@ describe("mcp-app-view localization", () => {
   }
 
   it("reveals questions and approvals only for its conversation without replacing the App frame", async () => {
-    const { view, frame, gatewayListeners } = await mountBridge(
-      "view-input-" + crypto.randomUUID(),
-    );
-    await expect.poll(() => gatewayListeners.size).toBeGreaterThan(0);
+    const { view, frame, gatewayListeners, gatewayEventsReady, gatewayEventsStopped } =
+      await mountBridge("view-input-" + crypto.randomUUID());
+    await gatewayEventsReady;
     const emit = (event: string, payload: unknown) => {
       for (const listener of gatewayListeners) {
         listener({ type: "event", event, payload });
@@ -227,7 +236,8 @@ describe("mcp-app-view localization", () => {
     expect(view.displayMode).toBe("inline");
     expect(view.shadowRoot?.querySelector("iframe")).toBe(frame);
     view.remove();
-    await expect.poll(() => gatewayListeners.size).toBe(0);
+    await gatewayEventsStopped;
+    expect(gatewayListeners.size).toBe(0);
   });
 
   it("sends rich user messages only after visible focus, confirmation, and conversation custody", async () => {

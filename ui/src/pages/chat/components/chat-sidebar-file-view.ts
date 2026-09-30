@@ -10,6 +10,7 @@ import { registerCodeBlocksEnglish } from "../../../i18n/locales/en-code-blocks.
 import { registerFilePreviewEnglish } from "../../../i18n/locales/en-file-preview.ts";
 import type { EditorId } from "../../../lib/editor-links.ts";
 import { getSafeLocalStorage } from "../../../local-storage.ts";
+import type { FileCopyAction, FileCopyFeedback } from "./chat-file-copy-controller.ts";
 import type { FileSidebarContent, AttachmentSidebarRuntime } from "./chat-sidebar-content-types.ts";
 import { renderChatSidebarEditorMenu } from "./chat-sidebar-editor-menu.ts";
 
@@ -49,10 +50,6 @@ export function computeFileMatches(content: string, query: string): number[] {
       line.toLocaleLowerCase().includes(normalizedQuery) ? [index + 1] : [],
     );
 }
-
-export type FileCopyAction = "path" | "contents";
-type FileCopyFeedback = Partial<Record<FileCopyAction, "copied" | "failed">>;
-export const emptyCopyFeedback: FileCopyFeedback = {};
 
 export type FileViewControls = {
   htmlPreview?: {

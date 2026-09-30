@@ -57,7 +57,7 @@ const MAX_SNAPSHOT_DEPTH = 8;
 const MAX_SNAPSHOT_NODES = 256;
 const MAX_SNAPSHOT_OBJECT_KEYS = 32;
 const MAX_SNAPSHOT_ARRAY_ITEMS = 16;
-const MAX_SNAPSHOT_TEXT = 65_536;
+export const STRUCTURED_INPUT_MAX_TEXT_CHARS = 65_536;
 const MAX_FIELD_NAME = 256;
 
 /** Copies only bounded, enumerable own data properties without invoking accessors. */
@@ -85,7 +85,7 @@ export function snapshotStructuredInput(
     }
     if (typeof current === "string") {
       textLength += current.length;
-      return current.length <= MAX_SNAPSHOT_TEXT && textLength <= 4 * 1024 * 1024
+      return current.length <= STRUCTURED_INPUT_MAX_TEXT_CHARS && textLength <= 4 * 1024 * 1024
         ? current
         : undefined;
     }
@@ -222,10 +222,17 @@ export function structuredInputInteger(
   return Number.isInteger(value) && value >= minimum ? value : null;
 }
 
-export function readStructuredInputText(value: unknown, maximum: number): string | undefined {
-  return typeof value === "string" && value.length <= maximum && !hasUnsafeVisibleCharacters(value)
-    ? value
-    : undefined;
+export function readStructuredInputText(
+  value: unknown,
+  maximum: number,
+  multiline = false,
+): string | undefined {
+  if (typeof value !== "string" || value.length > maximum) {
+    return undefined;
+  }
+  // Ignore only paragraph whitespace for display validation; preserve the original text.
+  const visibleText = multiline ? value.replace(/[\t\n\r]/gu, "") : value;
+  return hasUnsafeVisibleCharacters(visibleText) ? undefined : value;
 }
 
 export function hasUnsafeVisibleCharacters(value: string): boolean {

@@ -191,10 +191,7 @@ export function buildField(
       presentation: "form",
       ...(params.resource ? { resource: params.resource } : {}),
       header: boundText(title, 12),
-      question: boundText(
-        details.length > 0 ? `${title}\n${details.join(" ")}` : title,
-        MAX_FIELD_TEXT,
-      ),
+      question: boundText(`${title}\n${details.join(" ")}`, MAX_FIELD_TEXT),
       ...(!context.required || params.allowEmpty ? { allowEmpty: true } : {}),
       ...(params.multiSelect ? { multiSelect: true } : {}),
       ...(params.answerFormat ? { answerFormat: params.answerFormat } : {}),
