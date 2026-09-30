@@ -82,6 +82,10 @@ data class GatewayNodeInvokeRequest(
 data class QuestionOption(
   val label: String,
   val description: String? = null,
+  val value: String? = null,
+  val thumbnail: String? = null,
+  val resourceUri: String? = null,
+  val preview: JsonElement? = null,
 )
 
 @Serializable
@@ -91,7 +95,12 @@ data class Question(
   val question: String,
   val url: String? = null,
   val options: List<QuestionOption>,
+  val presentation: String? = null,
+  val resource: QuestionResource? = null,
   val multiSelect: Boolean? = null,
+  val answerFormat: String? = null,
+  val allowEmpty: Boolean? = null,
+  val defaultAnswers: List<String>? = null,
   val isOther: Boolean? = null,
   val isSecret: Boolean? = null,
   val secretStore: QuestionSecretStore? = null,
@@ -370,6 +379,13 @@ data class GatewayNodeInvokeResultParamsError(
 )
 
 @Serializable
+data class QuestionResource(
+  val viewId: String? = null,
+  val selection: String,
+  val userOptions: QuestionResourceUserOptions? = null,
+)
+
+@Serializable
 data class QuestionSecretStore(
   val name: String,
   val kind: String,
@@ -483,6 +499,12 @@ data class SessionGitHubPublicationNeedsConfirmationEffect(
 )
 
 @Serializable
+data class QuestionResourceUserOptions(
+  val kind: String,
+  val accept: List<String>? = null,
+)
+
+@Serializable
 data class ProjectsListResultObservedProjectsItemCheckoutsItem(
   val runnerId: String,
   val path: String,
@@ -580,6 +602,18 @@ enum class GatewayMethod(
   ToolsCatalog("tools.catalog"),
   ToolsEffective("tools.effective"),
   ToolsInvoke("tools.invoke"),
+  McpAppOnboard("mcp.app.onboard"),
+  McpAppDiscover("mcp.app.discover"),
+  McpAppLaunch("mcp.app.launch"),
+  McpAppSettings("mcp.app.settings"),
+  McpAppMention("mcp.app.mention"),
+  McpAppFormResource("mcp.app.formResource"),
+  McpAppModelContext("mcp.app.modelContext"),
+  McpAppRemoveModelContext("mcp.app.removeModelContext"),
+  McpAppWriteResource("mcp.app.writeResource"),
+  McpAppSubscribeResource("mcp.app.subscribeResource"),
+  McpAppUnsubscribeResource("mcp.app.unsubscribeResource"),
+  McpAppOpenFile("mcp.app.openFile"),
   McpAppView("mcp.app.view"),
   McpAppListTools("mcp.app.listTools"),
   McpAppListResources("mcp.app.listResources"),

@@ -105,7 +105,6 @@ import { buildCurrentInboundPrompt } from "../embedded-agent-runner/run/runtime-
 import { remapSkillReferencePaths } from "../embedded-agent-runner/sandbox-skills.js";
 import { selectContextEngineForTranscriptHost } from "../harness/context-engine-logical-turn.js";
 import { drainPendingContextEngineTurnsBeforeRun } from "../harness/context-engine-turn-attempt.js";
-import { createAgentQuestionAnswerAuthority } from "../harness/host-private-capabilities.js";
 import type { ResolvedProviderAuth } from "../model-auth-runtime-shared.js";
 import { loadManifestModelCatalog, overlayConfiguredModelCatalog } from "../model-catalog.js";
 import { resolveModelContextWindowProfile } from "../model-context-window.js";
@@ -167,7 +166,7 @@ import {
   resolveAutoCliSessionReseedHistoryChars,
 } from "./session-history.js";
 import { resolveCliSkillsPrompt } from "./skills-prompt.js";
-import { prepareCliReplyToolAuthority } from "./tool-authority.js";
+import { bindCliQuestionAnswerAuthority, prepareCliReplyToolAuthority } from "./tool-authority.js";
 import {
   captureCliRunStartTime,
   type CliReusableSession,
@@ -751,30 +750,15 @@ async function prepareCliRunContextWithinReadFence(
   if (questionOperation) {
     params = { ...params, toolAuthorityFingerprint: questionFingerprint };
   }
-  const bindQuestionAnswerAuthorityForSession = (sessionKey: string, assertActive: () => void) =>
-    createAgentQuestionAnswerAuthority({
-      sessionKey,
-      fingerprint: questionFingerprint,
-      project: (caller) =>
-        questionOperation
-          ? questionOperation.projectToolAuthorityFingerprint(caller)
-          : questionSnapshot?.project(caller, questionRoute),
-      assertActive: () => {
-        assertActive();
-        assertQuestionSourceCurrent?.();
-        questionAbortSignal?.throwIfAborted();
-        if (
-          questionOperation &&
-          (questionOperation.result ||
-            questionOperation.toolAuthorityRoute?.provider !== questionRoute.provider ||
-            questionOperation.toolAuthorityRoute.model !== questionRoute.model ||
-            questionOperation.toolAuthorityFingerprint !== questionFingerprint)
-        ) {
-          throw new Error("question creator reply authority is no longer active");
-        }
-        assertActive();
-      },
-    });
+  const bindQuestionAnswerAuthorityForSession = bindCliQuestionAnswerAuthority({
+    operation: questionOperation,
+    snapshot: questionSnapshot,
+    route: questionRoute,
+    fingerprint: questionFingerprint,
+    readSource: () => readRunOperatorAuthority(params),
+    assertSourceCurrent: assertQuestionSourceCurrent,
+    signal: questionAbortSignal,
+  });
   const bindQuestionAnswerAuthority: NonNullable<
     PreparedCliRunContext["bindQuestionAnswerAuthority"]
   > = (assertActive) => bindQuestionAnswerAuthorityForSession(questionSessionKey, assertActive);

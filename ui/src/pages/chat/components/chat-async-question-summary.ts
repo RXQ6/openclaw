@@ -125,7 +125,7 @@ export function renderAsyncQuestionSummary(
               <div>
                 ${
                   answers
-                    ? questionDraftValues(answers.get(String(index))).join(", ")
+                    ? questionDraftValues(answers.get(String(index)), {}).join(", ")
                     : t(
                         reopening
                           ? "chat.asyncQuestions.reopening"

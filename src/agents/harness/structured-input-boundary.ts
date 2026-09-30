@@ -27,12 +27,24 @@ export type StructuredInputCompileResult =
   | { kind: "ready"; plan: StructuredInputPlan }
   | { kind: "unsupported"; message: string };
 
+/** The existing MCP view owner supplies and retires this capability with the elicitation. */
+export type StructuredInputResourceContext = {
+  viewId: string;
+  uploads: boolean;
+  previews: boolean;
+  /** Checks resources admitted by this exact pending form, never arbitrary URI syntax. */
+  isUploadedResource: (questionId: string, uri: string) => boolean;
+};
+
 export type StructuredInputCompilerOptions = {
   protocolName: string;
   allowEmptyForm?: boolean;
   minimumChoiceCount?: 1 | 2;
   allowEnumNames?: boolean;
   allowImagePicker?: boolean;
+  /** OpenAI rich forms, including suggestions, thumbnails, and resource choices. */
+  allowRichForms?: boolean;
+  resourceContext?: StructuredInputResourceContext;
   booleanLabels?: readonly [string, string];
   metadata?: {
     secretPath?: readonly string[];
@@ -49,11 +61,20 @@ const MAX_SNAPSHOT_TEXT = 65_536;
 const MAX_FIELD_NAME = 256;
 
 /** Copies only bounded, enumerable own data properties without invoking accessors. */
-export function snapshotStructuredInput(value: unknown): StructuredInputValue | undefined {
+export function snapshotStructuredInput(
+  value: unknown,
+  options?: { richForm?: boolean },
+): StructuredInputValue | undefined {
+  // Resource preview targets contain nested tool arguments below the resource metadata.
+  // Only negotiated rich forms get this bound; ordinary/native questions retain theirs.
+  const maximumDepth = options?.richForm ? 16 : MAX_SNAPSHOT_DEPTH;
+  const maximumNodes = options?.richForm ? 2048 : MAX_SNAPSHOT_NODES;
+  const maximumItems = options?.richForm ? 64 : MAX_SNAPSHOT_ARRAY_ITEMS;
   let nodes = 0;
+  let textLength = 0;
   const visit = (current: unknown, depth: number): StructuredInputValue | undefined => {
     nodes += 1;
-    if (nodes > MAX_SNAPSHOT_NODES || depth > MAX_SNAPSHOT_DEPTH) {
+    if (nodes > maximumNodes || depth > maximumDepth) {
       return undefined;
     }
     if (current === null || typeof current === "boolean") {
@@ -63,16 +84,16 @@ export function snapshotStructuredInput(value: unknown): StructuredInputValue | 
       return Number.isFinite(current) ? current : undefined;
     }
     if (typeof current === "string") {
-      return current.length <= MAX_SNAPSHOT_TEXT ? current : undefined;
+      textLength += current.length;
+      return current.length <= MAX_SNAPSHOT_TEXT && textLength <= 4 * 1024 * 1024
+        ? current
+        : undefined;
     }
     if (typeof current !== "object") {
       return undefined;
     }
     if (Array.isArray(current)) {
-      if (
-        Object.getPrototypeOf(current) !== Array.prototype ||
-        current.length > MAX_SNAPSHOT_ARRAY_ITEMS
-      ) {
+      if (Object.getPrototypeOf(current) !== Array.prototype || current.length > maximumItems) {
         return undefined;
       }
       const descriptors = Object.getOwnPropertyDescriptors(current);

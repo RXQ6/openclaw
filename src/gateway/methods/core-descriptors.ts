@@ -1,9 +1,13 @@
-// Canonical append-only method table; derived lookup and dispatch policy lives in core-method-policy.ts.
 import type {
   GatewayMethodDescriptor,
   GatewayMethodScope,
   GatewayMethodSessionAccess,
 } from "./descriptor.js";
+// Canonical append-only method table; derived lookup and dispatch policy lives in core-method-policy.ts.
+import {
+  MCP_APP_GATEWAY_METHOD_SPECS,
+  MCP_APP_EXTENSION_METHOD_SPECS,
+} from "./mcp-app-descriptors.js";
 
 export type CoreGatewayMethodSpec = {
   name: string;
@@ -29,7 +33,7 @@ type CoreGatewayMethodPolicy = Pick<
   | "description"
   | "sessionAccess"
 >;
-type CoreGatewayMethodSpecRow = readonly [
+export type CoreGatewayMethodSpecRow = readonly [
   name: string,
   family: string | null,
   scope: GatewayMethodScope,
@@ -145,13 +149,7 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["tools.catalog", "tools-catalog", "operator.read", "<=2026.7"],
   ["tools.effective", "tools-effective", "operator.read", "<=2026.7", { startup: true }],
   ["tools.invoke", "tools-invoke", "operator.write", "<=2026.7"],
-  ["mcp.app.view", "mcp-app", "operator.read", "<=2026.7"],
-  ["mcp.app.listTools", "mcp-app", "operator.read", "<=2026.7"],
-  ["mcp.app.listResources", "mcp-app", "operator.read", "<=2026.7"],
-  ["mcp.app.listResourceTemplates", "mcp-app", "operator.read", "<=2026.7"],
-  ["mcp.app.readResource", "mcp-app", "operator.read", "<=2026.7"],
-  ["mcp.app.callTool", "mcp-app", "operator.write", "<=2026.7"],
-  ["mcp.app.updateModelContext", "mcp-app", "operator.write", "<=2026.7"],
+  ...MCP_APP_GATEWAY_METHOD_SPECS,
   ["board.get", "board", "operator.read", "<=2026.7"],
   ["board.update", "board", "operator.write", "<=2026.7"],
   ["board.widget.put", "board", "operator.write", "<=2026.7"],
@@ -760,4 +758,5 @@ export const CORE_GATEWAY_METHOD_SPECS = [
   ["users.merge", "users", "operator.admin", "2026.9"],
   ["gateway.stop.request", "restart", "operator.admin", "2026.9", CONTROL_PLANE_WRITE],
   ["diagnostics.heapSnapshot", "diagnostics", "operator.admin", "2026.9"],
+  ...MCP_APP_EXTENSION_METHOD_SPECS,
 ] as const satisfies readonly CoreGatewayMethodSpecRow[];

@@ -11,10 +11,13 @@ import {
   observeTextareaOverflow,
 } from "./chat-composer-dom.ts";
 import {
+  initializeQuestionDrafts,
   questionDraftValues,
+  questionPreservesWhitespace,
   renderQuestionFreeText,
   renderQuestionOptions,
 } from "./chat-question-answer-controls.ts";
+import "./chat-question-resource.ts";
 import { renderQuestionExternalStep } from "./chat-question-external-step.ts";
 
 type QuestionPanelQuestion = QuestionPrompt["questions"][number];
@@ -185,6 +188,9 @@ class ChatQuestionPanel extends OpenClawLightDomElement {
     const nextCollapsed = model?.collapsed ?? false;
     if (nextRequestKey !== this.requestKey) {
       this.requestKey = nextRequestKey;
+      if (model) {
+        initializeQuestionDrafts(model.questions, model.drafts);
+      }
       this.currentQuestionIndex = 0;
       this.pendingAction = null;
       this.collapsed = nextCollapsed;
@@ -229,7 +235,7 @@ class ChatQuestionPanel extends OpenClawLightDomElement {
   }
 
   private answerValues(model: QuestionPanelViewModel, question: QuestionPanelQuestion): string[] {
-    return questionDraftValues(model.drafts.get(question.questionId), question.isSecret);
+    return questionDraftValues(model.drafts.get(question.questionId), question);
   }
 
   private buildAnswers(model: QuestionPanelViewModel): Record<string, string[]> {
@@ -289,7 +295,7 @@ class ChatQuestionPanel extends OpenClawLightDomElement {
     const draft = model.drafts.get(question.questionId);
     this.updateDraft(model, question, {
       selected:
-        !question.multiSelect && (question.isSecret ? value : value.trim())
+        !question.multiSelect && (questionPreservesWhitespace(question) ? value : value.trim())
           ? new Set()
           : (draft?.selected ?? new Set()),
       freeText: value,
@@ -305,7 +311,9 @@ class ChatQuestionPanel extends OpenClawLightDomElement {
       const onSubmit = this.props?.onSubmit;
       if (
         !onSubmit ||
-        !model.questions.every((question) => this.answerValues(model, question).length > 0)
+        !model.questions.every(
+          (question) => question.allowEmpty || this.answerValues(model, question).length > 0,
+        )
       ) {
         return;
       }
@@ -331,7 +339,7 @@ class ChatQuestionPanel extends OpenClawLightDomElement {
   }
 
   private advanceOrSubmit(model: QuestionPanelViewModel, question: QuestionPanelQuestion): void {
-    if (this.answerValues(model, question).length === 0) {
+    if (!question.allowEmpty && this.answerValues(model, question).length === 0) {
       return;
     }
     if (this.currentQuestionIndex < model.questions.length - 1) {
@@ -365,7 +373,7 @@ class ChatQuestionPanel extends OpenClawLightDomElement {
         (event.metaKey || event.ctrlKey) &&
         !event.altKey &&
         !event.shiftKey &&
-        this.answerValues(model, question).length > 0
+        (question.allowEmpty || this.answerValues(model, question).length > 0)
       ) {
         event.preventDefault();
         this.advanceOrSubmit(model, question);
@@ -381,7 +389,10 @@ class ChatQuestionPanel extends OpenClawLightDomElement {
       return;
     }
     if (event.target instanceof HTMLInputElement) {
-      if (event.key === "Enter" && this.answerValues(model, question).length > 0) {
+      if (
+        event.key === "Enter" &&
+        (question.allowEmpty || this.answerValues(model, question).length > 0)
+      ) {
         event.preventDefault();
         this.advanceOrSubmit(model, question);
       }
@@ -442,7 +453,7 @@ class ChatQuestionPanel extends OpenClawLightDomElement {
     if (
       event.key === "Enter" &&
       !(event.target instanceof HTMLButtonElement) &&
-      this.answerValues(model, question).length > 0
+      (question.allowEmpty || this.answerValues(model, question).length > 0)
     ) {
       event.preventDefault();
       this.advanceOrSubmit(model, question);
@@ -461,7 +472,7 @@ class ChatQuestionPanel extends OpenClawLightDomElement {
     }
     const disabled = model.disabled || model.submitting || this.pendingAction !== null;
     const isLast = this.currentQuestionIndex === model.questions.length - 1;
-    const canAdvance = this.answerValues(model, question).length > 0;
+    const canAdvance = question.allowEmpty || this.answerValues(model, question).length > 0;
     const draft = model.drafts.get(question.questionId);
     const progress = `${this.currentQuestionIndex + 1}/${model.questions.length}`;
     const requestProgress = model.requestPosition
@@ -622,10 +633,25 @@ class ChatQuestionPanel extends OpenClawLightDomElement {
         ${renderQuestionFreeText({
           question,
           value: draft?.freeText ?? "",
-          selected: Boolean(question.isSecret ? draft?.freeText : draft?.freeText.trim()),
+          selected: Boolean(
+            questionPreservesWhitespace(question) ? draft?.freeText : draft?.freeText.trim(),
+          ),
           disabled,
           onInput: (value) => this.setFreeText(model, question, value),
         })}
+        ${
+          question.resource
+            ? html`<openclaw-chat-question-resource
+                .question=${question}
+                .requestId=${model.requestKey}
+                .sessionKey=${model.sessionKey ?? ""}
+                .agentId=${model.agentId}
+                .selected=${draft?.selected ?? new Set<string>()}
+                .disabled=${disabled}
+                @resource-selection=${(event: CustomEvent<{ values: string[] }>) => this.updateDraft(model, question, { selected: new Set(event.detail.values), freeText: "" })}
+              ></openclaw-chat-question-resource>`
+            : nothing
+        }
 
         <div class="chat-question-panel__footer">
           ${model.notice ? html`<span class="chat-question-panel__error" role="status">${model.notice}</span>` : nothing}

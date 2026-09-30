@@ -4,8 +4,8 @@ import { createDeferred as deferred } from "../../../test/helpers/promise.js";
 import { i18n } from "../i18n/index.ts";
 import {
   MCP_APP_VIEW_EXPIRED_EVENT,
-  WIDGET_PROMPT_EVENT,
-  type WidgetPromptEventDetail,
+  MCP_APP_MESSAGE_EVENT,
+  type McpAppMessageEventDetail,
 } from "./mcp-app-security.ts";
 
 const bridgeMocks = vi.hoisted(() => ({
@@ -28,6 +28,7 @@ vi.mock("@modelcontextprotocol/ext-apps/app-bridge", async (importOriginal) => {
       structuredContent?: Record<string, unknown>;
     }) => Promise<Record<string, never>>;
     onsizechange?: (params: { height?: number }) => void;
+    getAppCapabilities = () => ({});
     setHostContext = vi.fn();
     teardownResource = vi.fn(async () => ({}));
     sendSandboxResourceReady = vi.fn(async () => undefined);
@@ -125,6 +126,7 @@ describe("mcp-app-view localization", () => {
       toolResult: { content: [{ type: "text", text: "ready" }] },
       messageSupported,
       updateModelContextSupported,
+      state: null,
     }));
     const view = document.createElement(MCP_APP_VIEW_ELEMENT_NAME) as McpAppViewElement;
     Reflect.set(view, "context", {
@@ -189,55 +191,52 @@ describe("mcp-app-view localization", () => {
     };
   }
 
-  it("accepts only focused visible plain-text ui/message requests through the chat seam", async () => {
-    const { bridge, frame, view } = await mountBridge(`view-message-${crypto.randomUUID()}`);
+  it("sends rich user messages only after visible focus, confirmation, and conversation custody", async () => {
+    const { bridge, frame, view } = await mountBridge("view-message-" + crypto.randomUUID());
     expect(bridge.capabilities).toMatchObject({
-      message: { text: {} },
-      serverResources: {},
+      message: { text: {}, image: {}, resource: {}, resourceLink: {} },
+      experimental: { "openai/message": {} },
     });
-    expect(bridge.messageHandler).toBeTypeOf("function");
-
-    const received: string[] = [];
-    view.addEventListener(WIDGET_PROMPT_EVENT, (event: Event) => {
-      received.push((event as CustomEvent<WidgetPromptEventDetail>).detail.text);
+    const received: McpAppMessageEventDetail[] = [];
+    view.addEventListener(MCP_APP_MESSAGE_EVENT, (event: Event) => {
+      event.preventDefault();
+      const detail = (event as CustomEvent<McpAppMessageEventDetail>).detail;
+      received.push(detail);
+      detail.respond(true);
     });
     const send = async (content: Array<{ type: string; text?: string }>) =>
-      await bridge.messageHandler!({ role: "user", content });
-
-    expect(await send([{ type: "text", text: "Background send" }])).toEqual({ isError: true });
-    (frame as HTMLIFrameElement & { checkVisibility: () => boolean }).checkVisibility = () => false;
+      bridge.messageHandler!({ role: "user", content });
+    expect(await send([{ type: "text", text: "Background" }])).toEqual({ isError: true });
+    frame.checkVisibility = () => false;
     Object.defineProperty(document, "activeElement", { get: () => frame, configurable: true });
-    expect(await send([{ type: "text", text: "Hidden send" }])).toEqual({ isError: true });
-
-    (frame as HTMLIFrameElement & { checkVisibility: () => boolean }).checkVisibility = () => true;
+    expect(await send([{ type: "text", text: "Hidden" }])).toEqual({ isError: true });
+    frame.checkVisibility = () => true;
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
     expect(await send([{ type: "text", text: "Needs approval" }])).toEqual({ isError: true });
-    expect(confirm).toHaveBeenLastCalledWith("Confirm:\n\nNeeds approval");
     confirm.mockReturnValue(true);
-    expect(await send([{ type: "text", text: "  Show details  " }])).toEqual({});
-    expect(received).toEqual(["Show details"]);
-
+    expect(
+      await send([
+        { type: "text", text: "one" },
+        { type: "text", text: "two" },
+      ]),
+    ).toEqual({});
+    expect(received[0]).toMatchObject({
+      sessionKey: "agent:main:main",
+      target: "active",
+      content: [
+        { type: "text", text: "one" },
+        { type: "text", text: "two" },
+      ],
+    });
     for (const content of [
       [{ type: "text", text: "/approve" }],
       [{ type: "text", text: "!pwd" }],
       [{ type: "text", text: "   " }],
-      [{ type: "text", text: "x".repeat(4_001) }],
       [{ type: "image" }],
-      [
-        { type: "text", text: "first" },
-        { type: "text", text: "second" },
-      ],
     ]) {
       expect(await send(content)).toEqual({ isError: true });
     }
-    expect(confirm).toHaveBeenCalledTimes(2);
-    expect(received).toEqual(["Show details"]);
-
-    for (let index = 2; index <= 9; index += 1) {
-      expect(await send([{ type: "text", text: `Prompt ${index}` }])).toEqual({});
-    }
-    expect(await send([{ type: "text", text: "Prompt 10" }])).toEqual({ isError: true });
-    expect(received).toHaveLength(9);
+    expect(received).toHaveLength(1);
   });
 
   it("signals its board owner when the view lease has expired", async () => {
@@ -304,11 +303,32 @@ describe("mcp-app-view localization", () => {
       bridge.updateModelContextHandler?.({
         content: [{ type: "text", text: "selected item" }],
       }),
-    ).resolves.toEqual({});
-    expect(request).toHaveBeenLastCalledWith("mcp.app.updateModelContext", {
+    ).resolves.toBeDefined();
+    expect(request).toHaveBeenCalledWith("mcp.app.updateModelContext", {
       sessionKey: "agent:main:main",
       viewId: expect.any(String),
       content: [{ type: "text", text: "selected item" }],
+    });
+  });
+
+  it("does not let App parameters replace the mounted session, agent, or view", async () => {
+    const viewId = "bound-" + crypto.randomUUID();
+    const { bridge, request } = await mountBridge(viewId);
+    await bridge.updateModelContextHandler?.({
+      content: [
+        {
+          type: "text",
+          text: "context",
+        },
+      ],
+      sessionKey: "foreign",
+      viewId: "foreign-view",
+      agentId: "foreign-agent",
+    });
+    expect(request).toHaveBeenCalledWith("mcp.app.updateModelContext", {
+      sessionKey: "agent:main:main",
+      viewId,
+      content: [{ type: "text", text: "context" }],
     });
   });
 

@@ -14,6 +14,7 @@ import type {
   QuestionWaitAnswerResult,
 } from "../../packages/gateway-protocol/src/index.js";
 import type { OperationalRunInstanceRef } from "../agents/admitted-run-context.js";
+import { bindMcpFormQuestionRecord } from "../agents/mcp-form-resource-context.js";
 import type { GatewayScheduler, GatewayScheduledJob } from "../infra/gateway-scheduler.js";
 import {
   retainGatewayRootWorkAdmissionContinuationScope,
@@ -177,6 +178,13 @@ export class QuestionManager {
       admissionContinuation: retainGatewayRootWorkAdmissionContinuationScope(),
     };
     this.entries.set(record.id, entry);
+    bindMcpFormQuestionRecord(
+      record,
+      () =>
+        this.entries.get(record.id) === entry &&
+        entry.record === record &&
+        entry.record.status === "pending",
+    );
     entry.releaseHumanInputWait = params.registerHumanInputWait?.(
       () => this.get(id)?.status === "pending" && this.entries.get(id) === entry,
     );
@@ -418,9 +426,19 @@ export class QuestionManager {
         ? answers.answers[question.questionId]
         : undefined;
       if (!values || values.length === 0) {
+        if (question.allowEmpty) {
+          canonical.answers[question.questionId] = [];
+          continue;
+        }
         throw this.invalidAnswer(question.questionId, "requires an answer");
       }
-      if (values.some((value) => (question.isSecret ? value.length === 0 : !value.trim()))) {
+      if (
+        values.some((value) =>
+          question.isSecret || question.presentation === "form"
+            ? value.length === 0
+            : !value.trim(),
+        )
+      ) {
         throw this.invalidAnswer(question.questionId, "contains an empty answer");
       }
       if (!question.multiSelect && values.length > 1) {
@@ -430,7 +448,7 @@ export class QuestionManager {
       // downstream renderers compare answers to option labels exactly.
       const canonicalValues = values.map((value) => {
         // Masked free-text answers preserve exact bytes, including whitespace.
-        if (question.isSecret) {
+        if (question.isSecret || question.presentation === "form") {
           return value;
         }
         const matched = question.options.find((option) => option.label.trim() === value.trim());
@@ -439,7 +457,9 @@ export class QuestionManager {
       if (
         question.options.length > 0 &&
         !question.isOther &&
-        canonicalValues.some((value) => !question.options.some((option) => option.label === value))
+        canonicalValues.some(
+          (value) => !question.options.some((option) => (option.value ?? option.label) === value),
+        )
       ) {
         throw this.invalidAnswer(question.questionId, "contains an unknown option");
       }

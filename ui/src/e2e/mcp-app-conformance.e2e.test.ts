@@ -13,6 +13,7 @@ import {
 } from "../../../src/agents/agent-bundle-mcp-manager-api.js";
 import { getOrCreateSessionMcpRuntime } from "../../../src/agents/agent-bundle-mcp-manager.test-support.js";
 import { materializeBundleMcpToolsForRun } from "../../../src/agents/agent-bundle-mcp-materialize.js";
+import { getMcpAppModelContext } from "../../../src/agents/mcp-app-model-context.js";
 import { getMcpAppViewLease } from "../../../src/agents/mcp-ui-resource.js";
 import { readConfigFileSnapshotWithPluginMetadata } from "../../../src/config/config.js";
 import type { OpenClawConfig } from "../../../src/config/types.openclaw.js";
@@ -41,6 +42,7 @@ import {
   waitForTextContaining,
   writeFixtureServer,
 } from "../test-helpers/mcp-app-conformance-fixture.ts";
+import { seedMcpAppConformanceSession } from "../test-helpers/mcp-app-conformance-session.ts";
 import { createControlUiE2eSuite } from "./control-ui-e2e-suite.test-support.ts";
 import {
   assertMcpAppTimingEvents,
@@ -185,6 +187,8 @@ const suite = createControlUiE2eSuite({
               args: [fixturePath],
               cwd: tempRoot,
               requestTimeoutMs: 10_000,
+              // This keyless fixture proves transport lifetime, not interactive approval.
+              codex: { defaultToolsApprovalMode: "approve" },
             },
           },
         },
@@ -204,7 +208,8 @@ const suite = createControlUiE2eSuite({
       });
       runtime = await runtimeStartup;
       signal.throwIfAborted();
-      const materialized = await materializeBundleMcpToolsForRun({ runtime });
+      await seedMcpAppConformanceSession(runtime, state.env);
+      const materialized = await materializeBundleMcpToolsForRun({ runtime, agentId: "main" });
       signal.throwIfAborted();
       materialized.restrictAppTools?.([...materialized.tools, ...(materialized.appTools ?? [])]);
       const show = materialized.tools.find((tool) => tool.name === "conformance__show");
@@ -401,7 +406,13 @@ suite.define(() => {
           )
           .toBe("summarize selection");
         expect(confirmedPrompts).toEqual(["Confirm:\n\nsummarize selection"]);
-        expect(runtime.pendingMcpAppModelContext).toMatchObject({ text: "selected item 42" });
+        const currentView = getMcpAppViewLease(viewId, runtime);
+        if (!currentView) {
+          throw new Error("Conformance view expired before context inspection");
+        }
+        expect(getMcpAppModelContext(runtime, currentView)).toMatchObject({
+          content: [{ type: "text", text: "selected item 42" }],
+        });
 
         const standaloneUrl = await requestStandaloneUrl(controlPage, { sessionKey, viewId });
         await fixture.configure({

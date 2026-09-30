@@ -1299,7 +1299,7 @@ src/agents/agent-bundle-mcp-manager-api.ts	2
 src/agents/agent-bundle-mcp-manager-lifecycle.ts	1
 src/agents/agent-bundle-mcp-materialize.ts	3
 src/agents/agent-bundle-mcp-runtime-shared.ts	2
-src/agents/agent-bundle-mcp-runtime.ts	4
+src/agents/agent-bundle-mcp-runtime.ts	3
 src/agents/agent-command-restart-recovery.ts	3
 src/agents/agent-command.ts	1
 src/agents/agent-hooks/compaction-safeguard.ts	13
@@ -1504,7 +1504,6 @@ src/agents/lazy-process-tool.ts	2
 src/agents/live-cache-regression-policy.ts	2
 src/agents/main-session-recovery/main-session-restart-recovery-checkpoint.ts	3
 src/agents/main-session-recovery/main-session-restart-recovery-resume-policy.ts	18
-src/agents/mcp-app-model-context.ts	1
 src/agents/mcp-auth-profile.ts	1
 src/agents/mcp-codex-tool-approval.ts	4
 src/agents/mcp-http-fetch.ts	3
@@ -2266,7 +2265,6 @@ src/gateway/server-methods/devices.ts	4
 src/gateway/server-methods/doctor.ts	3
 src/gateway/server-methods/exec-approval.ts	2
 src/gateway/server-methods/exec-approvals.ts	2
-src/gateway/server-methods/mcp-app.ts	1
 src/gateway/server-methods/memory-search.ts	3
 src/gateway/server-methods/migrations.ts	1
 src/gateway/server-methods/models-auth-status.ts	1
@@ -3044,7 +3042,7 @@ ui/src/components/markdown-assistant-transcript.ts	1
 ui/src/components/markdown-code-blocks.ts	1
 ui/src/components/markdown-parser.ts	2
 ui/src/components/mcp-app-theme.ts	1
-ui/src/components/mcp-app-view.ts	8
+ui/src/components/mcp-app-view.ts	6
 ui/src/components/mcp-server-form.ts	1
 ui/src/components/model-picker.ts	2
 ui/src/components/onboarding-memory-import.ts	1
@@ -3108,7 +3106,7 @@ ui/src/pages/chat/chat-gateway.ts	1
 ui/src/pages/chat/chat-history-retry.ts	1
 ui/src/pages/chat/chat-page-retained-sessions.ts	1
 ui/src/pages/chat/chat-pane-browser-annotation.ts	2
-ui/src/pages/chat/chat-pane-lifecycle.ts	4
+ui/src/pages/chat/chat-pane-lifecycle.ts	3
 ui/src/pages/chat/chat-queue.ts	1
 ui/src/pages/chat/chat-send-ack.ts	2
 ui/src/pages/chat/chat-send-composer.ts	1
