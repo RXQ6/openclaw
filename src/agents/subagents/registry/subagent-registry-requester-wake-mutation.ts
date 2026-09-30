@@ -43,7 +43,7 @@ export const isCurrentRequesterSettleWakeBatch = (
   }
 };
 
-export function assertRequesterWakeCommitCurrent(
+function assertRequesterWakeCommitCurrent(
   context: SubagentLifecycleWakeContext,
   entries: readonly SubagentRunRecord[],
   stateContext: OpenClawStateWorkerContext,
