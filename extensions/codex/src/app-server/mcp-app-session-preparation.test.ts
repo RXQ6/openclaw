@@ -99,7 +99,10 @@ function fixture() {
   return {
     preparation,
     bindingStore: {
-      read: () => ({ threadId: "native-thread", clientId: "native-client" }),
+      read: () =>
+        mocks.start.mock.calls.length > 0
+          ? { threadId: "native-thread", clientId: "native-client" }
+          : undefined,
       withLease: async (_identity: unknown, operation: () => Promise<unknown>) => operation(),
     } as unknown as CodexAppServerBindingStore,
     assertCurrent: mocks.assert,

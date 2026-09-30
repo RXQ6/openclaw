@@ -72,193 +72,213 @@ export async function prepareCodexMcpAppSession(params: {
       admitted.assertCurrent();
     };
     assertCurrent();
-    const execPolicy = resolveOpenClawExecPolicyForCodexAppServer({
-      permissionMode: input.permissionMode,
-      execOverrides: input.execOverrides,
-      approvals: input.permissionMode === "full" ? undefined : loadExecApprovals(),
-      config: input.config,
-      agentId: input.agentId,
-    });
-    const { appServer: runtimeOptions } = await resolveCodexBindingAppServerConnection({
-      binding: admitted.binding,
-      pluginConfig,
-      execPolicy,
-      modelProvider: input.provider,
-      model: input.modelId,
-      config: input.config,
-      agentDir: input.agentDir,
-      requirementsToml: readCodexRequirementsToml({}),
-      openClawSandboxActive: false,
-      sessionPermissionMode: input.permissionMode,
-      assertCurrent,
-    });
-    assertCurrent();
-    const appServer = applyCodexSessionPermissionPolicy({
-      appServer: runtimeOptions,
-      pluginConfig,
-      permissionMode: input.permissionMode,
-      sessionRoot: input.sessionRoot,
-      defaultRoot: input.workspaceDir,
-      canUseAutoReview: false,
-    });
-    const environment = input.hostCapabilities.preparedEnvironment?.();
-    const startOptions =
-      appServer.start.transport === "stdio" && !isCodexAppServerProxyLaunch(appServer.start.args)
-        ? {
-            ...appServer.start,
-            env: {
-              ...appServer.start.env,
-              ...environment?.credentialScrubEnv,
-              ...environment?.localIdentityEnv,
-              ...environment?.localProcessEnv,
-            },
-          }
-        : appServer.start;
-    const authProfileId = resolveCodexAppServerAuthProfileId({
-      authProfileId: input.authProfileId ?? admitted.binding?.authProfileId,
-      store: input.authProfileStore,
-      config: input.config,
-    });
-    const client = await getLeasedSharedCodexAppServerClient({
-      startOptions,
-      pluginConfig: params.pluginConfig,
-      agentId: input.agentId,
-      agentDir: input.agentDir,
-      config: input.config,
-      authProfileStore: input.authProfileStore,
-      authProfileId:
-        admitted.binding?.connectionScope === "supervision" || appServer.start.homeScope === "user"
-          ? null
-          : authProfileId,
-      abandonSignal: input.abortSignal,
-      assertCurrent,
-      timeoutMs: appServer.requestTimeoutMs,
-    });
-    try {
-      assertCurrent();
-      ensureCodexAppServerClientRuntime(client, {
+    const prepareThread = async () => {
+      const execPolicy = resolveOpenClawExecPolicyForCodexAppServer({
+        permissionMode: input.permissionMode,
+        execOverrides: input.execOverrides,
+        approvals: input.permissionMode === "full" ? undefined : loadExecApprovals(),
+        config: input.config,
+        agentId: input.agentId,
+      });
+      const { appServer: runtimeOptions } = await resolveCodexBindingAppServerConnection({
+        binding: admitted.binding,
+        pluginConfig,
+        execPolicy,
+        modelProvider: input.provider,
+        model: input.modelId,
+        config: input.config,
         agentDir: input.agentDir,
-        authProfileId,
-        authProfileStore: input.authProfileStore,
+        requirementsToml: readCodexRequirementsToml({}),
+        openClawSandboxActive: false,
+        sessionPermissionMode: input.permissionMode,
+        assertCurrent,
+      });
+      assertCurrent();
+      const appServer = applyCodexSessionPermissionPolicy({
+        appServer: runtimeOptions,
+        pluginConfig,
+        permissionMode: input.permissionMode,
+        sessionRoot: input.sessionRoot,
+        defaultRoot: input.workspaceDir,
+        canUseAutoReview: false,
+      });
+      const environment = input.hostCapabilities.preparedEnvironment?.();
+      const startOptions =
+        appServer.start.transport === "stdio" && !isCodexAppServerProxyLaunch(appServer.start.args)
+          ? {
+              ...appServer.start,
+              env: {
+                ...appServer.start.env,
+                ...environment?.credentialScrubEnv,
+                ...environment?.localIdentityEnv,
+                ...environment?.localProcessEnv,
+              },
+            }
+          : appServer.start;
+      const authProfileId = resolveCodexAppServerAuthProfileId({
+        authProfileId: input.authProfileId ?? admitted.binding?.authProfileId,
+        store: input.authProfileStore,
         config: input.config,
       });
-      const pluginPolicy = resolveCodexPluginThreadConfigStartupPolicy({
-        pluginConfig,
-        nativeToolSurfaceEnabled: true,
-      });
-      const appCacheKey = buildCodexPluginAppCacheKey({
-        appServer,
-        agentDir: input.agentDir,
-        authProfileId,
-        appServerVersion: client.getServerVersion(),
-        runtimeIdentity: client.getRuntimeIdentity(),
-      });
-      const pluginThreadConfig = pluginPolicy.pluginThreadConfigRequired
-        ? createCodexPluginThreadConfigStartupProvider({
-            inputFingerprint: buildCodexPluginThreadConfigInputFingerprint({
-              pluginConfig: pluginPolicy.pluginThreadConfigPluginConfig,
-              appCacheKey,
-            }),
-            enabledPluginConfigKeys: pluginPolicy.enabledPluginConfigKeys,
-            policy: pluginPolicy.resolvedPluginPolicy,
-            requestTimeoutMs: appServer.requestTimeoutMs,
-            signal: input.abortSignal ?? new AbortController().signal,
-            pluginConfig: pluginPolicy.pluginThreadConfigPluginConfig,
-            client,
-            configCwd: input.workspaceDir,
-            appCacheKey,
-          })
-        : undefined;
-      // Static projections use the configuration/credential owner; they do not
-      // create a second MCP client to discover policy before native startup.
-      const bundle = await loadCodexBundleMcpThreadConfig({
-        workspaceDir: input.workspaceDir,
-        agentId: input.agentId,
-        cfg: input.config,
-        toolOverrides: input.toolOverrides,
-      });
-      assertCurrent();
-      const user = await buildCodexUserMcpServersThreadConfigPatchForRuntime(input.config, {
+      const client = await getLeasedSharedCodexAppServerClient({
+        startOptions,
+        pluginConfig: params.pluginConfig,
         agentId: input.agentId,
         agentDir: input.agentDir,
-        toolOverrides: input.toolOverrides,
-        allowLiteralOAuthProjection: appServer.connectionClass !== "remote",
-      });
-      assertCurrent();
-      const modelSource = input.hostCapabilities.retainSourceAuthority?.();
-      let nativeModelAdmission: "required" | "optional" | "disabled" | undefined;
-      try {
-        modelSource?.assertCurrent();
-        nativeModelAdmission = modelSource
-          ? modelSource.modelPolicyRequired !== false
-            ? "required"
-            : "optional"
-          : undefined;
-      } finally {
-        modelSource?.release();
-      }
-      const bundleConfig = bundle.configPatch
-        ? z.record(z.string(), z.json()).parse(bundle.configPatch)
-        : undefined;
-      const thread = await startOrResumeThread({
-        client,
-        bindingStore: params.bindingStore,
-        params: { ...input, authProfileId },
+        config: input.config,
+        authProfileStore: input.authProfileStore,
+        authProfileId:
+          admitted.binding?.connectionScope === "supervision" ||
+          appServer.start.homeScope === "user"
+            ? null
+            : authProfileId,
+        abandonSignal: input.abortSignal,
         assertCurrent,
-        agentId: input.agentId,
-        agentDir: input.agentDir,
-        cwd: input.workspaceDir,
-        appServer,
-        dynamicTools: [],
-        nativeCodeModeEnabled: false,
-        webSearchAllowed: false,
-        persistentWebSearchAllowed: false,
-        userMcpServersEnabled: false,
-        nativeModelAdmission,
-        pluginThreadConfig,
-        appServerRuntimeFingerprint: buildCodexAppServerRuntimeFingerprint({
+        timeoutMs: appServer.requestTimeoutMs,
+      });
+      try {
+        assertCurrent();
+        ensureCodexAppServerClientRuntime(client, {
+          agentDir: input.agentDir,
+          authProfileId,
+          authProfileStore: input.authProfileStore,
+          config: input.config,
+        });
+        const pluginPolicy = resolveCodexPluginThreadConfigStartupPolicy({
+          pluginConfig,
+          nativeToolSurfaceEnabled: true,
+        });
+        const appCacheKey = buildCodexPluginAppCacheKey({
           appServer,
+          agentDir: input.agentDir,
+          authProfileId,
           appServerVersion: client.getServerVersion(),
           runtimeIdentity: client.getRuntimeIdentity(),
-        }),
-        config: mergeCodexThreadConfigs(bundleConfig, user),
-        signal: input.abortSignal,
-      });
-      let retained = false;
-      try {
-        retained = await params.bindingStore.withLease(sessionBindingIdentity(input), async () => {
-          assertCurrent();
-          if (
-            !isSameCodexAppServerThreadOwner(
-              params.bindingStore.read(sessionBindingIdentity(input)),
-              thread,
-            )
-          ) {
-            return false;
-          }
-          thread.liveThreadOwnership?.assertCurrent();
-          return await retainCodexAppServerBindingSubscription(client, thread.threadId, {
-            release: thread.liveThreadOwnership?.release,
-            configFingerprint: thread.liveThreadConfigFingerprint,
-            serviceTier: thread.liveThreadOwnership?.serviceTier,
-            ephemeralPolicy: thread.liveThreadEphemeralPolicy,
-          });
         });
-        if (!retained) {
-          throw new Error("Native MCP session ownership changed before retention");
+        const pluginThreadConfig = pluginPolicy.pluginThreadConfigRequired
+          ? createCodexPluginThreadConfigStartupProvider({
+              inputFingerprint: buildCodexPluginThreadConfigInputFingerprint({
+                pluginConfig: pluginPolicy.pluginThreadConfigPluginConfig,
+                appCacheKey,
+              }),
+              enabledPluginConfigKeys: pluginPolicy.enabledPluginConfigKeys,
+              policy: pluginPolicy.resolvedPluginPolicy,
+              requestTimeoutMs: appServer.requestTimeoutMs,
+              signal: input.abortSignal ?? new AbortController().signal,
+              pluginConfig: pluginPolicy.pluginThreadConfigPluginConfig,
+              client,
+              configCwd: input.workspaceDir,
+              appCacheKey,
+            })
+          : undefined;
+        // Static projections use the configuration/credential owner; they do not
+        // create a second MCP client to discover policy before native startup.
+        const bundle = await loadCodexBundleMcpThreadConfig({
+          workspaceDir: input.workspaceDir,
+          agentId: input.agentId,
+          cfg: input.config,
+          toolOverrides: input.toolOverrides,
+        });
+        assertCurrent();
+        const user = await buildCodexUserMcpServersThreadConfigPatchForRuntime(input.config, {
+          agentId: input.agentId,
+          agentDir: input.agentDir,
+          toolOverrides: input.toolOverrides,
+          allowLiteralOAuthProjection: appServer.connectionClass !== "remote",
+        });
+        assertCurrent();
+        const modelSource = input.hostCapabilities.retainSourceAuthority?.();
+        let nativeModelAdmission: "required" | "optional" | "disabled" | undefined;
+        try {
+          modelSource?.assertCurrent();
+          nativeModelAdmission = modelSource
+            ? modelSource.modelPolicyRequired !== false
+              ? "required"
+              : "optional"
+            : undefined;
+        } finally {
+          modelSource?.release();
         }
-        return thread;
-      } finally {
-        if (!retained) {
-          if (thread.liveThreadOwnership) {
-            await thread.liveThreadOwnership.release(thread.threadId);
-          } else {
-            await rollbackCodexAppServerBindingSubscription(client, thread.threadId, false);
+        const bundleConfig = bundle.configPatch
+          ? z.record(z.string(), z.json()).parse(bundle.configPatch)
+          : undefined;
+        const thread = await startOrResumeThread({
+          client,
+          bindingStore: params.bindingStore,
+          params: { ...input, authProfileId },
+          assertCurrent,
+          agentId: input.agentId,
+          agentDir: input.agentDir,
+          cwd: input.workspaceDir,
+          appServer,
+          dynamicTools: [],
+          nativeCodeModeEnabled: false,
+          webSearchAllowed: false,
+          persistentWebSearchAllowed: false,
+          userMcpServersEnabled: false,
+          nativeModelAdmission,
+          pluginThreadConfig,
+          appServerRuntimeFingerprint: buildCodexAppServerRuntimeFingerprint({
+            appServer,
+            appServerVersion: client.getServerVersion(),
+            runtimeIdentity: client.getRuntimeIdentity(),
+          }),
+          config: mergeCodexThreadConfigs(bundleConfig, user),
+          signal: input.abortSignal,
+        });
+        let retained = false;
+        try {
+          retained = await params.bindingStore.withLease(
+            sessionBindingIdentity(input),
+            async () => {
+              assertCurrent();
+              if (
+                !isSameCodexAppServerThreadOwner(
+                  params.bindingStore.read(sessionBindingIdentity(input)),
+                  thread,
+                )
+              ) {
+                return false;
+              }
+              thread.liveThreadOwnership?.assertCurrent();
+              return await retainCodexAppServerBindingSubscription(client, thread.threadId, {
+                release: thread.liveThreadOwnership?.release,
+                configFingerprint: thread.liveThreadConfigFingerprint,
+                serviceTier: thread.liveThreadOwnership?.serviceTier,
+                ephemeralPolicy: thread.liveThreadEphemeralPolicy,
+              });
+            },
+          );
+          if (!retained) {
+            throw new Error("Native MCP session ownership changed before retention");
+          }
+          return thread;
+        } finally {
+          if (!retained) {
+            if (thread.liveThreadOwnership) {
+              await thread.liveThreadOwnership.release(thread.threadId);
+            } else {
+              await rollbackCodexAppServerBindingSubscription(client, thread.threadId, false);
+            }
           }
         }
+      } finally {
+        releaseLeasedSharedCodexAppServerClient(client);
       }
-    } finally {
-      releaseLeasedSharedCodexAppServerClient(client);
+    };
+    if (admitted.binding) {
+      return await prepareThread();
     }
+    // A cold App request owns the absent binding through subscription retention.
+    // Other discoveries recheck under this same reentrant lease instead of
+    // selecting a second lifecycle from an obsolete empty snapshot. Bound
+    // resumes still acquire the native thread queue before the binding lease.
+    const thread = await params.bindingStore.withLease(sessionBindingIdentity(input), async () => {
+      assertCurrent();
+      const current = params.bindingStore.read(sessionBindingIdentity(input));
+      return current ?? (await prepareThread());
+    });
+    assertCurrent();
+    return thread;
   });
 }
