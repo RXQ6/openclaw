@@ -45,7 +45,6 @@ function resolveSwarmWaitOwnerSessionKeys(
   return ownerSessionKeys;
 }
 
-/** Owns subagent registration and queued collector launch transitions. */
 export class SubagentLaunchManager extends SubagentRecoveryManager {
   private findRunByIdentity(runId: string): SubagentRunRecord | undefined {
     return (
@@ -149,7 +148,11 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
           ...[...killReconciliationSnapshots.keys()].map((candidate) => candidate.runId),
         ];
         const rollbackRegistration = () => {
-          this.options.runs.delete(runId);
+          if (previous) {
+            this.options.runs.set(runId, previous);
+          } else {
+            this.options.runs.delete(runId);
+          }
           this.restoreKillReconciliationSnapshots(killReconciliationSnapshots);
         };
         const bindRegistrationReservation = () => {
