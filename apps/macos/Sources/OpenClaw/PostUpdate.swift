@@ -385,6 +385,8 @@ final class PostUpdateController: NSObject, NSWindowDelegate {
 
     @discardableResult
     func startIfNeeded(profile: AppProfile = .current) -> Bool {
+        try? GatewayProcessManager.shared.initializeGatewayHosting()
+        guard (try? GatewayProcessManager.shared.shouldDeferLegacyServiceWhilePaused()) == false else { return false }
         guard !profile.isActive || BundledRuntime.isBundledApp else { return false }
         guard let receipt = PostAppUpdateReceiptStore.pendingForLaunch(
             currentVersion: GatewayEnvironment.appVersionString(),
@@ -446,6 +448,7 @@ final class PostUpdateController: NSObject, NSWindowDelegate {
     }
 
     private func run() {
+        guard (try? GatewayProcessManager.shared.shouldDeferLegacyServiceWhilePaused()) == false else { return }
         guard let receipt, task == nil else { return }
         self.model.phase = .checking
         self.model.title = String(localized: "Finishing your OpenClaw update")

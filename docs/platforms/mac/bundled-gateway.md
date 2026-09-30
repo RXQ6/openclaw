@@ -263,8 +263,11 @@ After an app update, including a rebuild with the same public version, the app
 seeds the new runtime and restarts its Gateway in the selected hosting mode.
 It verifies health before removing old builds. A paused Gateway stays paused.
 Seeded installations never run npm self-update; update OpenClaw.app to update
-their Gateway. Existing app-managed Node services continue through their installed
-CLI's update and repair flow, including health verification, and keep their runtime
+their Gateway. A paused legacy app-managed Node installation keeps background-service
+hosting even when the old app removed its LaunchAgent. While paused, the app records
+that preference without probing or changing the runtime. On resume it recovers the
+managed Node CLI before updating; this also applies to named profiles. Existing
+app-managed Node services continue through their installed CLI's update and repair flow, including health verification, and keep their runtime
 pin. A seed left on disk does not adopt an attached Node service. If that legacy
 runtime cannot be verified, the update window keeps the failure retryable instead
 of replacing it with a fresh bundled installation. A missing `runtime/current`

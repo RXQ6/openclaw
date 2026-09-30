@@ -10,6 +10,53 @@ struct GatewayServiceRuntimeTests {
             stdoutPath: nil, stderrPath: nil, port: nil, bind: nil, token: nil, password: nil)
     }
 
+    @Test(arguments: [AppProfile(environment: [:]), AppProfile(environment: ["OPENCLAW_PROFILE": "legacy-fixture"])])
+    func `legacy Node discovery follows only the profile owned package and canonical environment`(
+        profile: AppProfile) throws
+    {
+        let home = try makeTempDirForTests().resolvingSymlinksInPath()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let state = profile.stateDirectoryURL(homeDirectory: home)
+        let node = state.appendingPathComponent("tools/node-v26.1.0/bin/node")
+        let package = state.appendingPathComponent("tools/node-v26.1.0/lib/node_modules/openclaw")
+        let entry = package.appendingPathComponent("openclaw.mjs")
+        let wrapper = state.appendingPathComponent("bin/openclaw")
+        let artifacts = GatewayLaunchAgentManager.generatedEnvironmentArtifacts(
+            directory: state.appendingPathComponent("service-env"), profile: profile)
+        for directory in [
+            node.deletingLastPathComponent(),
+            package,
+            wrapper.deletingLastPathComponent(),
+            artifacts.wrapper.deletingLastPathComponent(),
+        ] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        try Data("#!/bin/sh\nexit 92\n".utf8).write(to: node)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: node.path)
+        try Data("// synthetic package\n".utf8).write(to: entry)
+        try Data(#"{"name":"openclaw","version":"2026.9.7"}"#.utf8)
+            .write(to: package.appendingPathComponent("package.json"))
+        try FileManager.default.createDirectory(
+            at: state.appendingPathComponent("tools/node/bin"),
+            withIntermediateDirectories: true)
+        // A previous seed can replace the CLI wrapper without removing the legacy npm package.
+        try Data("#!/bin/sh\n# OpenClaw.app managed CLI (bundled runtime)\n".utf8).write(to: wrapper)
+        try Data("#!/bin/sh\nexec \"$@\"\n".utf8).write(to: artifacts.wrapper)
+        try Data("export FIXTURE_CHANNEL='preserved'\n".utf8).write(to: artifacts.environment)
+        #expect(try GatewayLaunchAgentManager.hasLegacyManagedNodeInstall(profile: profile, homeDirectory: home))
+        let cli = try #require(try GatewayLaunchAgentManager.legacyManagedNodeCLI(
+            profile: profile, homeDirectory: home))
+        #expect(cli.prefix.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path } ==
+            [node, entry].map { $0.resolvingSymlinksInPath().path })
+        #expect(cli.environment["FIXTURE_CHANNEL"] == "preserved")
+        #expect(cli.usesGeneratedEnvironment)
+        #expect(try !GatewayLaunchAgentManager.hasLegacyManagedNodeInstall(
+            profile: AppProfile(environment: ["OPENCLAW_PROFILE": "other-fixture"]), homeDirectory: home))
+        try Data("#!/bin/sh\nexec /operator/openclaw \"$@\"\n".utf8).write(to: wrapper)
+        #expect(try !GatewayLaunchAgentManager.hasLegacyManagedNodeInstall(profile: profile, homeDirectory: home))
+        #expect(try GatewayLaunchAgentManager.legacyNodeInstallIsExternal(profile: profile, homeDirectory: home))
+    }
+
     @Test func `fresh and replacement installs pin the selected bundled runtime`() {
         let runtime = BundledRuntime(root: URL(fileURLWithPath: "/profile/runtime/build-two"))
         for (exists, replace, expectedPin) in [

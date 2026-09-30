@@ -139,19 +139,29 @@ extension BundledRuntime {
 
     static func isManagedShim(_ text: String, stateDirectory: URL) -> Bool {
         if text.hasPrefix("#!/bin/sh\n\(self.shimSignature)\n") { return true }
+        return self.legacyManagedNodeCommand(text, stateDirectory: stateDirectory) != nil
+    }
+
+    static func legacyManagedNodeCommand(_ text: String, stateDirectory: URL) -> [String]? {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false)
         guard lines.count == 4, lines[0] == "#!/usr/bin/env bash", lines[1] == "set -euo pipefail",
               lines[3].isEmpty
-        else { return false }
+        else { return nil }
         let prefix = "exec \"\(stateDirectory.path)/tools/node/bin/node\" \""
         let suffix = "/lib/node_modules/openclaw/dist/entry.js\" \"$@\""
-        guard lines[2].hasPrefix(prefix), lines[2].hasSuffix(suffix) else { return false }
+        guard lines[2].hasPrefix(prefix), lines[2].hasSuffix(suffix) else { return nil }
         let packagePrefix = String(lines[2].dropFirst(prefix.count).dropLast(suffix.count))
         // install-cli.sh owns node and versioned node-* trees; a custom script stays operator-owned.
         let tools = stateDirectory.appendingPathComponent("tools").path + "/"
-        guard packagePrefix.hasPrefix(tools) else { return false }
+        guard packagePrefix.hasPrefix(tools) else { return nil }
         let node = packagePrefix.dropFirst(tools.count)
-        return (node == "node" || node.hasPrefix("node-")) && !node.contains("/") && !node.contains("\"")
+        guard node == "node" || node.hasPrefix("node-"), !node.contains("/"), !node.contains("\"") else {
+            return nil
+        }
+        return [
+            stateDirectory.appendingPathComponent("tools/node/bin/node").path,
+            packagePrefix + "/lib/node_modules/openclaw/dist/entry.js",
+        ]
     }
 
     private static func shellQuote(_ value: String) -> String {

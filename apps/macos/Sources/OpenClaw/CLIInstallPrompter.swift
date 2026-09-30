@@ -407,7 +407,10 @@ final class CLIInstallPrompter {
         return tail.isEmpty ? nil : tail
     }
 
-    static func launchAgentUsesManagedCLI(programArguments: [String]) -> Bool {
+    static func launchAgentUsesManagedCLI(
+        programArguments: [String],
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) -> Bool
+    {
         var command = programArguments[...]
         if command.count >= 3,
            command[command.startIndex] == "/bin/sh",
@@ -419,7 +422,7 @@ final class CLIInstallPrompter {
         {
             command = command.dropFirst(2)
         }
-        let managedRoot = URL(fileURLWithPath: CLIInstaller.managedExecutableLocation())
+        let managedRoot = URL(fileURLWithPath: CLIInstaller.managedExecutableLocation(homeDirectory: homeDirectory))
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .standardizedFileURL.path + "/"

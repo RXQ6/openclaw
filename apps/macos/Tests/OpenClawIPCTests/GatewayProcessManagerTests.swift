@@ -309,6 +309,111 @@ struct GatewayProcessManagerTests {
         }
     }
 
+    @Test(arguments: [false, true], ["exact", "unset", "beta", "dev"])
+    func `published paused Node install retains service hosting without daemon work`(
+        packageOnly: Bool, policy: String) async throws
+    {
+        try await self.withLaunchAgentEnvironment {
+            let defaults = AppDefaults.standard
+            let keys = [
+                onboardingSeenKey,
+                pauseDefaultsKey,
+                cliInstallPolicyKey,
+                GatewayHosting.defaultsKey,
+                GatewayLaunchAgentManager.resumeCommandKey,
+            ]
+            let saved = keys.map { ($0, defaults.object(forKey: $0)) }
+            defer {
+                for (key, value) in saved {
+                    if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+                }
+            }
+            defaults.set(true, forKey: onboardingSeenKey)
+            defaults.set(true, forKey: pauseDefaultsKey)
+            for key in [cliInstallPolicyKey, GatewayHosting.defaultsKey, GatewayLaunchAgentManager.resumeCommandKey] {
+                defaults.removeObject(forKey: key)
+            }
+            if policy != "unset" { defaults.set(policy, forKey: cliInstallPolicyKey) }
+            let managed = ["exact", "unset"].contains(policy)
+            let state = AppProfile.current.stateDirectoryURL(homeDirectory: LaunchAgentPlist.homeDirectoryURL)
+            setenv("OPENCLAW_STATE_DIR", state.path, 1)
+            let node = state.appendingPathComponent("tools/node/bin/node")
+            let package = state.appendingPathComponent("tools/node/lib/node_modules/openclaw")
+            let entry = package.appendingPathComponent("dist/entry.js")
+            let wrapper = state.appendingPathComponent("bin/openclaw")
+            for directory in [
+                node.deletingLastPathComponent(),
+                entry.deletingLastPathComponent(),
+                wrapper.deletingLastPathComponent(),
+            ] {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            }
+            try Data("#!/bin/sh\nexit 91\n".utf8).write(to: node)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: node.path)
+            try Data("// legacy package fixture\n".utf8).write(to: entry)
+            try Data(#"{"name":"openclaw","version":"2026.9.7"}"#.utf8)
+                .write(to: package.appendingPathComponent("package.json"))
+            if !packageOnly {
+                try Data(("#!/usr/bin/env bash\nset -euo pipefail\nexec \"" + node.path + "\" \"" + entry
+                        .path + "\" \"$@\"\n").utf8)
+                    .write(to: wrapper)
+            }
+            let manager = GatewayProcessManager()
+            if !BundledRuntime.isBundledApp {
+                try manager.initializeGatewayHosting()
+                #expect(defaults.object(forKey: GatewayHosting.defaultsKey) == nil)
+                defaults.set(false, forKey: pauseDefaultsKey)
+                #expect(try manager.serviceCLIForResume() == nil)
+                return
+            }
+            manager.stop()
+            await manager.waitForStartupAttempt()
+            #expect(defaults.string(forKey: GatewayHosting.defaultsKey) == (managed ? "service" : nil))
+            #expect(GatewayLaunchAgentManager.testingDaemonCommandCallsSnapshot().isEmpty)
+            #expect(manager.installation == (managed ? .managed : .external))
+            #expect(defaults.object(forKey: GatewayLaunchAgentManager.resumeCommandKey) == nil)
+            #expect(manager.retainedServiceCLI == nil)
+            #expect(!FileManager.default.fileExists(atPath: state.appendingPathComponent("runtime").path))
+            #expect(try manager.serviceCLIForResume() == nil)
+            defaults.set(false, forKey: pauseDefaultsKey)
+            let resumed = GatewayProcessManager()
+            if managed {
+                let cli = try #require(try resumed.serviceCLIForResume())
+                #expect(cli.prefix == [node.path, entry.path])
+                #expect(!cli.hadRuntimePin)
+                #expect(await resumed._testEnableLaunchAgentIfNeededInstalled(port: 29871))
+                let install = try #require(GatewayLaunchAgentManager.testingResolvedDaemonCommandsSnapshot()
+                    .first { $0.contains("install") })
+                #expect(Array(install.prefix(2)) == [node.path, entry.path])
+                #expect(!install.contains("bun"))
+                defaults.removeObject(forKey: GatewayLaunchAgentManager.resumeCommandKey)
+                defaults.removeObject(forKey: GatewayHosting.defaultsKey)
+                let plist = GatewayLaunchAgentManager.plistURL(
+                    homeDirectory: LaunchAgentPlist.homeDirectoryURL, profile: .current)
+                try FileManager.default.createDirectory(
+                    at: plist.deletingLastPathComponent(),
+                    withIntermediateDirectories: true)
+                try PropertyListSerialization.data(fromPropertyList: [
+                    "ProgramArguments": [node.path, entry.path, "gateway", "--port", "29871"],
+                ], format: .xml, options: 0).write(to: plist)
+                let registered = GatewayProcessManager()
+                try registered.initializeGatewayHosting()
+                #expect(defaults.string(forKey: GatewayHosting.defaultsKey) == "service")
+                try FileManager.default.removeItem(at: plist)
+            } else {
+                #expect(try resumed.serviceCLIForResume() == nil)
+            }
+            defaults.removeObject(forKey: GatewayLaunchAgentManager.resumeCommandKey)
+            defaults.removeObject(forKey: GatewayHosting.defaultsKey)
+            try Data("#!/bin/sh\nexec /operator/openclaw \"$@\"\n".utf8).write(to: wrapper)
+            let external = GatewayProcessManager()
+            try external.initializeGatewayHosting()
+            #expect(external.installation == .external)
+            #expect(defaults.object(forKey: GatewayHosting.defaultsKey) == nil)
+            #expect(try external.serviceCLIForResume() == nil)
+        }
+    }
+
     @Test(
         arguments: [false, true],
         ["managed-node", "pinned-managed-node", "operator-node", "operator-bun", "seeded-bun"])

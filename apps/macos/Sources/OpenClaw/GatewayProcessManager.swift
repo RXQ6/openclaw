@@ -69,7 +69,7 @@ final class GatewayProcessManager {
 
     /// Pause removes managed service records without changing installation responsibility.
     /// Remember the established owner, not just that this port once answered.
-    private var gatewayOwnership: (port: Int, installation: Installation)?
+    var gatewayOwnership: (port: Int, installation: Installation)?
 
     private(set) var log: String = ""
     private(set) var environmentStatus: GatewayEnvironmentStatus = .checking
@@ -109,6 +109,7 @@ final class GatewayProcessManager {
     }
 
     var usesSeededGateway: Bool {
+        if (try? self.shouldDeferLegacyServiceWhilePaused()) != false { return false }
         guard BundledRuntime.isBundledApp, self.installation == .managed,
               !CommandResolver.connectionModeIsRemote() || self.hostsLocalGatewayWithRemotePrimary,
               let arguments = GatewayLaunchAgentManager.launchdProgramArguments()
@@ -121,16 +122,6 @@ final class GatewayProcessManager {
             hasRetainedService: self.retainedServiceCLI != nil ||
                 AppDefaults.standard.object(forKey: GatewayLaunchAgentManager.resumeCommandKey) != nil,
             retainedCLI: self.retainedServiceCLI)
-    }
-
-    private func installation(for port: Int, whenMissing: Installation) -> Installation {
-        if GatewayLaunchAgentManager.isLaunchAgentWriteDisabled() { return .external }
-        guard let arguments = GatewayLaunchAgentManager.launchdProgramArguments() else { return .unreadable }
-        if !arguments.isEmpty {
-            return CLIInstallPrompter.launchAgentUsesManagedCLI(programArguments: arguments) ? .managed : .external
-        }
-        if let gatewayOwnership, gatewayOwnership.port == port { return gatewayOwnership.installation }
-        return whenMissing
     }
 
     private var desiredActive = false
@@ -536,6 +527,11 @@ final class GatewayProcessManager {
     }
 
     func stop() {
+        do { try self.initializeGatewayHosting() } catch {
+            self.lastFailureReason = error.localizedDescription
+            self.status = .failed(error.localizedDescription)
+            return
+        }
         let hosting = self.gatewayHosting
         self.gatewayStartGeneration &+= 1
         let stopGeneration = self.gatewayStartGeneration
@@ -555,11 +551,21 @@ final class GatewayProcessManager {
         let disableTask = Task { @MainActor in
             _ = await priorDisableTask?.value
             _ = await enableTask?.value
+            defer {
+                if self.launchAgentDisableGeneration == stopGeneration {
+                    self.launchAgentDisableTask = nil
+                    self.launchAgentDisableGeneration = nil
+                }
+            }
             if self.launchAgentDisableGeneration == stopGeneration {
                 // A service can be installed while our child still runs. Pause owns both teardowns.
                 await self.childSupervisor.stop()
                 if hosting == .service, self.launchAgentDisableGeneration == stopGeneration {
                     do {
+                        // A published paused installation has no plist or resume record. Keep
+                        // its always-on intent without probing, capturing credentials, or uninstalling.
+                        if try self.shouldDeferLegacyServiceWhilePaused() { return }
+                        if self.installation == .external { return }
                         try await self.retainManagedServiceForResume()
                         if self.launchAgentDisableGeneration == stopGeneration {
                             _ = await GatewayLaunchAgentManager.set(
@@ -572,10 +578,6 @@ final class GatewayProcessManager {
                         }
                     }
                 }
-            }
-            if self.launchAgentDisableGeneration == stopGeneration {
-                self.launchAgentDisableTask = nil
-                self.launchAgentDisableGeneration = nil
             }
         }
         self.launchAgentDisableGeneration = stopGeneration
