@@ -137,7 +137,7 @@ export function prepareBranchEntries(
     totalTokens += tokens;
   }
 
-  return { messages: messages.reverse(), fileOps, totalTokens };
+  return { messages: messages.toReversed(), fileOps, totalTokens };
 }
 
 const BRANCH_SUMMARY_PREAMBLE = `The user explored a different conversation branch before returning here.

@@ -271,7 +271,7 @@ export function truncateTail(content: string, options: TruncationOptions = {}): 
 
   return buildTruncationResult(input, {
     // Join only selected lines so a multiline result does not retain the full source.
-    content: outputLines.reverse().join("\n"),
+    content: outputLines.toReversed().join("\n"),
     truncatedBy,
     outputLines: outputLines.length,
     outputBytes: outputBytesCount,
