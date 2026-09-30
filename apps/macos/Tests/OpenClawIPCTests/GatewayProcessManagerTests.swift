@@ -93,6 +93,57 @@ struct GatewayProcessManagerTests {
             managedServicePID: nil))
     }
 
+    @Test(arguments: [(false, false), (false, true), (true, true)])
+    func `transport recovery cannot activate an inactive or paused Gateway`(
+        desiredActive: Bool,
+        paused: Bool) async throws
+    {
+        try await self.withLaunchAgentEnvironment(port: AppProfile.current.defaultGatewayPort) {
+            let appState = AppStateStore.shared
+            let previousPause = appState.isPaused
+            let previousHosting = AppDefaults.standard.object(forKey: GatewayHosting.defaultsKey)
+            let manager = self.manager
+            appState.isPaused = paused
+            manager.setTestingDesiredActive(desiredActive)
+            defer {
+                manager._testResetGatewayStartTask()
+                appState.isPaused = previousPause
+                AppDefaults.standard.set(previousHosting, forKey: GatewayHosting.defaultsKey)
+            }
+
+            manager.setActive(true, source: .recovery)
+
+            #expect(manager.status == .stopped)
+            #expect(GatewayLaunchAgentManager.testingDaemonCommandCallsSnapshot().isEmpty)
+        }
+    }
+
+    @Test func `terminal child failure stays stopped until an explicit request`() async throws {
+        let port = AppProfile.current.defaultGatewayPort
+        try await self.withLaunchAgentEnvironment(port: port) {
+            let appState = AppStateStore.shared
+            let previousPause = appState.isPaused
+            let previousHosting = AppDefaults.standard.object(forKey: GatewayHosting.defaultsKey)
+            let manager = self.manager
+            appState.isPaused = false
+            manager.setTestingDesiredActive(true)
+            defer {
+                manager._testResetGatewayStartTask()
+                appState.isPaused = previousPause
+                AppDefaults.standard.set(previousHosting, forKey: GatewayHosting.defaultsKey)
+            }
+            let failure = "Gateway exited five times before becoming stable."
+
+            manager.handleChildEvent(.failed(failure), port: port)
+            manager.setActive(true, source: .recovery)
+            #expect(manager.status == .failed(failure))
+
+            manager.setActive(true, source: .request)
+            #expect(manager.status == .starting)
+            #expect(GatewayLaunchAgentManager.testingDaemonCommandCallsSnapshot().isEmpty)
+        }
+    }
+
     private func availableGatewayPort() throws -> Int {
         let fd = socket(AF_INET, SOCK_STREAM, 0)
         guard fd >= 0 else {
@@ -478,6 +529,45 @@ struct GatewayProcessManagerTests {
                 #expect(try FileManager.default.destinationOfSymbolicLink(atPath: alias.path) == "node-v26.2.0")
             } else {
                 #expect(try String(contentsOf: wrapper, encoding: .utf8).contains("/operator/openclaw"))
+            }
+        }
+    }
+
+    @Test func `pause preserves a service whose command cannot be restored after relaunch`() async throws {
+        try await self.withLaunchAgentEnvironment(port: AppProfile.current.defaultGatewayPort) {
+            let manager = self.manager
+            let state = AppProfile.current.stateDirectoryURL()
+            let priorHosting = AppDefaults.standard.object(forKey: GatewayHosting.defaultsKey)
+            AppDefaults.standard.set(GatewayHosting.service.rawValue, forKey: GatewayHosting.defaultsKey)
+            defer {
+                manager.retainedServiceCLI = nil
+                AppDefaults.standard.set(priorHosting, forKey: GatewayHosting.defaultsKey)
+            }
+            let plist = GatewayLaunchAgentManager.plistURL(
+                homeDirectory: LaunchAgentPlist.homeDirectoryURL, profile: .current)
+            try FileManager.default.createDirectory(
+                at: plist.deletingLastPathComponent(),
+                withIntermediateDirectories: true)
+            let original = try PropertyListSerialization.data(fromPropertyList: [
+                "ProgramArguments": [
+                    state.appendingPathComponent("tools/node-version/bin/node").path,
+                    LaunchAgentPlist.homeDirectoryURL.appendingPathComponent("outside-package/openclaw.mjs").path,
+                    "gateway", "--port", String(AppProfile.current.defaultGatewayPort),
+                ],
+            ], format: .xml, options: 0)
+            try original.write(to: plist)
+            GatewayLaunchAgentManager.setTestingInterceptDaemonCommands(true, beforeReturning: { arguments in
+                if arguments.first == "uninstall" { try? FileManager.default.removeItem(at: plist) }
+            })
+
+            manager.stop()
+            await manager.waitForStartupAttempt()
+
+            #expect((try? Data(contentsOf: plist)) == original)
+            #expect(!GatewayLaunchAgentManager.testingDaemonCommandCallsSnapshot().contains { $0.first == "uninstall" })
+            #expect(AppDefaults.standard.object(forKey: GatewayLaunchAgentManager.resumeCommandKey) == nil)
+            guard case .failed = manager.status else { Issue.record("Pause must explain why the service was preserved")
+                return
             }
         }
     }

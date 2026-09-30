@@ -11,9 +11,9 @@ struct BundledGatewayPreparationTests {
         let cli: GatewayLaunchAgentManager.InstalledServiceCLI
         let plist: URL
 
-        init(home: URL, inferredLegacy: Bool = false) throws {
-            let state = inferredLegacy ? AppProfile.current.stateDirectoryURL(homeDirectory: home) :
-                AppProfile.current.stateDirectoryURL()
+        init(home: URL, inferredLegacy: Bool = false, stateDirectory: URL? = nil) throws {
+            let state = stateDirectory ?? (inferredLegacy ? AppProfile.current.stateDirectoryURL(homeDirectory: home) :
+                AppProfile.current.stateDirectoryURL())
             self.state = state
             let id = UUID().uuidString
             self.root = state.appendingPathComponent("onboarding-\(id)")
@@ -147,6 +147,194 @@ struct BundledGatewayPreparationTests {
         }
     }
 
+    @Test(arguments: [
+        "unchanged", "attach-only", "before-entry-service", "service", "environment", "runtime-alias",
+        "script-alias", "late-service", "terminal-wrapper", "remote-marker", "remote-service",
+        "initial-beta", "policy", "channel-beta", "channel-dev", "channel-extended-stable", "late-policy",
+    ], [false, true])
+    func `captured service updater preserves current custody through final dispatch`(
+        change: String,
+        repair: Bool) async throws
+    {
+        let home = try makeTempDirForTests()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let state = home.appendingPathComponent("state")
+        let config = home.appendingPathComponent("openclaw.json")
+        try Data((change == "initial-beta" ? #"{"update":{"channel":"beta"}}"# : "{}").utf8).write(to: config)
+        try await TestIsolation.withIsolatedState(
+            launchAgentHomeDirectory: home,
+            env: ["OPENCLAW_STATE_DIR": state.path, "OPENCLAW_CONFIG_PATH": config.path],
+            defaults: [cliInstallPolicyKey: "exact", connectionModeKey: "local", postAppUpdateReceiptKey: nil])
+        {
+            let fixture = try Fixture(home: home, stateDirectory: state)
+            defer { fixture.remove() }
+            let remote = change.hasPrefix("remote-")
+            let label = remote ? nodeLaunchdLabel : AppProfile.current.gatewayLaunchAgentLabel
+            let plist = remote
+                ? home.appendingPathComponent("Library/LaunchAgents/\(label).plist") : fixture.plist
+            let envDirectory = state.appendingPathComponent("service-env")
+            try FileManager.default.createDirectory(at: envDirectory, withIntermediateDirectories: true)
+            let environment = envDirectory.appendingPathComponent("\(label).env")
+            let wrapper = envDirectory.appendingPathComponent("\(label)-env-wrapper.sh")
+            try "export OPENCLAW_PREPARATION_FIXTURE_ROOT='\(fixture.root.path)'\n"
+                .write(to: environment, atomically: true, encoding: .utf8)
+            try Data("#!/bin/sh\n".utf8).write(to: wrapper)
+            let alias = fixture.root.appendingPathComponent("runtime-alias")
+            try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: fixture.nodeRoot)
+            let package = fixture.root.appendingPathComponent("package")
+            try FileManager.default.createDirectory(
+                at: package.appendingPathComponent("dist"),
+                withIntermediateDirectories: true)
+            try Data().write(to: package.appendingPathComponent("dist/index.js"))
+            let packageAlias = fixture.root.appendingPathComponent("package-alias")
+            try FileManager.default.createSymbolicLink(at: packageAlias, withDestinationURL: package)
+            let runtimeName = change == "terminal-wrapper" ? "bun" : "node"
+            if runtimeName == "bun" {
+                try FileManager.default.copyItem(
+                    at: fixture.nodeRoot.appendingPathComponent("bin/node"),
+                    to: fixture.nodeRoot.appendingPathComponent("bin/bun"))
+            }
+            let prefix = [
+                alias.appendingPathComponent("bin/\(runtimeName)").path,
+                "--max-old-space-size=512",
+                packageAlias.appendingPathComponent("dist/index.js").path,
+            ]
+            try PropertyListSerialization.data(fromPropertyList: [
+                "ProgramArguments": ["/bin/sh", wrapper.path, environment.path] + prefix +
+                    [remote ? "node" : "gateway"],
+            ], format: .xml, options: 0).write(to: plist)
+            let captured = try #require(remote
+                ? NodeServiceManager.installedServiceCLI(profile: AppProfile(environment: [:]))
+                : GatewayLaunchAgentManager.installedServiceCLI())
+            #expect(!captured.isInferredLegacyInstall)
+            let cli: GatewayLaunchAgentManager.InstalledServiceCLI
+            if remote {
+                cli = captured
+            } else {
+                let data = try GatewayLaunchAgentManager.resumeData(for: captured)
+                try FileManager.default.removeItem(at: plist)
+                cli = try GatewayLaunchAgentManager.resumeCLI(from: data, stateDirectory: state)
+            }
+            let marker = home.appendingPathComponent("disable-launchagent")
+            GatewayLaunchAgentManager.setTestingDisableLaunchAgentMarkerURL(marker)
+            defer { GatewayLaunchAgentManager.setTestingDisableLaunchAgentMarkerURL(nil) }
+            let replaceService: @Sendable () throws -> Void = {
+                try Data("operator replacement".utf8).write(to: plist)
+            }
+            if change == "before-entry-service" { try replaceService() }
+            var dispatched = false
+            let outcome = await CLIInstaller.updateManaged(
+                targetVersion: "2026.9.1", restartGateway: false, repair: repair, installedCLI: cli,
+                checkCurrent: {
+                    await Task.yield()
+                    switch change {
+                    case "attach-only", "remote-marker": try Data().write(to: marker)
+                    case "service", "remote-service": try replaceService()
+                    case "environment": try Data("export CHANGED='yes'\n".utf8).write(to: environment)
+                    case "runtime-alias":
+                        let replacement = fixture.root.appendingPathComponent("replacement-runtime")
+                        try FileManager.default.copyItem(at: fixture.nodeRoot, to: replacement)
+                        try FileManager.default.removeItem(at: alias)
+                        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: replacement)
+                    case "script-alias":
+                        let replacement = fixture.root.appendingPathComponent("replacement-package")
+                        try FileManager.default.copyItem(at: package, to: replacement)
+                        try FileManager.default.removeItem(at: packageAlias)
+                        try FileManager.default.createSymbolicLink(at: packageAlias, withDestinationURL: replacement)
+                    case "terminal-wrapper":
+                        let terminal = state.appendingPathComponent("bin/openclaw")
+                        try FileManager.default.createDirectory(
+                            at: terminal.deletingLastPathComponent(),
+                            withIntermediateDirectories: true)
+                        try Data("#!/bin/sh\nexec /operator/openclaw \"$@\"\n".utf8).write(to: terminal)
+                    default: break
+                    }
+                },
+                onDispatch: {
+                    dispatched = true
+                    if change == "late-policy" { AppDefaults.standard.set("dev", forKey: cliInstallPolicyKey) }
+                    if change == "late-service" {
+                        do { try replaceService() } catch { Issue.record(error) }
+                    }
+                }, statusHandler: { _ in
+                    if change == "policy" { AppDefaults.standard.set("beta", forKey: cliInstallPolicyKey) }
+                    if change.hasPrefix("channel-") {
+                        let channel = String(change.dropFirst("channel-".count))
+                        do {
+                            try JSONSerialization.data(withJSONObject: ["update": ["channel": channel]])
+                                .write(to: config)
+                        } catch { Issue.record(error) }
+                    }
+                })
+            let allowed = ["unchanged", "terminal-wrapper", "remote-marker", "initial-beta"].contains(change)
+            if allowed {
+                #expect(outcome == .success(fromVersion: "2026.8.1", toVersion: "2026.9.1"))
+                let command = try String(contentsOf: fixture.root.appendingPathComponent("updates"), encoding: .utf8)
+                #expect(command.contains("--max-old-space-size=512"))
+                #expect(command
+                    .contains(package.appendingPathComponent("dist/index.js").resolvingSymlinksInPath().path))
+                #expect(!command.contains("package-alias"))
+            } else {
+                guard case .failure = outcome else { Issue.record("Stale captured custody reached the updater")
+                    return
+                }
+                #expect(!FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("updates").path))
+            }
+            #expect(dispatched == (allowed || ["late-service", "late-policy"].contains(change)))
+        }
+    }
+
+    @Test(arguments: ["install", "uninstall", "restart", "status"], ["unchanged", "service", "attach-only"])
+    func `gateway daemon mutations recheck service custody after command resolution`(
+        verb: String, change: String) async throws
+    {
+        let home = try makeTempDirForTests()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try await TestIsolation.withIsolatedState(launchAgentHomeDirectory: home) {
+            let fixture = try Fixture(home: home)
+            defer { fixture.remove() }
+            let marker = home.appendingPathComponent("disable-launchagent")
+            GatewayLaunchAgentManager.setTestingDisableLaunchAgentMarkerURL(marker)
+            GatewayLaunchAgentManager.clearTestingDaemonCommandCalls()
+            GatewayLaunchAgentManager.setTestingInterceptDaemonCommands(true, resolveCLI: { _, _ in
+                await Task.yield()
+                do {
+                    if change == "service" { try Data("operator replacement".utf8).write(to: fixture.plist) }
+                    if change == "attach-only" { try Data().write(to: marker) }
+                } catch { Issue.record(error) }
+                return .executable(fixture.cli.prefix)
+            })
+            defer {
+                GatewayLaunchAgentManager.setTestingInterceptDaemonCommands(false)
+                GatewayLaunchAgentManager.setTestingDisableLaunchAgentMarkerURL(nil)
+                GatewayLaunchAgentManager.clearTestingDaemonCommandCalls()
+            }
+            let error = await GatewayLaunchAgentManager.runDaemonCommand([verb])
+            let allowed = verb == "status" || change == "unchanged"
+            #expect((error == nil) == allowed)
+            #expect(GatewayLaunchAgentManager.testingDaemonCommandCallsSnapshot() == (allowed ? [[verb]] : []))
+        }
+    }
+
+    @Test func `saved concrete runtime identity is not recaptured through a replacement alias`() async throws {
+        let home = try makeTempDirForTests()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try await TestIsolation.withIsolatedState(launchAgentHomeDirectory: home) {
+            let fixture = try Fixture(home: home)
+            defer { fixture.remove() }
+            let captured = try #require(GatewayLaunchAgentManager.installedServiceCLI())
+            let saved = try GatewayLaunchAgentManager.resumeData(for: captured)
+            try FileManager.default.removeItem(at: fixture.plist)
+            let replacement = fixture.root.appendingPathComponent("replacement-runtime")
+            try FileManager.default.moveItem(at: fixture.nodeRoot, to: replacement)
+            try FileManager.default.createSymbolicLink(at: fixture.nodeRoot, withDestinationURL: replacement)
+            #expect(throws: GatewayHostingError.self) {
+                try GatewayLaunchAgentManager.resumeCLI(from: saved, stateDirectory: fixture.state)
+            }
+            #expect(!FileManager.default.fileExists(atPath: fixture.root.appendingPathComponent("updates").path))
+        }
+    }
+
     @Test(arguments: ["initial", "seeded-retry", "paused-retry", "partial-ready"])
     func `bundled setup updates the actual legacy service and retries through its updater`(
         scenario: String) async throws
@@ -170,12 +358,21 @@ struct BundledGatewayPreparationTests {
                 try FileManager.default.removeItem(at: fixture.plist)
             }
             let current = AppProfile.current.stateDirectoryURL().appendingPathComponent("runtime/current")
+            let runtimeDirectory = current.deletingLastPathComponent()
+            let runtimeDirectoryExisted = FileManager.default.fileExists(atPath: runtimeDirectory.path)
             if scenario != "initial" {
                 try FileManager.default.createDirectory(
                     at: current.deletingLastPathComponent(), withIntermediateDirectories: true)
                 try FileManager.default.createSymbolicLink(atPath: current.path, withDestinationPath: "existing-build")
             }
-            defer { if scenario != "initial" { try? FileManager.default.removeItem(at: current) } }
+            defer {
+                if scenario != "initial" { try? FileManager.default.removeItem(at: current) }
+                if !runtimeDirectoryExisted,
+                   (try? FileManager.default.contentsOfDirectory(atPath: runtimeDirectory.path).isEmpty) == true
+                {
+                    try? FileManager.default.removeItem(at: runtimeDirectory)
+                }
+            }
             let original = GatewayLaunchAgentManager.launchdConfigSnapshot()
             let failure = fixture.root.appendingPathComponent("fail")
             if scenario == "partial-ready" { try Data().write(to: fixture.root.appendingPathComponent("advance")) }

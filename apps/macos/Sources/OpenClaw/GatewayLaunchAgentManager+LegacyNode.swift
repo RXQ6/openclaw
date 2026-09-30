@@ -51,12 +51,14 @@ extension GatewayLaunchAgentManager {
                 wrapperURL: artifacts.wrapper)
         }
         // Inferred argv is also authority: keep its physical paths across awaits and relaunches.
-        return InstalledServiceCLI(
+        return try InstalledServiceCLI(
             prefix: command.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path },
             sqliteLibrary: environment["OPENCLAW_SQLITE_LIBRARY"],
             environment: environment,
             usesGeneratedEnvironment: hasEnvironment,
-            isInferredLegacyInstall: true)
+            isInferredLegacyInstall: true,
+            serviceAuthority: self.gatewayServiceAuthority(
+                stateDirectory: state, profile: profile, homeDirectory: homeDirectory))
     }
 
     static func legacyServiceAuthorityError(for cli: InstalledServiceCLI) -> String? {

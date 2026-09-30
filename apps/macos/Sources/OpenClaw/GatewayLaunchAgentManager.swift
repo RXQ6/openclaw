@@ -14,6 +14,8 @@ enum GatewayLaunchAgentManager {
         var usesGeneratedEnvironment = false
         var hadRuntimePin = false
         var isInferredLegacyInstall = false
+        var sourcePrefix: [String]?
+        var serviceAuthority: ServiceAuthority?
     }
 
     private static let logger = Logger(subsystem: "ai.openclaw", category: "gateway.launchd")
@@ -203,6 +205,8 @@ enum GatewayLaunchAgentManager {
             return nil
         }
 
+        let custody: ServiceAuthority
+        do { custody = try self.gatewayServiceAuthority() } catch { return error.localizedDescription }
         if enabled {
             self.logger.info("launchd enable requested via CLI port=\(port)")
             let existing = self.launchdConfigSnapshot()
@@ -226,7 +230,9 @@ enum GatewayLaunchAgentManager {
                 }
                 installedCLI = cli
             } else {
-                installedCLI = existed ? nil : whenMissingCLI
+                do {
+                    installedCLI = try existed ? nil : whenMissingCLI.map { try self.resumedServiceCLI($0) }
+                } catch { return error.localizedDescription }
             }
             let runtime: BundledRuntime?
             do {
@@ -239,6 +245,7 @@ enum GatewayLaunchAgentManager {
             guard !self.isLaunchAgentWriteDisabled(),
                   !CommandResolver.connectionModeIsRemote() || allowUnconfigured
             else { return nil }
+            if let error = custody.currentError() { return error }
             if BundledRuntime.isBundledApp {
                 guard FileManager.default.fileExists(atPath: self.plistURL.path) == existed,
                       self.launchdConfigSnapshot() == existing
@@ -258,7 +265,7 @@ enum GatewayLaunchAgentManager {
                 if preserved.hadRuntimePin ||
                     !self.isManagedNode(executable, stateDirectory: AppProfile.current.stateDirectoryURL())
                 {
-                    arguments += ["--runtime-path", executable]
+                    arguments += ["--runtime-path", preserved.sourcePrefix?.first ?? executable]
                 }
             }
             return await self.runDaemonCommand(arguments, runtime: runtime, installedCLI: installedCLI)
@@ -310,6 +317,8 @@ enum GatewayLaunchAgentManager {
         allowUnconfigured: Bool = false) async -> String?
     {
         guard !self.isLaunchAgentWriteDisabled() else { return "Gateway service changes are disabled" }
+        let custody: ServiceAuthority
+        do { custody = try self.gatewayServiceAuthority() } catch { return error.localizedDescription }
         let snapshot = self.launchdConfigSnapshot()
         let exists = FileManager.default.fileExists(atPath: self.plistURL.path)
         if let snapshot {
@@ -343,6 +352,7 @@ enum GatewayLaunchAgentManager {
             }
         }
         guard !Task.isCancelled else { return "Gateway service update was cancelled" }
+        if let error = custody.currentError() { return error }
         guard !self.isLaunchAgentWriteDisabled(),
               FileManager.default.fileExists(atPath: self.plistURL.path) == exists,
               self.launchdConfigSnapshot() == snapshot
@@ -378,12 +388,10 @@ enum GatewayLaunchAgentManager {
     static func installedServiceCLI() -> InstalledServiceCLI? {
         let artifacts = self.generatedEnvironmentArtifacts(
             directory: self.generatedEnvironmentDirectoryURL, profile: .current)
-        return self.launchdConfigSnapshot().flatMap {
-            self.installedServiceCLI(
-                snapshot: $0,
-                environmentFile: artifacts.environment,
-                environmentWrapper: artifacts.wrapper)
-        }
+        return self.captureServiceCLI(
+            plist: self.plistURL,
+            environmentFile: artifacts.environment,
+            environmentWrapper: artifacts.wrapper)
     }
 
     static func installedServiceCLI(
@@ -412,11 +420,12 @@ enum GatewayLaunchAgentManager {
                 ["index.js", "index.mjs", "entry.js", "entry.mjs"].contains(url.lastPathComponent))
         else { return nil }
         return InstalledServiceCLI(
-            prefix: prefix,
+            prefix: self.concreteServicePrefix(prefix),
             sqliteLibrary: snapshot.environment["OPENCLAW_SQLITE_LIBRARY"],
             environment: snapshot.environment,
             usesGeneratedEnvironment: snapshot.programArguments.first == "/bin/sh" ||
-                snapshot.programArguments.first == environmentWrapper.path)
+                snapshot.programArguments.first == environmentWrapper.path,
+            sourcePrefix: prefix)
     }
 
     static func kickstart() async -> String? {
@@ -569,12 +578,18 @@ extension GatewayLaunchAgentManager {
         legacyAuthority: InstalledServiceCLI? = nil) async -> CommandResult
     {
         let beforeSpawn: (@Sendable () -> String?)?
-        if args.first == "install" {
+        if args.first.map(["install", "uninstall", "restart"].contains) == true {
+            let custody: ServiceAuthority
+            do { custody = try self.gatewayServiceAuthority() } catch {
+                return CommandResult(success: false, payload: nil, message: error.localizedDescription)
+            }
             let authority = legacyAuthority ?? installedCLI
             beforeSpawn = {
                 guard !self.isLaunchAgentWriteDisabled() else { return "Gateway service changes are disabled" }
+                if let error = custody.currentError() { return error }
+                if let installedCLI, let error = self.serviceCommandPathError(for: installedCLI) { return error }
                 guard let authority else { return nil }
-                return self.legacyServiceAuthorityError(for: authority)
+                return self.serviceCommandPathError(for: authority) ?? self.legacyServiceAuthorityError(for: authority)
             }
         } else {
             beforeSpawn = nil

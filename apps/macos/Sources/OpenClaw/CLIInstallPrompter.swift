@@ -346,7 +346,7 @@ final class CLIInstallPrompter {
     /// Shared gate for auto-repair and the dashboard's native update bridge.
     /// If these drift apart, the card can route to Sparkle while the
     /// post-relaunch gateway repair refuses, stranding an old gateway.
-    static func managedRepairGatesOpen(
+    nonisolated static func managedRepairGatesOpen(
         launchAgentUsesManagedCLI: Bool,
         gatewayUpdateChannel: String?,
         installPolicy: String?,

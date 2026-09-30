@@ -9,6 +9,7 @@ extension GatewayLaunchAgentManager {
         let usesGeneratedEnvironment: Bool?
         let hadRuntimePin: Bool?
         let isInferredLegacyInstall: Bool?
+        let sourcePrefix: [String]?
     }
 
     static func resumeData(for cli: InstalledServiceCLI) throws -> Data {
@@ -18,10 +19,22 @@ extension GatewayLaunchAgentManager {
             sqliteLibrary: cli.sqliteLibrary,
             usesGeneratedEnvironment: cli.usesGeneratedEnvironment,
             hadRuntimePin: cli.hadRuntimePin,
-            isInferredLegacyInstall: cli.isInferredLegacyInstall ? true : nil))
+            isInferredLegacyInstall: cli.isInferredLegacyInstall ? true : nil,
+            sourcePrefix: cli.sourcePrefix))
     }
 
     static func resumeCLI(
+        from data: Data,
+        stateDirectory: URL,
+        profile: AppProfile = .current) throws -> InstalledServiceCLI
+    {
+        try self.resumedServiceCLI(
+            self.retainedServiceIntent(from: data, stateDirectory: stateDirectory, profile: profile),
+            stateDirectory: stateDirectory,
+            profile: profile)
+    }
+
+    static func retainedServiceIntent(
         from data: Data,
         stateDirectory: URL,
         profile: AppProfile = .current) throws -> InstalledServiceCLI
@@ -59,15 +72,23 @@ extension GatewayLaunchAgentManager {
             bind: nil,
             token: nil,
             password: nil)
-        guard var cli = self.installedServiceCLI(
-            snapshot: snapshot, environmentFile: artifacts.environment, environmentWrapper: artifacts.wrapper)
+        guard self.installedServiceCLI(
+            snapshot: snapshot, environmentFile: artifacts.environment, environmentWrapper: artifacts.wrapper) != nil
         else {
             throw GatewayHostingError(
                 message: "The retained Gateway entrypoint is invalid; repair its managed installation.")
         }
-        cli.usesGeneratedEnvironment = command.usesGeneratedEnvironment == true
-        cli.hadRuntimePin = command.hadRuntimePin == true
-        cli.isInferredLegacyInstall = command.isInferredLegacyInstall == true
+        // These paths were frozen before persistence. Re-resolving them here would adopt a
+        // retargeted runtime/package directory before the dispatch guard could detect it.
+        let cli = InstalledServiceCLI(
+            prefix: command.prefix,
+            sqliteLibrary: command.sqliteLibrary,
+            environment: environment,
+            usesGeneratedEnvironment: command.usesGeneratedEnvironment == true,
+            hadRuntimePin: command.hadRuntimePin == true,
+            isInferredLegacyInstall: command.isInferredLegacyInstall == true,
+            sourcePrefix: command.sourcePrefix)
+        if let error = self.serviceCommandPathError(for: cli) { throw GatewayHostingError(message: error) }
         return cli
     }
 
@@ -92,7 +113,8 @@ extension GatewayLaunchAgentManager {
             sqliteLibrary: runtime.sqliteLibrary.path,
             environment: environment,
             usesGeneratedEnvironment: cli.usesGeneratedEnvironment,
-            hadRuntimePin: cli.hadRuntimePin)
+            hadRuntimePin: cli.hadRuntimePin,
+            serviceAuthority: cli.serviceAuthority)
     }
 
     static func isWithinState(_ path: String, stateDirectory: URL) -> Bool {

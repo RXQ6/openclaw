@@ -183,12 +183,14 @@ final class GatewayProcessManager {
     }
 
     enum ActivationSource {
-        case request
-        case recovery
+        case request, recovery
     }
 
     func setActive(_ active: Bool, source: ActivationSource = .request) {
         guard !self.isTerminating else { return }
+        if active, source == .recovery {
+            guard self.desiredActive, !AppStateStore.shared.isPaused else { return }
+        }
         if CommandResolver.connectionModeIsRemote(), !self.hostsLocalGatewayWithRemotePrimary {
             self.desiredActive = false
             self.stop()
@@ -1374,6 +1376,7 @@ extension GatewayProcessManager {
             self.status = .starting
             self.appendLog("[gateway] child exited; restarting in \(delay)\n")
         case let .failed(reason):
+            self.desiredActive = false
             self.status = .failed(reason)
             self.lastFailureReason = reason
             self.appendLog("[gateway] \(reason)\n")

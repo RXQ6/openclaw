@@ -37,15 +37,11 @@ enum NodeServiceManager {
         let directory = OpenClawPaths.stateDirURL.appendingPathComponent("service-env", isDirectory: true)
         let environmentFile = directory.appendingPathComponent("\(nodeLaunchdLabel).env")
         let wrapper = directory.appendingPathComponent("\(nodeLaunchdLabel)-env-wrapper.sh")
-        guard let snapshot = LaunchAgentPlist.snapshot(
-            url: self.launchdPlistURL,
-            generatedEnvironmentFileURL: environmentFile,
-            generatedEnvironmentWrapperURL: wrapper),
-            let cli = GatewayLaunchAgentManager.installedServiceCLI(
-                snapshot: snapshot,
-                environmentFile: environmentFile,
-                environmentWrapper: wrapper,
-                subcommand: "node")
+        guard let cli = GatewayLaunchAgentManager.captureServiceCLI(
+            plist: self.launchdPlistURL,
+            environmentFile: environmentFile,
+            environmentWrapper: wrapper,
+            subcommand: "node")
         else { return nil }
         if cli.usesGeneratedEnvironment {
             guard FileManager.default.isReadableFile(atPath: environmentFile.path),

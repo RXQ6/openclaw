@@ -22,6 +22,26 @@ enum CLIInstallBuild {
 }
 
 enum CLIInstallPolicy {
+    struct ManagedUpdateSelection: Equatable, Sendable {
+        let installPolicy: String?
+        let gatewayUpdateChannel: String?
+    }
+
+    static func managedUpdateSelection() -> ManagedUpdateSelection {
+        ManagedUpdateSelection(
+            installPolicy: self.storedPolicy(),
+            gatewayUpdateChannel: OpenClawConfigFile.gatewayUpdateChannel())
+    }
+
+    static func permitsManagedUpdate(_ captured: ManagedUpdateSelection) -> Bool {
+        let current = self.managedUpdateSelection()
+        return current == captured && CLIInstallPrompter.managedRepairGatesOpen(
+            launchAgentUsesManagedCLI: true,
+            gatewayUpdateChannel: current.gatewayUpdateChannel,
+            installPolicy: current.installPolicy,
+            launchAgentWriteDisabled: false)
+    }
+
     static func storedPolicy(defaults: UserDefaults = AppDefaults.standard) -> String? {
         defaults.string(forKey: cliInstallPolicyKey)
     }
@@ -597,12 +617,8 @@ enum CLIInstaller {
                 searchPaths: CommandResolver.preferredPaths())
         } ?? self.probeEnvironment(location: executable)
         let beforeSpawn: @Sendable () -> String? = {
-            // The local Gateway marker does not own captured remote node service updates.
-            guard let installedCLI, installedCLI.isInferredLegacyInstall else { return nil }
-            guard !GatewayLaunchAgentManager.isLaunchAgentWriteDisabled() else {
-                return "Gateway service changes are disabled"
-            }
-            return GatewayLaunchAgentManager.legacyServiceAuthorityError(for: installedCLI)
+            guard let installedCLI else { return nil }
+            return GatewayLaunchAgentManager.serviceUpdateAuthorityError(for: installedCLI)
         }
         do { try await checkCurrent?() } catch {
             let message = String(localized: "Gateway update failed.")

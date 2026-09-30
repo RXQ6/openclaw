@@ -118,7 +118,9 @@ extension GatewayProcessManager {
     }
 
     func serviceCLIForResume() throws -> GatewayLaunchAgentManager.InstalledServiceCLI? {
-        if let retainedServiceCLI { return retainedServiceCLI }
+        if let retainedServiceCLI {
+            return try GatewayLaunchAgentManager.resumedServiceCLI(retainedServiceCLI)
+        }
         guard let stored = AppDefaults.standard.object(forKey: GatewayLaunchAgentManager.resumeCommandKey) else {
             guard !AppDefaults.standard.bool(forKey: pauseDefaultsKey),
                   try self.hasUnrecordedLegacyManagedService() else { return nil }
@@ -134,6 +136,8 @@ extension GatewayProcessManager {
     func loadRetainedServiceForResume() throws {
         guard self.retainedServiceCLI == nil else { return }
         try self.initializeGatewayHosting()
+        // An installed service has its own current command; a saved pause record does not supersede it.
+        guard GatewayLaunchAgentManager.launchdProgramArguments()?.isEmpty == true else { return }
         if let cli = try self.serviceCLIForResume() { self.retainedServiceCLI = cli }
     }
 
@@ -142,18 +146,15 @@ extension GatewayProcessManager {
               let snapshot = GatewayLaunchAgentManager.launchdConfigSnapshot()
         else { return }
         let state = AppProfile.current.stateDirectoryURL()
-        let artifacts = GatewayLaunchAgentManager.generatedEnvironmentArtifacts(
-            directory: state.appendingPathComponent("service-env"), profile: .current)
-        guard var cli = GatewayLaunchAgentManager.installedServiceCLI(
-            snapshot: snapshot, environmentFile: artifacts.environment, environmentWrapper: artifacts.wrapper)
+        guard var cli = GatewayLaunchAgentManager.installedServiceCLI()
         else { return }
         let pin = try await GatewayLaunchAgentManager.runtimePinRecord(stateDirectory: state, profile: .current)
         guard try await GatewayLaunchAgentManager.runtimePinRecord(stateDirectory: state, profile: .current) == pin,
               GatewayLaunchAgentManager.launchdConfigSnapshot() == snapshot
         else { throw GatewayHostingError(message: "The Gateway service changed before pausing; retry.") }
         cli.hadRuntimePin = pin != nil
-        let data = try GatewayLaunchAgentManager.resumeData(for: cli)
-        _ = try GatewayLaunchAgentManager.resumeCLI(from: data, stateDirectory: state)
+        _ = try GatewayLaunchAgentManager.retainedServiceIntent(
+            from: GatewayLaunchAgentManager.resumeData(for: cli), stateDirectory: state)
         self.retainedServiceCLI = cli
     }
 
