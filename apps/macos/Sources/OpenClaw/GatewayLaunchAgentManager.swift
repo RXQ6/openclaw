@@ -13,6 +13,7 @@ enum GatewayLaunchAgentManager {
         var environment: [String: String] = [:]
         var usesGeneratedEnvironment = false
         var hadRuntimePin = false
+        var isInferredLegacyInstall = false
     }
 
     private static let logger = Logger(subsystem: "ai.openclaw", category: "gateway.launchd")
@@ -545,10 +546,16 @@ extension GatewayLaunchAgentManager {
         timeout: Double = Self.startupMigrationTolerance,
         quiet: Bool = false,
         runtime: BundledRuntime? = nil,
-        installedCLI: InstalledServiceCLI? = nil) async -> String?
+        installedCLI: InstalledServiceCLI? = nil,
+        legacyAuthority: InstalledServiceCLI? = nil) async -> String?
     {
         let result = await self.runDaemonCommandResult(
-            args, timeout: timeout, quiet: quiet, runtime: runtime, installedCLI: installedCLI)
+            args,
+            timeout: timeout,
+            quiet: quiet,
+            runtime: runtime,
+            installedCLI: installedCLI,
+            legacyAuthority: legacyAuthority)
         if result.success { return nil }
         return result.message ?? "Gateway daemon command failed"
     }
@@ -558,12 +565,25 @@ extension GatewayLaunchAgentManager {
         timeout: Double,
         quiet: Bool,
         runtime: BundledRuntime? = nil,
-        installedCLI: InstalledServiceCLI? = nil) async -> CommandResult
+        installedCLI: InstalledServiceCLI? = nil,
+        legacyAuthority: InstalledServiceCLI? = nil) async -> CommandResult
     {
+        let beforeSpawn: (@Sendable () -> String?)?
+        if args.first == "install" {
+            let authority = legacyAuthority ?? installedCLI
+            beforeSpawn = {
+                guard !self.isLaunchAgentWriteDisabled() else { return "Gateway service changes are disabled" }
+                guard let authority else { return nil }
+                return self.legacyServiceAuthorityError(for: authority)
+            }
+        } else {
+            beforeSpawn = nil
+        }
         #if DEBUG
         if let resolveCLI = self.testingState.withLock({ $0.resolveCLI }) {
             let command = await self.daemonCommand(
                 args, runtime: runtime, installedCLI: installedCLI, resolveCLI: resolveCLI)
+            if let error = beforeSpawn?() { return CommandResult(success: false, payload: nil, message: error) }
             // Snapshot each response and remove it from the queue before a hook can suspend
             // or reenter. Commands run off-actor while tests read their call snapshots.
             let (hook, payload) = self.testingState.withLock { state in
@@ -598,7 +618,9 @@ extension GatewayLaunchAgentManager {
             environment: ProcessInfo.processInfo.environment,
             profile: .current,
             searchPaths: CommandResolver.preferredPaths())
-        let response = await ShellExecutor.runDetailed(command: command, cwd: nil, env: env, timeout: timeout)
+        let response = await ShellExecutor.runDetailed(
+            command: command, cwd: nil, env: env, timeout: timeout, beforeSpawn: beforeSpawn)
+        if let error = response.preflightError { return CommandResult(success: false, payload: nil, message: error) }
         let parsed = JSONObjectExtractionSupport.extract(from: response.stdout)
             ?? JSONObjectExtractionSupport.extract(from: response.stderr)
         let ok = parsed?.object["ok"] as? Bool

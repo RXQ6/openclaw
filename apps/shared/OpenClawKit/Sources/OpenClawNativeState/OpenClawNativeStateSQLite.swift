@@ -216,6 +216,7 @@ public final class OpenClawNativeStateSQLite: @unchecked Sendable {
     private let readOnly: Bool
     private let admission: OpenClawNativeStateAdmission
     private let databaseIdentity: OpenClawNativeStateAdmission.DatabaseIdentity
+    private var admittedConfigMachineStateAvailable: Bool?
     fileprivate let database: OpaquePointer
     fileprivate let connectionLock = NSRecursiveLock()
 
@@ -256,7 +257,11 @@ public final class OpenClawNativeStateSQLite: @unchecked Sendable {
         }
         try self.admission.assertAvailable()
         try self.assertCurrentDatabase()
-        if !readOnly { try Self.secureDatabaseFiles(databaseURL) }
+        if readOnly {
+            self.admittedConfigMachineStateAvailable = try self.admitReadOnlySchema()
+        } else {
+            try Self.secureDatabaseFiles(databaseURL)
+        }
         initializationSucceeded = true
     }
 
@@ -333,21 +338,13 @@ public final class OpenClawNativeStateSQLite: @unchecked Sendable {
         }
     }
 
-    /// A one-shot admission and read for native lifecycle decisions; core remains the value writer.
+    /// Uses the read-only handle's admitted schema; core remains the value writer.
     public func configMachineStateValue(key: String) throws -> OpenClawNativeStateConfigValue? {
         try self.withCurrentDatabase {
-            let version = try self.scalarInt64("PRAGMA user_version")
-            guard version <= Self.maximumSupportedSchemaVersion else {
-                throw OpenClawNativeStateError("The shared state database requires a newer OpenClaw app")
+            guard let available = self.admittedConfigMachineStateAvailable else {
+                throw OpenClawNativeStateError("Config machine-state reads require a read-only database handle")
             }
-            if version == 0 {
-                try self.validateVersionZeroOwnership()
-                return nil
-            }
-            try self.validateSharedDatabaseMetadata(userVersion: version)
-            guard try self.schemaObjectExists(type: "table", name: "config_machine_state") else {
-                throw OpenClawNativeStateError("The shared state database is missing config_machine_state")
-            }
+            guard available else { return nil }
             let query = try self.prepare(
                 "SELECT value_json, updated_at_ms FROM config_machine_state WHERE state_key = ? LIMIT 1")
             try query.bindText(key, at: 1)
@@ -469,6 +466,22 @@ public final class OpenClawNativeStateSQLite: @unchecked Sendable {
         case .execApprovalsConfig: self.execApprovalsConfig
         case .macosPortGuardianRecords: self.macosPortGuardianRecords
         }
+    }
+
+    private func admitReadOnlySchema() throws -> Bool {
+        let version = try self.scalarInt64("PRAGMA user_version")
+        guard version <= Self.maximumSupportedSchemaVersion else {
+            throw OpenClawNativeStateError("The shared state database requires a newer OpenClaw app")
+        }
+        if version == 0 {
+            try self.validateVersionZeroOwnership()
+            return false
+        }
+        try self.validateSharedDatabaseMetadata(userVersion: version)
+        guard try self.schemaObjectExists(type: "table", name: "config_machine_state") else {
+            throw OpenClawNativeStateError("The shared state database is missing config_machine_state")
+        }
+        return true
     }
 
     private func validateVersionZeroOwnership() throws {

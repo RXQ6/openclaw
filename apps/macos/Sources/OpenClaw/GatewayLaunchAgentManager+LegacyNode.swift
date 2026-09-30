@@ -50,11 +50,28 @@ extension GatewayLaunchAgentManager {
                 fileURL: artifacts.environment,
                 wrapperURL: artifacts.wrapper)
         }
+        // Inferred argv is also authority: keep its physical paths across awaits and relaunches.
         return InstalledServiceCLI(
-            prefix: command,
+            prefix: command.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path },
             sqliteLibrary: environment["OPENCLAW_SQLITE_LIBRARY"],
             environment: environment,
-            usesGeneratedEnvironment: hasEnvironment)
+            usesGeneratedEnvironment: hasEnvironment,
+            isInferredLegacyInstall: true)
+    }
+
+    static func legacyServiceAuthorityError(for cli: InstalledServiceCLI) -> String? {
+        guard cli.isInferredLegacyInstall else { return nil }
+        let message = "The legacy Gateway installation changed during setup; retry."
+        guard !CommandResolver.connectionModeIsRemote(),
+              [nil, "exact"].contains(CLIInstallPolicy.storedPolicy()) else { return message }
+        do {
+            guard case let .managed(command) = try self.legacyNodeInstallation(
+                profile: .current, homeDirectory: LaunchAgentPlist.homeDirectoryURL) else { return message }
+            // Seeding may replace our wrapper with the bundled shim; the surviving Node package
+            // still proves ownership. An operator wrapper or different package cannot authorize it.
+            let currentPaths = command.map { URL(fileURLWithPath: $0).resolvingSymlinksInPath().path }
+            return currentPaths == cli.prefix ? nil : message
+        } catch { return message }
     }
 
     private static func legacyNodeInstallation(

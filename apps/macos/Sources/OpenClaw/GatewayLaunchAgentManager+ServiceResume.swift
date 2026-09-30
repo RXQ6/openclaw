@@ -8,6 +8,7 @@ extension GatewayLaunchAgentManager {
         let sqliteLibrary: String?
         let usesGeneratedEnvironment: Bool?
         let hadRuntimePin: Bool?
+        let isInferredLegacyInstall: Bool?
     }
 
     static func resumeData(for cli: InstalledServiceCLI) throws -> Data {
@@ -16,7 +17,8 @@ extension GatewayLaunchAgentManager {
             prefix: cli.prefix,
             sqliteLibrary: cli.sqliteLibrary,
             usesGeneratedEnvironment: cli.usesGeneratedEnvironment,
-            hadRuntimePin: cli.hadRuntimePin))
+            hadRuntimePin: cli.hadRuntimePin,
+            isInferredLegacyInstall: cli.isInferredLegacyInstall ? true : nil))
     }
 
     static func resumeCLI(
@@ -65,6 +67,7 @@ extension GatewayLaunchAgentManager {
         }
         cli.usesGeneratedEnvironment = command.usesGeneratedEnvironment == true
         cli.hadRuntimePin = command.hadRuntimePin == true
+        cli.isInferredLegacyInstall = command.isInferredLegacyInstall == true
         return cli
     }
 

@@ -57,6 +57,31 @@ struct GatewayServiceRuntimeTests {
         #expect(try GatewayLaunchAgentManager.legacyNodeInstallIsExternal(profile: profile, homeDirectory: home))
     }
 
+    @MainActor
+    @Test func `attach-only withdrawal blocks captured service install but permits inspection`() async throws {
+        let home = try makeTempDirForTests()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try await TestIsolation.withIsolatedState(launchAgentHomeDirectory: home) {
+            let marker = home.appendingPathComponent("disable-launchagent")
+            GatewayLaunchAgentManager.setTestingDisableLaunchAgentMarkerURL(marker)
+            GatewayLaunchAgentManager.setTestingInterceptDaemonCommands(true)
+            GatewayLaunchAgentManager.clearTestingDaemonCommandCalls()
+            defer {
+                GatewayLaunchAgentManager.setTestingDisableLaunchAgentMarkerURL(nil)
+                GatewayLaunchAgentManager.setTestingInterceptDaemonCommands(false)
+                GatewayLaunchAgentManager.clearTestingDaemonCommandCalls()
+            }
+            let captured = GatewayLaunchAgentManager.InstalledServiceCLI(
+                prefix: ["/operator/node", "/operator/openclaw.mjs"], sqliteLibrary: nil, hadRuntimePin: true)
+            try Data().write(to: marker)
+            #expect(await GatewayLaunchAgentManager.runDaemonCommand(["install", "--force"], installedCLI: captured) ==
+                "Gateway service changes are disabled")
+            #expect(await GatewayLaunchAgentManager
+                .runDaemonCommand(["status", "--json"], installedCLI: captured) == nil)
+            #expect(GatewayLaunchAgentManager.testingDaemonCommandCallsSnapshot() == [["status", "--json"]])
+        }
+    }
+
     @Test func `fresh and replacement installs pin the selected bundled runtime`() {
         let runtime = BundledRuntime(root: URL(fileURLWithPath: "/profile/runtime/build-two"))
         for (exists, replace, expectedPin) in [

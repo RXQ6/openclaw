@@ -335,29 +335,7 @@ struct GatewayProcessManagerTests {
             }
             if policy != "unset" { defaults.set(policy, forKey: cliInstallPolicyKey) }
             let managed = ["exact", "unset"].contains(policy)
-            let state = AppProfile.current.stateDirectoryURL(homeDirectory: LaunchAgentPlist.homeDirectoryURL)
-            setenv("OPENCLAW_STATE_DIR", state.path, 1)
-            let node = state.appendingPathComponent("tools/node/bin/node")
-            let package = state.appendingPathComponent("tools/node/lib/node_modules/openclaw")
-            let entry = package.appendingPathComponent("dist/entry.js")
-            let wrapper = state.appendingPathComponent("bin/openclaw")
-            for directory in [
-                node.deletingLastPathComponent(),
-                entry.deletingLastPathComponent(),
-                wrapper.deletingLastPathComponent(),
-            ] {
-                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            }
-            try Data("#!/bin/sh\nexit 91\n".utf8).write(to: node)
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: node.path)
-            try Data("// legacy package fixture\n".utf8).write(to: entry)
-            try Data(#"{"name":"openclaw","version":"2026.9.7"}"#.utf8)
-                .write(to: package.appendingPathComponent("package.json"))
-            if !packageOnly {
-                try Data(("#!/usr/bin/env bash\nset -euo pipefail\nexec \"" + node.path + "\" \"" + entry
-                        .path + "\" \"$@\"\n").utf8)
-                    .write(to: wrapper)
-            }
+            let (state, node, entry, wrapper) = try self.makeLegacyNodeInstall(packageOnly: packageOnly)
             let manager = GatewayProcessManager()
             if !BundledRuntime.isBundledApp {
                 try manager.initializeGatewayHosting()
@@ -379,12 +357,13 @@ struct GatewayProcessManagerTests {
             let resumed = GatewayProcessManager()
             if managed {
                 let cli = try #require(try resumed.serviceCLIForResume())
-                #expect(cli.prefix == [node.path, entry.path])
+                let expectedPrefix = [node, entry].map { $0.resolvingSymlinksInPath().path }
+                #expect(cli.prefix == expectedPrefix)
                 #expect(!cli.hadRuntimePin)
                 #expect(await resumed._testEnableLaunchAgentIfNeededInstalled(port: 29871))
                 let install = try #require(GatewayLaunchAgentManager.testingResolvedDaemonCommandsSnapshot()
                     .first { $0.contains("install") })
-                #expect(Array(install.prefix(2)) == [node.path, entry.path])
+                #expect(Array(install.prefix(2)) == expectedPrefix)
                 #expect(!install.contains("bun"))
                 defaults.removeObject(forKey: GatewayLaunchAgentManager.resumeCommandKey)
                 defaults.removeObject(forKey: GatewayHosting.defaultsKey)
@@ -411,6 +390,95 @@ struct GatewayProcessManagerTests {
             #expect(external.installation == .external)
             #expect(defaults.object(forKey: GatewayHosting.defaultsKey) == nil)
             #expect(try external.serviceCLIForResume() == nil)
+        }
+    }
+
+    private func makeLegacyNodeInstall(packageOnly: Bool = false) throws -> (URL, URL, URL, URL) {
+        let state = AppProfile.current.stateDirectoryURL(homeDirectory: LaunchAgentPlist.homeDirectoryURL)
+        setenv("OPENCLAW_STATE_DIR", state.path, 1)
+        let node = state.appendingPathComponent("tools/node/bin/node")
+        let package = state.appendingPathComponent("tools/node/lib/node_modules/openclaw")
+        let entry = package.appendingPathComponent("dist/entry.js")
+        let wrapper = state.appendingPathComponent("bin/openclaw")
+        for directory in [
+            node.deletingLastPathComponent(),
+            entry.deletingLastPathComponent(),
+            wrapper.deletingLastPathComponent(),
+        ] {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        }
+        try Data("#!/bin/sh\nexit 91\n".utf8).write(to: node)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: node.path)
+        try Data("// legacy package fixture\n".utf8).write(to: entry)
+        try Data(#"{"name":"openclaw","version":"2026.9.7"}"#.utf8)
+            .write(to: package.appendingPathComponent("package.json"))
+        if !packageOnly {
+            try Data(("#!/usr/bin/env bash\nset -euo pipefail\nexec \"" + node.path + "\" \"" + entry
+                    .path + "\" \"$@\"\n").utf8)
+                .write(to: wrapper)
+        }
+        return (state, node, entry, wrapper)
+    }
+
+    @Test(arguments: ["operator-wrapper", "runtime-alias"])
+    func `legacy resume rejects changed file authority during status inspection`(_ change: String) async throws {
+        guard BundledRuntime.isBundledApp else { return }
+        let port = AppProfile.current.defaultGatewayPort
+        try await self.withLaunchAgentEnvironment(port: port) {
+            let defaults = AppDefaults.standard
+            let keys = [
+                onboardingSeenKey,
+                pauseDefaultsKey,
+                cliInstallPolicyKey,
+                GatewayHosting.defaultsKey,
+                GatewayLaunchAgentManager.resumeCommandKey,
+            ]
+            let saved = keys.map { ($0, defaults.object(forKey: $0)) }
+            defer {
+                for (key, value) in saved {
+                    if let value { defaults.set(value, forKey: key) } else { defaults.removeObject(forKey: key) }
+                }
+            }
+            defaults.set(true, forKey: onboardingSeenKey)
+            defaults.set(false, forKey: pauseDefaultsKey)
+            defaults.set("exact", forKey: cliInstallPolicyKey)
+            defaults.removeObject(forKey: GatewayHosting.defaultsKey)
+            defaults.removeObject(forKey: GatewayLaunchAgentManager.resumeCommandKey)
+            let (state, _, _, wrapper) = try self.makeLegacyNodeInstall(packageOnly: change == "runtime-alias")
+            let alias = state.appendingPathComponent("tools/node")
+            if change == "runtime-alias" {
+                let original = state.appendingPathComponent("tools/node-v26.1.0")
+                try FileManager.default.moveItem(at: alias, to: original)
+                try FileManager.default.copyItem(at: original, to: state.appendingPathComponent("tools/node-v26.2.0"))
+                try FileManager.default.createSymbolicLink(atPath: alias.path, withDestinationPath: "node-v26.1.0")
+            }
+            let inferred = try #require(try GatewayProcessManager().serviceCLIForResume())
+            // Inferred authority must remain distinguishable after an app relaunch.
+            let persisted = try GatewayLaunchAgentManager.resumeData(for: inferred)
+            let manager = GatewayProcessManager()
+            manager.retainedServiceCLI = try GatewayLaunchAgentManager.resumeCLI(from: persisted, stateDirectory: state)
+            GatewayLaunchAgentManager.setTestingInterceptDaemonCommands(true, beforeReturning: { arguments in
+                if arguments.first == "status" {
+                    do {
+                        if change == "runtime-alias" {
+                            try FileManager.default.removeItem(at: alias)
+                            try FileManager.default.createSymbolicLink(
+                                atPath: alias.path,
+                                withDestinationPath: "node-v26.2.0")
+                        } else {
+                            try Data("#!/bin/sh\nexec /operator/openclaw \"$@\"\n".utf8).write(to: wrapper)
+                        }
+                    } catch { Issue.record(error) }
+                }
+            })
+            let error = await manager._testEnableLaunchAgentIfNeeded(port: port)
+            #expect(error?.contains("legacy Gateway installation changed") == true)
+            #expect(!GatewayLaunchAgentManager.testingDaemonCommandCallsSnapshot().contains { $0.first == "install" })
+            if change == "runtime-alias" {
+                #expect(try FileManager.default.destinationOfSymbolicLink(atPath: alias.path) == "node-v26.2.0")
+            } else {
+                #expect(try String(contentsOf: wrapper, encoding: .utf8).contains("/operator/openclaw"))
+            }
         }
     }
 
