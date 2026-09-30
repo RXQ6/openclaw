@@ -119,15 +119,10 @@ export async function resolveActiveWakeWithRetries(
       if (!canRetry) {
         break;
       }
-      // Use the next scheduled backoff delay; once the schedule is exhausted,
-      // keep using its last entry until the deadline is reached.
       const scheduledDelayMs =
         compactionRetryDelaysMs[
           Math.min(compactionRetryIndex, compactionRetryDelaysMs.length - 1)
         ] ?? 0;
-      // Clamp the wait to the remaining delivery window so the final retry does
-      // not sleep past the deadline (which would overrun the delivery timeout).
-      // If no time remains, stop retrying and let the fallback handle it.
       const delayMs =
         remainingDeliveryTimeoutMs === undefined
           ? scheduledDelayMs

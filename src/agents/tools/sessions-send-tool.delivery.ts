@@ -1,4 +1,3 @@
-/** Delivers notifications, new turns, and active-run steering for sessions_send. */
 import crypto from "node:crypto";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { runWithInProcessGatewaySessionMutation } from "../../gateway/server-plugin-in-process-dispatch.js";

@@ -6,7 +6,6 @@ type SubagentAnnounceDeliveryDisposition =
   | "retryable"
   | "ambiguous"
   | "permanent_failure";
-/** Stable reasons an announcement delivery can fail without throwing. */
 type SubagentAnnounceDeliveryFailureReason =
   | "completion_handoff_pending"
   | "completion_handoff_unavailable"
@@ -23,7 +22,6 @@ type SubagentAnnounceSteerOutcome =
   | { status: "steered"; deliveredAt?: number; enqueuedAt?: number }
   | { status: "none" | "dropped" | "source_owner_changed" };
 
-/** Result of trying to deliver a subagent announcement. */
 export type SubagentAnnounceDeliveryResult = {
   delivered: boolean;
   path: SubagentDeliveryPath;
@@ -67,7 +65,6 @@ export function sourceOwnerChangedResult(): SubagentAnnounceDeliveryResult {
   };
 }
 
-/** Converts a steer outcome into the shared delivery result shape. */
 function mapSteerOutcomeToDeliveryResult(
   outcome: SubagentAnnounceSteerOutcome,
 ): SubagentAnnounceDeliveryResult {
@@ -89,7 +86,6 @@ function mapSteerOutcomeToDeliveryResult(
   };
 }
 
-/** Runs the ordered steer/direct announcement delivery strategy. */
 export async function runSubagentAnnounceDispatch(params: {
   expectsCompletionMessage: boolean;
   requireDirectDelivery?: boolean;

@@ -22,7 +22,6 @@ export async function readLatestSubagentOutputWithRetryUsing<Outcome = unknown>(
       return result;
     }
     const sleepMs = Math.min(params.retryIntervalMs, remainingMs);
-    // Use real timers here; tests provide fake timers around this small retry loop.
     await new Promise((resolve) => {
       setTimeout(resolve, sleepMs);
     });

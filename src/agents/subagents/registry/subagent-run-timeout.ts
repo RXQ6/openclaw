@@ -13,7 +13,6 @@ type SubagentRunDeadlineRecord = Pick<
   execution: Pick<SubagentRunRecord["execution"], "startedAt">;
 };
 
-/** Convert subagent timeout seconds to a finite millisecond duration. */
 export function resolveSubagentRunDurationMs(timeoutSeconds: unknown): number | undefined {
   if (
     typeof timeoutSeconds !== "number" ||
@@ -26,7 +25,6 @@ export function resolveSubagentRunDurationMs(timeoutSeconds: unknown): number | 
   return Number.isSafeInteger(durationMs) && durationMs > 0 ? durationMs : undefined;
 }
 
-/** Resolve the absolute timeout deadline for a subagent run. */
 export function resolveSubagentRunDeadlineMs(
   entry: SubagentRunDeadlineRecord,
   observedStartedAt?: number,
@@ -53,7 +51,6 @@ export function resolveSubagentRunDeadlineMs(
     : undefined;
 }
 
-/** Clamp a reported terminal time to the run's explicit timeout deadline. */
 export function resolveSubagentRunEffectiveEndedAt(
   entry: SubagentRunDeadlineRecord,
   endedAt: number,
