@@ -19,9 +19,7 @@ describe("resolveSlackThreadContextData", () => {
     storeFixture.setup();
   });
 
-  afterAll(() => {
-    storeFixture.cleanup();
-  });
+  afterAll(() => storeFixture.cleanup());
 
   afterEach(() => {
     vi.restoreAllMocks();

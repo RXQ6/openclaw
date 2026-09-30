@@ -1,9 +1,7 @@
 // Real grammY command handling and SQLite ingress, with a loopback Telegram API.
 import { once } from "node:events";
-import fs from "node:fs/promises";
 import { createServer, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import os from "node:os";
 import path from "node:path";
 import type { Message } from "grammy/types";
 import { createPluginRuntimeMock } from "openclaw/plugin-sdk/channel-test-helpers";
@@ -16,8 +14,12 @@ import {
   resetPluginStateStoreForTests,
 } from "openclaw/plugin-sdk/plugin-state-test-runtime";
 import type { MsgContext } from "openclaw/plugin-sdk/reply-runtime";
-import { closeOpenClawStateDatabaseAsync } from "openclaw/plugin-sdk/sqlite-runtime-testing";
-import { expect, it, vi } from "vitest";
+import {
+  closeOpenClawAgentDatabasesAsync,
+  closeOpenClawStateDatabaseAsync,
+} from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
+import { afterAll, expect, it, vi } from "vitest";
 import { defaultTelegramBotDeps } from "./bot-deps.js";
 import {
   enqueueTelegramMenuSync,
@@ -41,6 +43,15 @@ const downstream = vi.hoisted(() =>
     counts: { block: 0, final: 0, tool: 0 },
   })),
 );
+const tempDirs = useAutoCleanupTempDirTracker((cleanup) => {
+  afterAll(async () => {
+    await closeOpenClawAgentDatabasesAsync(sessionRoot);
+    await closeOpenClawStateDatabaseAsync();
+    closeOpenClawStateDatabaseForTest();
+    cleanup();
+  });
+});
+const sessionRoot = tempDirs.make("telegram-native-admission-");
 
 vi.mock("openclaw/plugin-sdk/channel-inbound", async (importOriginal) => {
   const actual = await importOriginal<typeof import("openclaw/plugin-sdk/channel-inbound")>();
@@ -59,7 +70,7 @@ it.each(["none", "middleware", "handler"] as const)(
   "answers a callback during a native menu request with %s ACK recovery",
   async (recovery) => {
     downstream.mockClear();
-    const stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "telegram-native-admission-"));
+    const stateDir = tempDirs.make("case-", sessionRoot);
     const previousStateDir = process.env.OPENCLAW_STATE_DIR;
     process.env.OPENCLAW_STATE_DIR = stateDir;
     resetPluginStateStoreForTests({ closeDatabase: false });
@@ -309,15 +320,12 @@ it.each(["none", "middleware", "handler"] as const)(
       });
       clearTelegramRuntimeForTest();
       resetTelegramAccountThrottlersForTest();
-      await closeOpenClawStateDatabaseAsync();
-      closeOpenClawStateDatabaseForTest();
       resetPluginStateStoreForTests({ closeDatabase: false });
       if (previousStateDir === undefined) {
         delete process.env.OPENCLAW_STATE_DIR;
       } else {
         process.env.OPENCLAW_STATE_DIR = previousStateDir;
       }
-      await fs.rm(stateDir, { recursive: true, force: true });
     }
     expect(runtimeErrors).toEqual([]);
     expect(downstream).toHaveBeenCalledOnce();

@@ -1,5 +1,3 @@
-import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { clearRuntimeAuthProfileStoreSnapshots } from "openclaw/plugin-sdk/agent-runtime";
 import { MODEL_SELECTION_LOCKED_MESSAGE } from "openclaw/plugin-sdk/model-session-runtime";
@@ -28,6 +26,9 @@ import {
   setCodexConversationModel as setCodexConversationModelImpl,
   setCodexConversationPermissions as setCodexConversationPermissionsImpl,
 } from "./conversation-control.js";
+import { useCodexSessionStoreTempDirs } from "./session-store.test-helpers.js";
+
+const sessionDirs = useCodexSessionStoreTempDirs("openclaw-codex-control-");
 
 function controlTarget(sessionFile: string) {
   const identity = { kind: "session" as const, agentId: "main", sessionId: sessionFile };
@@ -102,18 +103,17 @@ vi.mock("./app-server/shared-client.js", () => ({
 }));
 
 describe("codex conversation controls", () => {
-  beforeEach(async () => {
+  beforeEach(() => {
     resetCodexTestBindingStore();
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-codex-control-"));
+    tempDir = sessionDirs.make();
     vi.stubEnv("OPENCLAW_STATE_DIR", tempDir);
     sharedClientMocks.getSharedCodexAppServerClient.mockReset();
     sharedClientMocks.releaseLeasedSharedCodexAppServerClient.mockReset();
   });
 
-  afterEach(async () => {
+  afterEach(() => {
     vi.unstubAllEnvs();
     clearRuntimeAuthProfileStoreSnapshots();
-    await fs.rm(tempDir, { recursive: true, force: true });
   });
 
   it("persists fast mode on the binding and permissions on the session", async () => {

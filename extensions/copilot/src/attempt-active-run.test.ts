@@ -6,7 +6,7 @@ import {
 import { createMockPluginRegistry } from "openclaw/plugin-sdk/plugin-test-runtime";
 import { controlRealtimeVoiceAgentRun } from "openclaw/plugin-sdk/realtime-voice";
 import { readSessionTranscriptEvents } from "openclaw/plugin-sdk/session-transcript-runtime";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { registerCopilotActiveRun } from "./attempt-active-run.js";
 import type { AttemptTranscriptJournal } from "./attempt-transcript-journal.js";
 import {
@@ -104,7 +104,7 @@ function createSteeringRecorder(
 }
 
 describe("registerCopilotActiveRun", () => {
-  afterEach(cleanupAttemptTranscriptJournalFixtures);
+  afterAll(cleanupAttemptTranscriptJournalFixtures);
   afterEach(resetGlobalHookRunner);
   beforeEach(() => {
     harnessMocks.cancelPendingAgentQuestionForSession.mockClear();

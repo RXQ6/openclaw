@@ -2,8 +2,6 @@
 // Both Telegram inbound buffers (album, forward-burst debounce) defer their spooled
 // participant the same way, so both depend on deferredLaneOccupancy="release" to admit
 // later same-lane members. Cover them together — a lane regression breaks both at once.
-import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { DEFAULT_INGRESS_RETRY_MAX_ATTEMPTS } from "openclaw/plugin-sdk/channel-outbound";
 import { createPluginRuntimeMock } from "openclaw/plugin-sdk/channel-test-helpers";
@@ -17,8 +15,12 @@ import {
 } from "openclaw/plugin-sdk/plugin-state-test-runtime";
 import type { MsgContext } from "openclaw/plugin-sdk/reply-runtime";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
-import { closeOpenClawStateDatabaseAsync } from "openclaw/plugin-sdk/sqlite-runtime-testing";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  closeOpenClawAgentDatabasesAsync,
+  closeOpenClawStateDatabaseAsync,
+} from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TelegramBotDeps } from "./bot-deps.js";
 import {
   holdTelegramMediaTimeouts,
@@ -41,6 +43,15 @@ const downstreamTurns = vi.hoisted(() =>
   })),
 );
 const runtimeErrors: unknown[] = [];
+const tempDirs = useAutoCleanupTempDirTracker((cleanup) => {
+  afterAll(async () => {
+    await closeOpenClawAgentDatabasesAsync(sessionRoot);
+    await closeOpenClawStateDatabaseAsync();
+    closeOpenClawStateDatabaseForTest();
+    cleanup();
+  });
+});
+const sessionRoot = tempDirs.make("openclaw-telegram-album-ingress-");
 
 vi.mock("./fetch.js", () => ({
   resolveTelegramApiBase: (apiRoot?: string) => apiRoot ?? "https://api.telegram.org",
@@ -201,7 +212,7 @@ describe("Telegram durable ingress coalescing", () => {
   }>;
 
   beforeEach(async () => {
-    stateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-telegram-album-ingress-"));
+    stateDir = tempDirs.make("case-", sessionRoot);
     process.env.OPENCLAW_STATE_DIR = stateDir;
     activeResources = [];
     runtimeErrors.length = 0;
@@ -237,15 +248,12 @@ describe("Telegram durable ingress coalescing", () => {
         await telegramTransport.close();
       }),
     );
-    await closeOpenClawStateDatabaseAsync();
-    closeOpenClawStateDatabaseForTest();
     resetPluginStateStoreForTests({ closeDatabase: false });
     if (originalStateDir === undefined) {
       delete process.env.OPENCLAW_STATE_DIR;
     } else {
       process.env.OPENCLAW_STATE_DIR = originalStateDir;
     }
-    await fs.rm(stateDir, { recursive: true, force: true });
   });
 
   async function createMonitor(

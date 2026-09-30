@@ -1,13 +1,13 @@
 // A real grammY bot and HTTP Bot API prove model callbacks across the active router.
-import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Bot } from "grammy";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import { listSessionEntries } from "openclaw/plugin-sdk/session-store-runtime";
-import { afterEach, describe, expect, it } from "vitest";
+import { closeOpenClawAgentDatabasesAsync } from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { defaultTelegramBotDeps, type TelegramBotDeps } from "./bot-deps.js";
 import type { TelegramCallbackMessageRuntime } from "./bot-handlers.callback-router-controls.js";
 import { createTelegramCallbackRouter } from "./bot-handlers.callback-router.js";
@@ -21,6 +21,13 @@ const TOKEN = "123456:loopback-token";
 const CHAT_ID = 1234;
 const PROVIDER = "ollama";
 const MODEL = "xentriom/gemma-4-12B-agentic-fable5-composer2.5-v2:latest";
+const tempDirs = useAutoCleanupTempDirTracker((cleanup) => {
+  afterAll(async () => {
+    await closeOpenClawAgentDatabasesAsync(sessionRoot);
+    cleanup();
+  });
+});
+const sessionRoot = tempDirs.make("openclaw-telegram-model-loopback-");
 
 type TelegramApiRequest = { method: string; payload: Record<string, unknown> };
 
@@ -44,7 +51,7 @@ describe("Telegram model callback loopback", () => {
   });
 
   it("sends, authorizes, resolves, persists, answers, and edits an opaque callback", async () => {
-    const stateDir = await mkdtemp(join(tmpdir(), "openclaw-telegram-model-loopback-"));
+    const stateDir = tempDirs.make("case-", sessionRoot);
     const requests: TelegramApiRequest[] = [];
     let sentMessage: Record<string, unknown> | undefined;
 
@@ -245,7 +252,6 @@ describe("Telegram model callback loopback", () => {
       server.close();
       server.closeAllConnections();
       server.unref();
-      await rm(stateDir, { recursive: true, force: true });
     }
   });
 });

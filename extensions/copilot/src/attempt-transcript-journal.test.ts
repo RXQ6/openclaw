@@ -10,7 +10,7 @@ import {
 import type { AssistantMessage } from "openclaw/plugin-sdk/llm";
 import { createMockPluginRegistry } from "openclaw/plugin-sdk/plugin-test-runtime";
 import { readSessionTranscriptEvents } from "openclaw/plugin-sdk/session-transcript-runtime";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
   cleanupAttemptTranscriptJournalFixtures,
   createFixture,
@@ -20,11 +20,11 @@ import {
   transcriptMessages,
 } from "./attempt-transcript-journal.test-helpers.js";
 
-afterEach(async () => {
+afterEach(() => {
   resetGlobalHookRunner();
   vi.restoreAllMocks();
-  await cleanupAttemptTranscriptJournalFixtures();
 });
+afterAll(cleanupAttemptTranscriptJournalFixtures);
 
 function emitAssistant(
   session: ReturnType<typeof createJournalSession>["session"],

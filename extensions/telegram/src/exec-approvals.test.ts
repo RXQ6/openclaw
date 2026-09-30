@@ -5,13 +5,9 @@ import {
   normalizeSessionDeliveryState,
   upsertSessionEntry,
 } from "openclaw/plugin-sdk/session-store-runtime";
-import { closeOpenClawAgentDatabasesForTest } from "openclaw/plugin-sdk/sqlite-runtime-testing";
-import {
-  resolvePreferredOpenClawTmpDir,
-  tempWorkspaceSync,
-  type TempWorkspaceSync,
-} from "openclaw/plugin-sdk/temp-path";
-import { afterEach, describe, expect, it } from "vitest";
+import { closeOpenClawAgentDatabasesAsync } from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
+import { afterAll, describe, expect, it } from "vitest";
 import {
   getTelegramExecApprovalApprovers,
   isTelegramExecApprovalAuthorizedSender,
@@ -22,18 +18,17 @@ import {
   shouldInjectTelegramExecApprovalButtons,
 } from "./exec-approvals.js";
 
-const tempWorkspaces: TempWorkspaceSync[] = [];
+const tempDirs = useAutoCleanupTempDirTracker((cleanup) => {
+  afterAll(async () => {
+    await closeOpenClawAgentDatabasesAsync(sessionRoot);
+    cleanup();
+  });
+});
+const sessionRoot = tempDirs.make("openclaw-telegram-exec-approvals-");
 
 type TelegramExecApprovalRequest = Parameters<
   typeof shouldHandleTelegramExecApprovalRequest
 >[0]["request"];
-
-afterEach(() => {
-  closeOpenClawAgentDatabasesForTest();
-  for (const workspace of tempWorkspaces.splice(0)) {
-    workspace.cleanup();
-  }
-});
 
 function buildConfig(
   execApprovals?: NonNullable<NonNullable<OpenClawConfig["channels"]>["telegram"]>["execApprovals"],
@@ -139,12 +134,7 @@ describe("telegram exec approvals", () => {
   });
 
   it("scopes non-telegram turn sources to the stored telegram account", async () => {
-    const workspace = tempWorkspaceSync({
-      rootDir: resolvePreferredOpenClawTmpDir(),
-      prefix: "openclaw-telegram-exec-approvals-",
-    });
-    tempWorkspaces.push(workspace);
-    const tmpDir = workspace.dir;
+    const tmpDir = tempDirs.make("case-", sessionRoot);
     const storePath = path.join(tmpDir, "sessions.json");
     await upsertSessionEntry({
       storePath,

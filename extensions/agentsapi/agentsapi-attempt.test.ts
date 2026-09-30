@@ -1,3 +1,4 @@
+import { mkdirSync } from "node:fs";
 import path from "node:path";
 import type { AgentSession } from "openai/resources/beta/agents/agents";
 import type { Turn } from "openai/resources/beta/agents/sessions/turns";
@@ -14,9 +15,9 @@ import {
   resetGlobalHookRunner,
 } from "openclaw/plugin-sdk/plugin-test-runtime";
 import { upsertSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
-import { closeOpenClawAgentDatabasesForTest } from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import { closeOpenClawAgentDatabasesAsync } from "openclaw/plugin-sdk/sqlite-runtime-testing";
 import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { runAgentsApiAttempt, type AgentsApiPromptHistories } from "./agentsapi-attempt.js";
 import type { AgentsApiBinding } from "./agentsapi-bindings.js";
 import { AgentsApiClient, type AgentsApiItem } from "./agentsapi-client.js";
@@ -39,7 +40,16 @@ vi.mock("openclaw/plugin-sdk/agent-harness-runtime", async (importOriginal) => {
   };
 });
 
-const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+const tempDirs = useAutoCleanupTempDirTracker((cleanup) => {
+  afterAll(async () => {
+    if (suiteRoot) {
+      await closeOpenClawAgentDatabasesAsync(suiteRoot);
+    }
+    cleanup();
+  });
+});
+let suiteRoot: string | undefined;
+let fixtureIndex = 0;
 
 beforeEach(() => {
   vi.spyOn(AgentsApiClient.prototype, "create").mockResolvedValue("session-fixture");
@@ -70,7 +80,6 @@ afterEach(() => {
   createSession.mockReset();
   registerRun.mockReset();
   resetGlobalHookRunner();
-  closeOpenClawAgentDatabasesForTest();
 });
 
 describe("Agents API completed reply settlement", () => {
@@ -316,7 +325,9 @@ describe("Agents API retry prompt history", () => {
 });
 
 async function createAttempt() {
-  const workspaceDir = tempDirs.make("agentsapi-completed-reply-");
+  suiteRoot ??= tempDirs.make("agentsapi-completed-reply-");
+  const workspaceDir = path.join(suiteRoot, `case-${++fixtureIndex}`);
+  mkdirSync(workspaceDir);
   const target = {
     agentId: "main",
     sessionId: "artifact-reply",

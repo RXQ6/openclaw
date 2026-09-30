@@ -1,6 +1,4 @@
 // Slack tests cover approval native plugin behavior.
-import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import type { PluginApprovalRequest } from "openclaw/plugin-sdk/approval-runtime";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
@@ -8,8 +6,9 @@ import {
   normalizeSessionDeliveryState,
   upsertSessionEntry,
 } from "openclaw/plugin-sdk/session-store-runtime";
-import { closeOpenClawAgentDatabasesForTest } from "openclaw/plugin-sdk/sqlite-runtime-testing";
-import { afterEach, describe, expect, it } from "vitest";
+import { closeOpenClawAgentDatabasesAsync } from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
+import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { slackApprovalCapability } from "./approval-native.js";
 import { registerSlackInstallationState } from "./installation-identity-state.js";
 
@@ -46,22 +45,23 @@ function buildPluginRequest(
   };
 }
 
-const tempDirs: string[] = [];
+const tempDirs = useAutoCleanupTempDirTracker((cleanup) => {
+  afterAll(async () => {
+    await closeOpenClawAgentDatabasesAsync(sessionRoot);
+    cleanup();
+  });
+});
+const sessionRoot = tempDirs.make("openclaw-slack-approval-native-");
 const installationStates: SlackInstallationStateRegistration[] = [];
 
 afterEach(() => {
   for (const installationState of installationStates.splice(0)) {
     installationState.release();
   }
-  closeOpenClawAgentDatabasesForTest();
-  for (const dir of tempDirs.splice(0)) {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 function createTempStorePath(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-slack-approval-native-"));
-  tempDirs.push(dir);
+  const dir = tempDirs.make("case-", sessionRoot);
   return path.join(dir, "sessions.json");
 }
 

@@ -6,6 +6,7 @@ import type { ChannelRuntimeSurface } from "openclaw/plugin-sdk/channel-contract
 import { buildChannelInboundEventContext } from "openclaw/plugin-sdk/channel-inbound";
 import type { OpenClawConfig } from "openclaw/plugin-sdk/config-contracts";
 import type { RuntimeEnv } from "openclaw/plugin-sdk/runtime-env";
+import { closeOpenClawAgentDatabasesAsync } from "openclaw/plugin-sdk/sqlite-runtime-testing";
 import { resolvePreferredOpenClawTmpDir } from "openclaw/plugin-sdk/temp-path";
 import type { ResolvedSlackAccount } from "../../accounts.js";
 import { installSlackTestRuntime } from "../../test-runtime.test-support.js";
@@ -94,12 +95,16 @@ export function createSlackSessionStoreFixture(prefix: string) {
 
   return {
     setup() {
-      fixtureRoot = fs.mkdtempSync(path.join(resolvePreferredOpenClawTmpDir(), prefix));
+      // openclaw-temp-dir: allow suite-owned session stores drain once before removal
+      fixtureRoot = fs.realpathSync.native(
+        fs.mkdtempSync(path.join(resolvePreferredOpenClawTmpDir(), prefix)),
+      );
     },
-    cleanup() {
+    async cleanup() {
       if (!fixtureRoot) {
         return;
       }
+      await closeOpenClawAgentDatabasesAsync(fixtureRoot);
       fs.rmSync(fixtureRoot, {
         recursive: true,
         force: true,

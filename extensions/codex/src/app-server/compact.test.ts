@@ -1,6 +1,4 @@
 // Codex tests cover compact plugin behavior.
-import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import {
   embeddedAgentLog,
@@ -9,6 +7,7 @@ import {
 import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { patchSessionEntry, upsertSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useCodexSessionStoreTempDirs } from "../session-store.test-helpers.js";
 import { applyCodexAppServerAuthProfile } from "./auth-bridge.js";
 import {
   consumeCodexAppServerLiveThread,
@@ -47,6 +46,8 @@ import {
 import type { CodexAppServerClientFactory } from "./shared-client.js";
 import { withCodexAppServerThreadMutation } from "./thread-ownership.js";
 
+const sessionDirs = useCodexSessionStoreTempDirs("openclaw-codex-compact-");
+
 let tempDir: string;
 let finishCompactionTestCleanup: ReturnType<typeof beginCompactionTestCleanup>;
 
@@ -82,9 +83,9 @@ function startCompaction(
 }
 
 describe("maybeCompactCodexAppServerSession", () => {
-  beforeEach(async () => {
+  beforeEach(() => {
     resetCodexTestBindingStore();
-    tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-codex-compact-"));
+    tempDir = sessionDirs.make();
     finishCompactionTestCleanup = beginCompactionTestCleanup();
   });
 
@@ -93,7 +94,6 @@ describe("maybeCompactCodexAppServerSession", () => {
       await finishCompactionTestCleanup(task.result?.state === "fail");
     } finally {
       resetCodexAppServerClientFactoryForTest();
-      await fs.rm(tempDir, { recursive: true, force: true });
     }
   });
 

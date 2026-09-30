@@ -1,5 +1,3 @@
-import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import { WebClient } from "@slack/web-api";
@@ -18,7 +16,9 @@ import {
   upsertSessionEntry,
 } from "openclaw/plugin-sdk/session-store-runtime";
 // Slack tests cover Agent View lifecycle handling.
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { closeOpenClawAgentDatabasesAsync } from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { getSlackListenerWriteClient } from "../../client.js";
 import { appendSlackStream, markSlackStreamsStopped, startSlackStream } from "../../streaming.js";
 import * as sessionEventRouting from "../message-handler/prepare-routing.js";
@@ -54,6 +54,13 @@ vi.mock("../../streaming.js", async (importOriginal) => {
 const slashMocks = getSlackSlashMocks();
 
 let tempDir: string;
+const tempDirs = useAutoCleanupTempDirTracker((cleanup) => {
+  afterAll(async () => {
+    await closeOpenClawAgentDatabasesAsync(sessionRoot);
+    cleanup();
+  });
+});
+const sessionRoot = tempDirs.make("slack-session-events-");
 
 function createSessionEventHarness(channelType: "im" | "channel" | "mpim" = "im") {
   const harness = createSlackSystemEventTestHarness({ channelType, allowFrom: ["*"] });
@@ -126,7 +133,7 @@ function createSessionEventHarness(channelType: "im" | "channel" | "mpim" = "im"
 
 describe("registerSlackAgentEvents", () => {
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "slack-session-events-"));
+    tempDir = tempDirs.make("case-", sessionRoot);
     vi.clearAllMocks();
     clearRuntimeConfigSnapshot();
     resetSlackSlashMocks();
@@ -134,10 +141,6 @@ describe("registerSlackAgentEvents", () => {
     slashMocks.deliverSlackSlashRepliesMock.mockImplementation(async (params: unknown) => {
       await deliverSlackSlashReplies(params as Parameters<typeof deliverSlackSlashReplies>[0]);
     });
-  });
-
-  afterEach(() => {
-    fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
   it("records Agent View for app_context_changed", async () => {

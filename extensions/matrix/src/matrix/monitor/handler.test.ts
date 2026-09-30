@@ -13,6 +13,7 @@ import {
   sessionDeliveryOrigin,
   upsertSessionEntry,
 } from "openclaw/plugin-sdk/session-store-runtime";
+import { closeOpenClawAgentDatabasesAsync } from "openclaw/plugin-sdk/sqlite-runtime-testing";
 import {
   peekSystemEventEntries,
   resetSystemEventsForTest,
@@ -20,7 +21,7 @@ import {
 // Matrix tests cover handler plugin behavior.
 import { useAutoCleanupTempDirTracker } from "openclaw/plugin-sdk/test-env";
 import { createRequireRecord } from "openclaw/plugin-sdk/test-fixtures";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installMatrixMonitorTestRuntime } from "../../test-runtime.js";
 import { MATRIX_OPENCLAW_FINALIZED_PREVIEW_KEY } from "../send/types.js";
 import { registerMatrixPreviewDeliveryTests } from "./handler.preview-delivery.test-support.js";
@@ -297,7 +298,13 @@ function createMockMatrixDeliveryResult(messageId = "$reply1", content = "delive
 }
 
 type HarnessOptions = NonNullable<Parameters<typeof createMatrixHandlerTestHarness>[0]>;
-const noticeDirs = useAutoCleanupTempDirTracker(afterEach);
+const noticeDirs = useAutoCleanupTempDirTracker((cleanup) => {
+  afterAll(async () => {
+    await closeOpenClawAgentDatabasesAsync(sessionRoot);
+    cleanup();
+  });
+});
+const sessionRoot = noticeDirs.make("matrix-dm-notice-");
 
 function registerTestBinding(conversationId: string, parentConversationId?: string) {
   const touch = vi.fn();
@@ -335,7 +342,7 @@ async function createDmNoticeHarness(
     sendNotice?: ReturnType<typeof vi.fn<() => Promise<string>>>;
   } = {},
 ) {
-  const storePath = path.join(noticeDirs.make("matrix-dm-notice-"), "sessions.json");
+  const storePath = path.join(noticeDirs.make("case-", sessionRoot), "sessions.json");
   const sessionKey = params.sessionKey ?? "agent:ops:main";
   if (params.origin === null) {
     await upsertSessionEntry({

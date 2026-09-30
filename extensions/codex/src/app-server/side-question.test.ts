@@ -21,7 +21,8 @@ import {
 } from "openclaw/plugin-sdk/plugin-test-runtime";
 import type { ModelCompatConfig } from "openclaw/plugin-sdk/provider-model-types";
 import { patchSessionEntry, upsertSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { useCodexSessionStoreTempDirs } from "../session-store.test-helpers.js";
 import { codexTestTurnIds } from "./codex-app-server.test-fixtures.js";
 import { resolveCodexSupervisionAppServerRuntimeOptions } from "./config.js";
 import * as elicitationBridge from "./elicitation-bridge.js";
@@ -29,11 +30,7 @@ import { buildCodexAppServerConnectionFingerprint } from "./plugin-app-cache-key
 import type { JsonObject, JsonValue } from "./protocol.js";
 import { createSandboxContext } from "./sandbox-exec-server.test-helpers.js";
 import { createCodexTestBindingStore } from "./session-binding.test-helpers.js";
-import {
-  createClientHarness,
-  createCodexTestModel,
-  useAutoCleanupTempDirTracker,
-} from "./test-support.js";
+import { createClientHarness, createCodexTestModel } from "./test-support.js";
 
 const {
   readCodexAppServerBindingMock,
@@ -178,14 +175,14 @@ function nativeCommandItem(
 useProviderToolSchemaRuntimeForTest(["openai", "codex", "lmstudio"]);
 
 describe("runCodexAppServerSideQuestion", () => {
-  const tempDirs = useAutoCleanupTempDirTracker(afterEach);
+  const tempDirs = useCodexSessionStoreTempDirs("codex-side-predecessor-");
 
   useSideQuestionTestSetup();
 
   it.each([false, true])(
     "fences the recovered predecessor before forking a side thread (host rotated: %s)",
     async (hostRotated) => {
-      const root = tempDirs.make("codex-side-predecessor-");
+      const root = tempDirs.make();
       const storePath = path.join(root, "admitted", "sessions.json");
       const previous = {
         kind: "session" as const,
