@@ -2,6 +2,8 @@ import path from "node:path";
 import { expect, it, vi } from "vitest";
 import { withTestDir } from "../../test-helpers/temp-dir.js";
 import type { prepareModelChoice } from "../model-runtime-choice.js";
+import { createSubagentRunRecord } from "../subagent-test-fixtures.test-helpers.js";
+import { countActiveRunsForSessionFromRuns } from "../subagents/registry/subagent-registry-queries.js";
 import { callInProcessGatewayTool } from "./in-process-gateway.js";
 import { createSessionsSpawnTool } from "./sessions-spawn-tool.js";
 
@@ -12,6 +14,51 @@ vi.mock("../subagents/spawn/subagent-spawn.runtime.js", () => ({
 vi.mock("../subagents/registry/subagent-registry.js", () => ({
   registerSubagentRun: vi.fn(),
 }));
+
+it("keeps visible child quotas separate for agents sharing a bare requester key", async () => {
+  hoisted.prepareModelChoiceMock.mockResolvedValue({
+    kind: "automatic",
+    ref: { provider: "mock-provider", model: "primary" },
+  });
+  const otherAgentRun = createSubagentRunRecord({
+    runId: "other-agent-run",
+    childSessionKey: "agent:other:subagent:child",
+    requesterSessionKey: "global",
+    requesterAgentId: "other",
+    createdAt: Date.now(),
+  });
+  const runs = new Map([[otherAgentRun.runId, otherAgentRun]]);
+  const gateway = { call: callInProcessGatewayTool };
+  vi.spyOn(gateway, "call").mockResolvedValue({
+    key: "agent:main:dashboard:quota-child",
+    runStarted: true,
+    runId: "quota-child-run",
+  });
+  const tool = createSessionsSpawnTool({
+    agentSessionKey: "global",
+    requesterAgentIdOverride: "main",
+    config: {
+      session: { scope: "global" },
+      agents: {
+        defaults: {
+          model: "mock-provider/primary",
+          subagents: { maxChildrenPerAgent: 1 },
+        },
+        entries: { main: {}, other: {} },
+      },
+    },
+    callGateway: gateway.call,
+    registerRun: vi.fn(),
+    countActiveRuns: (key, options) => countActiveRunsForSessionFromRuns(runs, key, options),
+  });
+
+  const result = await tool.execute("visible-bare-key-quota", {
+    task: "inspect the repository",
+    visible: true,
+  });
+
+  expect(result.details).toMatchObject({ status: "accepted", runId: "quota-child-run" });
+});
 
 it("rejects an unsupported visible model before creating a session or registering a run", async () => {
   await withTestDir({ prefix: "openclaw-visible-model-" }, async (dir) => {

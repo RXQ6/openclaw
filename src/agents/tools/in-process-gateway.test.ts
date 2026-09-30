@@ -10,6 +10,7 @@ import {
   readInProcessSubagentResume,
 } from "../../gateway/in-process-subagent-resume.js";
 import type { GatewayRequestContext } from "../../gateway/server-methods/types.js";
+import { createAdmittedRunOperatorAuthority } from "../admitted-run-context.js";
 
 const mocks = vi.hoisted(() => ({
   hasContext: true,
@@ -79,7 +80,7 @@ describe("trusted in-process Gateway session creation", () => {
     expect(mocks.callGateway).not.toHaveBeenCalled();
   });
 
-  it("surfaces creation provenance only on in-process dispatch", async () => {
+  it("surfaces creation provenance only in-process and preserves the fallback timeout", async () => {
     const creation = {
       via: "spawn" as const,
       actor: { type: "agent" as const, id: "main" },
@@ -101,11 +102,13 @@ describe("trusted in-process Gateway session creation", () => {
     expect(mocks.callGatewayTool).not.toHaveBeenCalled();
 
     mocks.hasContext = false;
-    await callInProcessGatewayToolWithCreation("sessions.create", { agentId: "main" }, creation);
+    await callInProcessGatewayToolWithCreation("sessions.create", { agentId: "main" }, creation, {
+      timeoutMs: 120_000,
+    });
 
     expect(mocks.callGatewayTool).toHaveBeenCalledWith(
       "sessions.create",
-      {},
+      { timeoutMs: 120_000 },
       { agentId: "main" },
       { scopes: ["operator.write"] },
     );
@@ -164,7 +167,7 @@ describe("trusted in-process Gateway session creation", () => {
     expect(mocks.callGatewayTool).not.toHaveBeenCalled();
   });
 
-  it("carries visible-spawn policy through signed identity on fallback dispatch", async () => {
+  it("carries visible-spawn policy and its timeout through signed fallback dispatch", async () => {
     mocks.hasContext = false;
     const inheritedToolPolicy = {
       version: 1 as const,
@@ -201,11 +204,12 @@ describe("trusted in-process Gateway session creation", () => {
         resolvedModel,
         spawnModelAutoSelection,
       },
+      { timeoutMs: 120_000 },
     );
 
     expect(mocks.callGatewayTool).toHaveBeenCalledWith(
       "sessions.create",
-      {},
+      { timeoutMs: 120_000 },
       {
         agentId: "main",
         parentSessionKey: "agent:main:main",
@@ -372,6 +376,47 @@ describe("trusted in-process Gateway session creation", () => {
       { limit: 5 },
       { scopes: ["operator.write"], signal },
     );
+  });
+
+  it.each([
+    {
+      name: "request-shaped",
+      call: () => callAgentToolGatewayRequest({ method: "sessions.list" }),
+    },
+    { name: "positional", call: () => callInProcessGatewayTool("sessions.list", {}) },
+    {
+      name: "trusted creation",
+      call: () =>
+        callInProcessGatewayToolWithCreation(
+          "sessions.create",
+          { agentId: "main" },
+          {
+            via: "spawn",
+            actor: { type: "agent", id: "main" },
+            requesterSessionKey: "agent:main:main",
+            inheritedToolPolicy: { version: 1, allow: ["read"], deny: [] },
+          },
+        ),
+    },
+  ])("refuses $name transport before forwarding admitted operator authority", async ({ call }) => {
+    mocks.hasContext = false;
+    await expect(
+      withGatewayToolCallerIdentity(
+        {
+          agentId: "main",
+          sessionKey: "agent:main:main",
+          operatorAuthority: createAdmittedRunOperatorAuthority({
+            profileId: "operator",
+            scopes: ["operator.write"],
+            assertCurrent: () => {},
+          }),
+        },
+        call,
+      ),
+    ).rejects.toThrow("operator run authority requires its admitted Gateway");
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+    expect(mocks.callGateway).not.toHaveBeenCalled();
+    expect(mocks.callGatewayTool).not.toHaveBeenCalled();
   });
 });
 
