@@ -81,11 +81,9 @@ vi.mock("../../plugin-sdk/facade-runtime.js", async () => {
 
 type SessionsToolTestConfig = {
   agents?: OpenClawConfig["agents"];
-  bindings?: OpenClawConfig["bindings"];
   session: {
     scope: "per-sender";
     mainKey: string;
-    dmScope?: "main" | "per-peer" | "per-channel-peer" | "per-account-channel-peer";
   };
   tools: {
     agentToAgent: { enabled: boolean };
@@ -236,71 +234,14 @@ function createMainSessionsSendTool() {
 
 async function executeFireAndForgetA2AFrom(
   requesterSessionKey: string,
-  options?: {
-    mainKey?: string;
-    expectReplyFlow?: boolean;
-    dmScope?: NonNullable<SessionsToolTestConfig["session"]["dmScope"]>;
-    bindingDmScope?: NonNullable<SessionsToolTestConfig["session"]["dmScope"]>;
-    defaultBindingDmScope?: NonNullable<SessionsToolTestConfig["session"]["dmScope"]>;
-    bindingAccountId?: string;
-    bindingAgentId?: string;
-    bindingPeerId?: string;
-    bindingTeamId?: string;
-    routingConfig?: Pick<SessionsToolTestConfig, "agents" | "bindings">;
-  },
+  options?: { expectReplyFlow?: boolean },
 ) {
   setActivePluginRegistry(createSessionConversationTestRegistry());
   const { runSessionsSendA2AFlow } = await import("./sessions-send-tool.a2a.js");
   vi.mocked(runSessionsSendA2AFlow).mockClear();
   const targetSessionKey = "agent:other:discord:group:ops";
   loadConfigMock.mockReturnValue({
-    ...(options?.bindingDmScope ||
-    options?.defaultBindingDmScope ||
-    options?.bindingAccountId ||
-    options?.bindingAgentId
-      ? {
-          ...(options.bindingAgentId
-            ? {
-                agents: {
-                  list: [{ id: "main", default: true }, { id: options.bindingAgentId }],
-                },
-              }
-            : {}),
-          bindings: [
-            ...(options.defaultBindingDmScope
-              ? [
-                  {
-                    type: "route" as const,
-                    agentId: "main",
-                    match: {
-                      channel: requesterSessionKey.includes(":feishu:") ? "feishu" : "telegram",
-                      accountId: "default",
-                      peer: { kind: "direct" as const, id: "peer-1" },
-                    },
-                    session: { dmScope: options.defaultBindingDmScope },
-                  },
-                ]
-              : []),
-            {
-              type: "route",
-              agentId: options.bindingAgentId ?? "main",
-              match: {
-                channel: requesterSessionKey.includes(":feishu:") ? "feishu" : "telegram",
-                accountId: options.bindingAccountId ?? "default",
-                peer: { kind: "direct", id: options.bindingPeerId ?? "peer-1" },
-                ...(options.bindingTeamId ? { teamId: options.bindingTeamId } : {}),
-              },
-              ...(options.bindingDmScope ? { session: { dmScope: options.bindingDmScope } } : {}),
-            },
-          ],
-        }
-      : {}),
-    ...options?.routingConfig,
-    session: {
-      scope: "per-sender",
-      mainKey: options?.mainKey ?? "main",
-      ...(options?.dmScope ? { dmScope: options.dmScope } : {}),
-    },
+    session: { scope: "per-sender", mainKey: "main" },
     tools: {
       agentToAgent: { enabled: true },
       sessions: { visibility: "all" },
@@ -1563,7 +1504,7 @@ describe("sessions_send gating", () => {
       label: "normal requester",
       requesterSessionKey: "agent:main:telegram:direct:user",
       expected: true,
-      expectedRequesterSessionKey: "agent:main:main",
+      expectedRequesterSessionKey: "agent:main:telegram:direct:user",
     },
     {
       label: "non-canonical cron-like requester",
@@ -1585,204 +1526,22 @@ describe("sessions_send gating", () => {
     },
   );
 
-  it.each([
-    { label: "peer", key: "agent:main:direct:peer-1" },
-    { label: "channel", key: "agent:main:feishu:direct:peer-1" },
-    { label: "account", key: "agent:main:feishu:default:direct:peer-1" },
-  ] as const)("preserves a $label DM owned by another routed agent", async ({ key }) => {
-    const flowParams = await executeFireAndForgetA2AFrom(key, {
-      bindingAgentId: "stranger",
-    });
+  it("keeps a key-only DM requester's own session key in reply context and provenance", async () => {
+    const requesterSessionKey = "agent:main:feishu:direct:peer-1";
+    const flowParams = await executeFireAndForgetA2AFrom(requesterSessionKey);
 
-    expect(flowParams.requesterSessionKey).toBe(key);
-  });
-
-  it("fails closed when an erased named account belongs to another agent", async () => {
-    const key = "agent:main:feishu:direct:peer-1";
-    const flowParams = await executeFireAndForgetA2AFrom(key, {
-      bindingAgentId: "stranger",
-      bindingAccountId: "work",
-    });
-
-    expect(flowParams.requesterSessionKey).toBe(key);
-  });
-
-  it("preserves a named-account route that inherits isolated global DM scope", async () => {
-    const key = "agent:main:feishu:direct:peer-1";
-    const flowParams = await executeFireAndForgetA2AFrom(key, {
-      dmScope: "per-peer",
-      defaultBindingDmScope: "main",
-      bindingAccountId: "work",
-    });
-
-    expect(flowParams.requesterSessionKey).toBe(key);
-  });
-
-  it("preserves account-isolated bindings with trimmed wildcard peers", async () => {
-    const key = "agent:main:feishu:direct:peer-1";
-    const flowParams = await executeFireAndForgetA2AFrom(key, {
-      bindingDmScope: "per-peer",
-      bindingAccountId: "work",
-      bindingPeerId: " * ",
-    });
-
-    expect(flowParams.requesterSessionKey).toBe(key);
-  });
-
-  it("preserves isolated peers when the session key loses binding casing", async () => {
-    const key = "agent:main:feishu:direct:peer-1";
-    const flowParams = await executeFireAndForgetA2AFrom(key, {
-      bindingDmScope: "per-peer",
-      bindingPeerId: "PEER-1",
-    });
-
-    expect(flowParams.requesterSessionKey).toBe(key);
-  });
-
-  it("preserves isolated bindings whose team is absent from the session key", async () => {
-    const key = "agent:main:feishu:direct:peer-1";
-    const flowParams = await executeFireAndForgetA2AFrom(key, {
-      bindingDmScope: "per-peer",
-      bindingTeamId: "T123",
-    });
-
-    expect(flowParams.requesterSessionKey).toBe(key);
-  });
-
-  it.each([
-    { label: "peer direct", key: "agent:main:direct:peer-1" },
-    { label: "channel dm", key: "agent:main:feishu:dm:peer-1" },
-    { label: "account direct", key: "agent:main:feishu:default:direct:peer-1" },
-  ] as const)(
-    "routes a legacy $label requester back to its monitored main session",
-    async ({ key }) => {
-      const flowParams = await executeFireAndForgetA2AFrom(key);
-
-      expect(flowParams.requesterSessionKey).toBe(MAIN_AGENT_SESSION_KEY);
-      const agentCall = callGatewayMock.mock.calls.find(
-        ([request]) => (request as { method?: string }).method === "agent",
-      );
-      expect(agentCall?.[0]).toMatchObject({
-        method: "agent",
-        params: {
-          inputProvenance: {
-            kind: "inter_session",
-            sourceSessionKey: MAIN_AGENT_SESSION_KEY,
-            sourceTool: "sessions_send",
-          },
-        },
-      });
-    },
-  );
-
-  it("routes a legacy direct requester to its configured main session key", async () => {
-    const flowParams = await executeFireAndForgetA2AFrom("agent:main:feishu:direct:peer-1", {
-      mainKey: "work",
-    });
-
-    expect(flowParams.requesterSessionKey).toBe("agent:main:work");
-  });
-
-  it.each([
-    { label: "group", key: "agent:main:feishu:group:peer-1" },
-    { label: "group with opaque direct token", key: "agent:main:feishu:group:direct:peer-1" },
-    { label: "channel with opaque dm token", key: "agent:main:channel:dm:peer-1" },
-    { label: "cron with direct token", key: "agent:main:cron:direct:peer-1" },
-    { label: "hook with direct token", key: "agent:main:hook:direct:peer-1" },
-    { label: "nested agent owner", key: "agent:main:agent:worker:feishu:direct:peer-1" },
-    {
-      label: "thread-scoped account direct conversation",
-      key: "agent:main:feishu:default:dm:peer-1:thread:reply-root",
-    },
-  ] as const)("preserves the exact $label requester under main DM scope", async ({ key }) => {
-    const flowParams = await executeFireAndForgetA2AFrom(key);
-
-    expect(flowParams.requesterSessionKey).toBe(key);
-  });
-
-  it.each([
-    { label: "group", key: "agent:main:feishu:group:peer-1" },
-    { label: "channel", key: "agent:main:slack:channel:peer-1" },
-    { label: "threaded DM", key: "agent:main:feishu:direct:peer-2:thread:reply-root" },
-  ])("preserves a peer-only $label requester without an account owner", async ({ key }) => {
-    const flowParams = await executeFireAndForgetA2AFrom(key, {
-      routingConfig: PEER_ONLY_ROUTING_CONFIG,
-    });
-
-    expect(flowParams.requesterSessionKey).toBe(key);
+    expect(flowParams.requesterSessionKey).toBe(requesterSessionKey);
     expect(callGatewayMock).toHaveBeenCalledWith(
       expect.objectContaining({
         method: "agent",
         params: expect.objectContaining({
-          sessionKey: "agent:other:discord:group:ops",
-          inputProvenance: expect.objectContaining({ sourceSessionKey: key }),
+          inputProvenance: expect.objectContaining({
+            sourceSessionKey: requesterSessionKey,
+          }),
         }),
       }),
     );
   });
-
-  it.each([
-    { dmScope: "per-peer", key: "agent:main:direct:peer-1" },
-    { dmScope: "per-channel-peer", key: "agent:main:feishu:dm:peer-1" },
-    {
-      dmScope: "per-account-channel-peer",
-      key: "agent:main:feishu:default:direct:peer-1",
-    },
-  ] as const)("preserves privacy under $dmScope for $key", async ({ dmScope, key }) => {
-    const flowParams = await executeFireAndForgetA2AFrom(key, { dmScope });
-
-    expect(flowParams.requesterSessionKey).toBe(key);
-  });
-
-  it.each([
-    { bindingDmScope: "per-peer", key: "agent:main:direct:peer-1" },
-    { bindingDmScope: "per-channel-peer", key: "agent:main:feishu:direct:peer-1" },
-    {
-      bindingDmScope: "per-account-channel-peer",
-      key: "agent:main:feishu:default:direct:peer-1",
-    },
-  ] as const)(
-    "preserves a binding-isolated $bindingDmScope DM under global main scope",
-    async ({ bindingDmScope, key }) => {
-      const flowParams = await executeFireAndForgetA2AFrom(key, { bindingDmScope });
-
-      expect(flowParams.requesterSessionKey).toBe(key);
-    },
-  );
-
-  it.each([
-    { dmScope: "per-peer", key: "agent:main:direct:peer-1" },
-    { dmScope: "per-channel-peer", key: "agent:main:feishu:direct:peer-1" },
-    {
-      dmScope: "per-account-channel-peer",
-      key: "agent:main:feishu:default:direct:peer-1",
-    },
-  ] as const)(
-    "honors a main-scope binding overriding global $dmScope",
-    async ({ dmScope, key }) => {
-      const flowParams = await executeFireAndForgetA2AFrom(key, {
-        dmScope,
-        bindingDmScope: "main",
-      });
-
-      expect(flowParams.requesterSessionKey).toBe(MAIN_AGENT_SESSION_KEY);
-    },
-  );
-
-  it.each([
-    { bindingDmScope: "per-peer", key: "agent:main:direct:peer-1" },
-    { bindingDmScope: "per-channel-peer", key: "agent:main:feishu:direct:peer-1" },
-  ] as const)(
-    "fails closed for an account-erased $bindingDmScope DM binding",
-    async ({ bindingDmScope, key }) => {
-      const flowParams = await executeFireAndForgetA2AFrom(key, {
-        bindingDmScope,
-        bindingAccountId: "work",
-      });
-
-      expect(flowParams.requesterSessionKey).toBe(key);
-    },
-  );
 
   it("caps oversized timeoutSeconds before waiting for the target run", async () => {
     const targetSessionKey = "agent:main:other";

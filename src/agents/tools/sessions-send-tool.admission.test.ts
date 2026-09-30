@@ -172,7 +172,7 @@ describe("sessions_send dispatch admission", () => {
       });
       expect(runSessionsSendA2AFlow).toHaveBeenCalledOnce();
       expect(runSessionsSendA2AFlow).toHaveBeenCalledWith(
-        expect.objectContaining({ requesterSessionKey, targetSessionKey }),
+        expect.objectContaining({ requesterSessionKey: sourceKey, targetSessionKey }),
       );
       source.release();
       expect(readGatewayDeviceSourceAuthority(source.isCurrent)?.()).toBe(true);
