@@ -546,7 +546,8 @@ describeLive("OpenAI subagent yield and operator resume stress", () => {
   it.each(["timeout", "cancellation", "service_failure"] as const)(
     "reports a child's %s truthfully while preserving its successful sibling",
     async (interruption) => {
-      await runWithLiveSubagentGateway({}, async ({ gates, start, record, interrogate }) => {
+      await runWithLiveSubagentGateway({}, async (context) => {
+        const { gates, start, record, interrogate, waitForDescendantSettlement } = context;
         const id = randomUUID().replaceAll("-", "");
         const parentKey = `agent:main:live-${interruption}:${id}`;
         const marker = `OUTCOME_${id}`;
@@ -752,9 +753,7 @@ describeLive("OpenAI subagent yield and operator resume stress", () => {
           expect(reply, "late cancelled stdout is not a delivered result").not.toContain(
             lateResult,
           );
-          await until("all child obligations settled", async () =>
-            (await countPendingDescendantRuns(parentKey, () => {})) === 0 ? true : undefined,
-          );
+          await waitForDescendantSettlement(parentKey);
           const finalMessages = await history(parentKey);
           expect(finalReplies(finalMessages, marker)).toHaveLength(1);
           expect(successfulYields(finalMessages)).toBeGreaterThan(0);
