@@ -9,6 +9,7 @@ import { getAdmittedSqliteSchemaFacts } from "../infra/sqlite-schema-facts.js";
 import {
   BACKUP_RUN_WINDOW,
   parseBackupRun,
+  resolveBackupRunNamespace,
   resolveBackupRunTarget,
   type BackupRunRecord,
 } from "./backup-run-records.contract.js";
@@ -27,7 +28,11 @@ export function recordBackupRunInDatabase(db: DatabaseSync, row: PreparedBackupR
   const latestOkTargets = new Set<string>();
   // Frequent jobs must not evict another target's last attempt or successful recovery point.
   for (const run of runs) {
-    const target = JSON.stringify([run.kind, resolveBackupRunTarget(run)]);
+    const target = JSON.stringify([
+      run.kind,
+      run.location?.name ?? resolveBackupRunTarget(run),
+      resolveBackupRunNamespace(run),
+    ]);
     if (!latestTargets.has(target)) {
       latestTargets.add(target);
       retainedIds.add(run.id);

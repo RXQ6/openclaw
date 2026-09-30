@@ -28,6 +28,7 @@ describe("offsite backup CLI", () => {
       const scratchRoot = state.path("scratch");
       await fs.mkdir(scratchRoot);
       vi.spyOn(os, "tmpdir").mockReturnValue(scratchRoot);
+      vi.spyOn(os, "hostname").mockReturnValue("default-host");
       await state.writeConfig({
         agents: { entries: { main: { workspace: state.workspaceDir } } },
         storage: {
@@ -72,6 +73,7 @@ describe("offsite backup CLI", () => {
       expect((await readBackupRuns(process.env))[0]).toMatchObject({
         kind: "archive",
         target: "archive",
+        namespace: "default-host",
         status: "failed",
         error: unavailableMessage,
       });
@@ -144,6 +146,7 @@ describe("offsite backup CLI", () => {
       expect((await readBackupRuns(process.env))[0]).toMatchObject({
         status: "failed",
         target: "archive",
+        namespace: "test-host",
         error: collisionMessage,
       });
       await expect(fs.stat(localCopy)).rejects.toMatchObject({ code: "ENOENT" });

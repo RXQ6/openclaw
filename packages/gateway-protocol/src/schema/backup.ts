@@ -27,6 +27,7 @@ export const BackupRunRecordSchema = closedObject({
   status: Type.Union([Type.Literal("ok"), Type.Literal("failed")]),
   kind: BackupKindSchema,
   target: Type.Optional(Type.String()),
+  namespace: Type.Optional(Type.String()),
   error: Type.Optional(Type.String()),
   pushFailed: Type.Optional(Type.Literal(true)),
   bytes: Type.Optional(BytesSchema),
@@ -39,6 +40,7 @@ export const BackupStatusResultSchema = closedObject({
     closedObject({
       kind: BackupKindSchema,
       target: Type.String(),
+      namespace: Type.Optional(Type.String()),
       latest: BackupRunRecordSchema,
       latestOk: Type.Optional(BackupRunRecordSchema),
     }),

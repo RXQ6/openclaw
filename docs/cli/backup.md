@@ -478,7 +478,7 @@ Every real archive, SQLite snapshot, and Git create attempt records a compact
 outcome in the existing shared state database. External jobs can also report
 their outcomes. Dry runs are not recorded. The log retains the newest 200
 attempts plus the newest attempt and newest successful result for every backup
-kind and target. Frequent schedules cannot evict an infrequent destination's
+kind and target, including the namespace for offsite backups. Frequent schedules cannot evict an infrequent destination's
 last attempt or last success; history stays bounded by the recent window and
 the number of distinct targets.
 Git history is grouped by repository. Local archives and SQLite snapshots
@@ -487,17 +487,19 @@ without a named target share a bounded history group for their backup kind.
 Successful offsite outcomes include the location name, provider, location identity,
 key, namespace, plaintext archive bytes, and stored bytes. Runs with retention
 also record kept/deleted counts. Storage encryption can make stored bytes larger
-than plaintext bytes.
+than plaintext bytes. Failed offsite attempts also record the namespace they tried.
 
 `openclaw status` shows the newest offsite result alongside the backup overview;
 `openclaw status --json` includes recorded freshness. `openclaw doctor` prints an
 informational hint when no successful backup is recorded or the newest success
 is more than 14 days old. It also flags an enabled offsite schedule whose newest
 attempt failed or whose newest success is older than three times its interval,
-naming the location and `openclaw storage test <name>` as the next check.
+naming the location and `openclaw storage test <name>` as the next check. Offsite
+health matches both the location and the schedule's namespace. Older records
+without a namespace remain readable but cannot satisfy a namespaced schedule.
 
 Gateway RPC `backup.status` requires operator read scope. It returns the newest
-attempt and success per backup kind and target from the whole retained ledger,
+attempt and success per backup kind, target, and offsite namespace from the whole retained ledger,
 configured backup schedules with their next run, and the configured storage
 locations. Listing configuration does not probe storage. The Control UI's
 Backups section on the Systems landing and Gateway host views uses this status and provides a **Check** action per location

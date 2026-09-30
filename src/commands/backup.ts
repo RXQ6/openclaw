@@ -1,5 +1,5 @@
 import { createBackupArchive, type BackupCreateOptions } from "../infra/backup-create.js";
-import type { BackupRetentionOptions } from "../infra/backup-retention.js";
+import { resolveBackupNamespace, type BackupRetentionOptions } from "../infra/backup-retention.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { beginLifecycleWriteCustody } from "../infra/lifecycle-write-custody.js";
 import { withCommandProcessScope } from "../process/exec-spawn.js";
@@ -35,7 +35,11 @@ export async function backupCreateCommand(
   let archivePath = opts.output ?? (opts.to === undefined ? process.cwd() : `storage://${opts.to}`);
   const releaseCustody = opts.dryRun ? undefined : beginLifecycleWriteCustody("backup");
   let failure: unknown;
+  let namespace = opts.namespace;
   try {
+    if (opts.to !== undefined) {
+      namespace = resolveBackupNamespace(opts.namespace);
+    }
     const result: OffsiteBackupResult = await withCommandProcessScope(async () => {
       const options = {
         ...opts,
@@ -43,7 +47,7 @@ export async function backupCreateCommand(
       };
       if (opts.to !== undefined) {
         const { createOffsiteBackupArchive } = await loadBackupRemoteRuntime();
-        return await createOffsiteBackupArchive({ ...options, to: opts.to });
+        return await createOffsiteBackupArchive({ ...options, to: opts.to, namespace });
       }
       return await createBackupArchive(options);
     });
@@ -61,6 +65,7 @@ export async function backupCreateCommand(
         ...(opts.to !== undefined
           ? {
               target: opts.to,
+              namespace,
               location: result.location,
               retention: result.retention,
               bytes: result.location?.plaintextBytes,
@@ -92,7 +97,7 @@ export async function backupCreateCommand(
         archivePath,
         status: "failed",
         error: formatErrorMessage(error),
-        ...(opts.to !== undefined ? { target: opts.to } : {}),
+        ...(opts.to !== undefined ? { target: opts.to, namespace } : {}),
       });
     }
     throw error;

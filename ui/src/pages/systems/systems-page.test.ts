@@ -191,6 +191,7 @@ describe("Systems workspace", () => {
         {
           kind: "archive",
           target: "offsite",
+          namespace: "gateway",
           latest: {
             ...success,
             id: "backup-failed",
@@ -226,6 +227,7 @@ describe("Systems workspace", () => {
           id: "scheduled",
           mode: "offsite",
           target: "offsite",
+          namespace: "gateway",
           enabled: true,
           everyMs: 86_400_000,
           nextRunAtMs: now + 3_600_000,
@@ -272,6 +274,41 @@ describe("Systems workspace", () => {
     await page.updateComplete;
     expect(page.querySelector(".systems-backups")).toBeNull();
   });
+
+  it.each(["host-a", undefined])(
+    "does not attach the active namespace schedule to namespace %s history",
+    async (namespace) => {
+      const success = {
+        id: "other-namespace-ok",
+        createdAt: Date.now(),
+        archivePath: "storage://offsite/backup.tar.gz",
+        kind: "archive" as const,
+        status: "ok" as const,
+        target: "offsite",
+        namespace,
+      };
+      const { controller } = harness(undefined, undefined, async () => ({
+        targets: [
+          { kind: "archive", target: "offsite", namespace, latest: success, latestOk: success },
+        ],
+        schedules: [
+          {
+            id: "host-b-schedule",
+            mode: "offsite",
+            target: "offsite",
+            namespace: "host-b",
+            enabled: true,
+            everyMs: 86_400_000,
+            nextRunAtMs: Date.now() + 3_600_000,
+          },
+        ],
+        locations: [],
+      }));
+      const { page } = await mount(controller);
+      expect(page.querySelector(".systems-backup")?.textContent).not.toContain("Next run:");
+      expect(page.querySelector(".systems-backups__hint")?.textContent).toContain("Next run:");
+    },
+  );
 
   it.each([undefined, "Git remote rejected the push: permission denied."])(
     "shows a failed Git push while preserving local backup success (%s)",

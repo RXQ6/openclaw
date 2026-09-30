@@ -26,6 +26,10 @@ export function resolveBackupRunTarget(run: BackupRunRecord): string | undefined
   return run.kind === "git" ? run.archivePath : run.target;
 }
 
+export function resolveBackupRunNamespace(run: BackupRunManifest): string | undefined {
+  return run.kind === "archive" ? (run.location?.namespace ?? run.namespace) : undefined;
+}
+
 function boundedText(value: string | undefined, maxLength: number): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? truncateUtf16Safe(trimmed, maxLength) : undefined;
@@ -88,6 +92,9 @@ export function parseBackupRun(
   }
   const location = parseLocation(manifest.location);
   const retention = parseRetention(manifest.retention);
+  const namespace =
+    location?.namespace ??
+    (typeof manifest.namespace === "string" ? manifest.namespace : undefined);
   return {
     id: row.id,
     createdAt: row.created_at,
@@ -95,6 +102,7 @@ export function parseBackupRun(
     status: row.status,
     kind: manifest.kind,
     ...(typeof manifest.target === "string" ? { target: manifest.target } : {}),
+    ...(namespace === undefined ? {} : { namespace }),
     ...(typeof manifest.error === "string" ? { error: manifest.error } : {}),
     ...(manifest.pushFailed === true ? { pushFailed: true } : {}),
     ...(isBytes(manifest.bytes) ? { bytes: manifest.bytes } : {}),
@@ -107,6 +115,7 @@ export function serializeBackupRunManifest(manifest: BackupRunManifest): string 
   return JSON.stringify({
     kind: manifest.kind,
     target: boundedText(manifest.target, 512),
+    namespace: boundedText(resolveBackupRunNamespace(manifest), 128),
     error: boundedText(manifest.error, BACKUP_RUN_ERROR_MAX_LENGTH),
     ...(manifest.pushFailed ? { pushFailed: true } : {}),
     ...(isBytes(manifest.bytes) ? { bytes: manifest.bytes } : {}),

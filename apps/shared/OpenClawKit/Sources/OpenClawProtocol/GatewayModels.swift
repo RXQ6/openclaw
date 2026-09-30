@@ -2596,6 +2596,7 @@ public struct BackupRunRecord: Codable, Sendable {
     public let status: AnyCodable
     public let kind: AnyCodable
     public let target: String?
+    public let namespace: String?
     public let error: String?
     public let pushfailed: Bool?
     public let bytes: Int?
@@ -2609,6 +2610,7 @@ public struct BackupRunRecord: Codable, Sendable {
         status: AnyCodable,
         kind: AnyCodable,
         target: String? = nil,
+        namespace: String? = nil,
         error: String? = nil,
         pushfailed: Bool? = nil,
         bytes: Int? = nil,
@@ -2621,6 +2623,7 @@ public struct BackupRunRecord: Codable, Sendable {
         self.status = status
         self.kind = kind
         self.target = target
+        self.namespace = namespace
         self.error = error
         self.pushfailed = pushfailed
         self.bytes = bytes
@@ -2635,6 +2638,7 @@ public struct BackupRunRecord: Codable, Sendable {
         case status
         case kind
         case target
+        case namespace
         case error
         case pushfailed = "pushFailed"
         case bytes

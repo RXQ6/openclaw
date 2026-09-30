@@ -75,6 +75,7 @@ describe("backup.status", () => {
       kind: "archive",
       status: "ok",
       target: "offsite",
+      namespace: "host",
       bytes: 12,
     };
     const failed: BackupRunRecord = {
@@ -103,7 +104,9 @@ describe("backup.status", () => {
     expect(respond).toHaveBeenCalledWith(
       true,
       {
-        targets: [{ kind: "archive", target: "offsite", latest: failed, latestOk: ok }],
+        targets: [
+          { kind: "archive", target: "offsite", namespace: "host", latest: failed, latestOk: ok },
+        ],
         schedules: [
           {
             id: "backup-job",

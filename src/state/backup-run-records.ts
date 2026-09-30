@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import {
+  resolveBackupRunNamespace,
   resolveBackupRunTarget,
   serializeBackupRunManifest,
   type BackupRunManifest,
@@ -99,16 +100,23 @@ export function summarizeBackupTargets(runs: readonly BackupRunRecord[]) {
     {
       kind: BackupRunRecord["kind"];
       target: string;
+      namespace?: string;
       latest: BackupRunRecord;
       latestOk?: BackupRunRecord;
     }
   >();
   for (const run of runs) {
     const target = run.location?.name ?? resolveBackupRunTarget(run) ?? run.archivePath;
-    const key = JSON.stringify([run.kind, target]);
+    const namespace = resolveBackupRunNamespace(run);
+    const key = JSON.stringify([run.kind, target, namespace]);
     let group = groups.get(key);
     if (!group) {
-      group = { kind: run.kind, target, latest: run };
+      group = {
+        kind: run.kind,
+        target,
+        ...(namespace === undefined ? {} : { namespace }),
+        latest: run,
+      };
       groups.set(key, group);
     }
     if (run.status === "ok" && !group.latestOk) {

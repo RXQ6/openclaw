@@ -11,6 +11,19 @@ const byteFormat = {
   fractionDigits: 0,
 } as const;
 
+function matchesSchedule(
+  target: BackupStatusResult["targets"][number],
+  schedule: BackupStatusResult["schedules"][number],
+) {
+  return (
+    schedule.enabled &&
+    schedule.target === target.target &&
+    (schedule.mode === "offsite"
+      ? target.kind === "archive" && schedule.namespace === target.namespace
+      : target.kind === "git")
+  );
+}
+
 function renderTarget(target: BackupStatusResult["targets"][number], status: BackupStatusResult) {
   const { latest, latestOk } = target;
   const pushFailed = target.kind === "git" && latest.status === "ok" && latest.pushFailed === true;
@@ -21,13 +34,7 @@ function renderTarget(target: BackupStatusResult["targets"][number], status: Bac
       entry.name ===
       (storedLocation?.name ?? (target.kind === "archive" ? target.target : undefined)),
   );
-  const schedules = status.schedules.filter(
-    (entry) =>
-      entry.enabled &&
-      entry.target === target.target &&
-      ((entry.mode === "offsite" && target.kind === "archive") ||
-        (entry.mode === "git" && target.kind === "git")),
-  );
+  const schedules = status.schedules.filter((entry) => matchesSchedule(target, entry));
   const nextRunAtMs = schedules.reduce<number | undefined>(
     (next, entry) =>
       entry.nextRunAtMs === undefined ? next : Math.min(next ?? Infinity, entry.nextRunAtMs),
@@ -50,7 +57,7 @@ function renderTarget(target: BackupStatusResult["targets"][number], status: Bac
       ${nextRunAtMs === undefined ? nothing : html`<span>${t("systems.backups.nextRun", { time: formatDateTimeMs(nextRunAtMs, { dateStyle: "short", timeStyle: "short" }) })}</span>`}
     </div>
     <div class="systems-backup__destination">${location?.displayTarget ?? target.target}</div>
-    ${storedLocation ? html`<div class="systems-backup__meta">${t("systems.backups.namespace", { name: storedLocation.namespace })}</div>` : nothing}
+    ${target.namespace === undefined ? nothing : html`<div class="systems-backup__meta">${t("systems.backups.namespace", { name: target.namespace })}</div>`}
     ${failed ? html`<p class="systems-backup__error">${latest.error ?? t(pushFailed ? "systems.backups.pushFailureHint" : "systems.backups.failureHint")}</p>` : nothing}
   </li>`;
 }
@@ -91,7 +98,7 @@ export function renderSystemsBackups(controller: SystemsController) {
                     <code>openclaw backup enable --to &lt;location&gt;</code>
                   </p>`
             }
-            ${status.schedules.filter((schedule) => schedule.enabled && !status.targets.some((target) => target.target === schedule.target)).map((schedule) => html`<p class="systems-backups__hint">${t("systems.backups.scheduled", { target: schedule.target })} ${schedule.nextRunAtMs === undefined ? nothing : t("systems.backups.nextRun", { time: formatDateTimeMs(schedule.nextRunAtMs, { dateStyle: "short", timeStyle: "short" }) })}</p>`)}
+            ${status.schedules.filter((schedule) => schedule.enabled && !status.targets.some((target) => matchesSchedule(target, schedule))).map((schedule) => html`<p class="systems-backups__hint">${t("systems.backups.scheduled", { target: schedule.target })} ${schedule.namespace === undefined ? nothing : t("systems.backups.namespace", { name: schedule.namespace })} ${schedule.nextRunAtMs === undefined ? nothing : t("systems.backups.nextRun", { time: formatDateTimeMs(schedule.nextRunAtMs, { dateStyle: "short", timeStyle: "short" }) })}</p>`)}
             ${
               status.locations.length
                 ? html`<h3>${t("systems.backups.locations")}</h3>

@@ -70,7 +70,10 @@ function buildOffsiteBackupDoctorHints(params: {
       return [];
     }
     const target = targets.find(
-      (entry) => entry.kind === "archive" && entry.target === schedule.target,
+      (entry) =>
+        entry.kind === "archive" &&
+        entry.target === schedule.target &&
+        entry.namespace === schedule.namespace,
     );
     const failed = target?.latest.status === "failed";
     const stale = !target?.latestOk || now - target.latestOk.createdAt > 3 * schedule.everyMs;
