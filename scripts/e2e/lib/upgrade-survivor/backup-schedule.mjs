@@ -72,7 +72,8 @@ function ledgerRows() {
       .prepare(
         "SELECT id, created_at, archive_path, status, manifest_json FROM backup_runs ORDER BY created_at, id",
       )
-      .all();
+      .all()
+      .map((row) => Object.assign({}, row));
   } finally {
     db.close();
   }
