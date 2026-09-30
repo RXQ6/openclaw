@@ -8,7 +8,10 @@ import type {
   MemorySearchResult,
 } from "../../memory-host-sdk/host/types.js";
 import { resolveMemorySearchStaleness } from "../../memory-host-sdk/host/types.js";
-import { getActiveMemorySearchManagerCore } from "../../plugins/memory-runtime.js";
+import {
+  getActiveMemorySearchManagerCore,
+  resolveActiveMemoryBackendConfig,
+} from "../../plugins/memory-runtime.js";
 import { loadBundledPluginPublicArtifactModuleSync } from "../../plugins/public-surface-loader.js";
 import { normalizeAgentId } from "../../routing/session-key.js";
 import type { GatewayRequestHandlers } from "./types.js";
@@ -145,6 +148,18 @@ export const memorySearchHandlers: GatewayRequestHandlers = {
         respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, error.message));
         return;
       }
+    }
+    const backend = resolveActiveMemoryBackendConfig({ cfg, agentId });
+    if (backend?.backend === "provider-runtime") {
+      respond(
+        false,
+        undefined,
+        errorShape(
+          ErrorCodes.INVALID_REQUEST,
+          `memory plugin "${backend.providerId}" uses the provider runtime; retry memory.search with version: 2`,
+        ),
+      );
+      return;
     }
     let acquired: Awaited<ReturnType<typeof getActiveMemorySearchManagerCore>>;
     try {

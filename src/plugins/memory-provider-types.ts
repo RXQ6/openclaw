@@ -1,5 +1,10 @@
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 
+/** Host-resolved memory partition for one trusted session invocation. */
+export type MemoryAudience =
+  | { kind: "owner-private"; agentId: string }
+  | { kind: "conversation"; agentId: string; sessionKey: string; sessionId: string };
+
 /** Authenticated caller authority supplied by the trusted host, never inferred from IDs. */
 export type MemoryCallerAuthority =
   | { kind: "operator"; scopes: readonly string[]; connId?: string }
@@ -8,8 +13,7 @@ export type MemoryCallerAuthority =
       sessionKey: string;
       sandboxed: boolean;
       sessionId?: string;
-      senderIsOwner?: boolean;
-      chatType?: "direct" | "group" | "channel";
+      audience?: MemoryAudience;
     }
   | { kind: "host"; operation: string };
 

@@ -10,6 +10,11 @@ import { resolveUserPath } from "../utils.js";
 import { normalizePluginsConfig } from "./config-state.js";
 import { withPluginHostCleanupTimeout } from "./host-hook-cleanup-timeout.js";
 import { loadPluginRegistryHandle } from "./loader.js";
+import {
+  assertMemoryAudienceCurrent,
+  assertMemoryAudienceSession,
+  isHostMemoryAudience,
+} from "./memory-audience.js";
 import { adaptLegacyMemoryProvider, bindMemoryProvider } from "./memory-provider-adapter.js";
 import type {
   ActiveMemoryProviderResult,
@@ -31,9 +36,6 @@ import type {
 } from "./registry-contribution-types.js";
 import type { PluginRegistry } from "./registry-types.js";
 
-type MemorySearchAuthorization = Parameters<
-  NonNullable<MemoryPluginRuntime["authorizeSearchHits"]>
->[0];
 type WorkspaceMemoryPathClassification = Parameters<
   NonNullable<MemoryPluginRuntime["classifyWorkspaceMemoryPaths"]>
 >[0];
@@ -287,8 +289,27 @@ export async function getActiveMemoryProviderCore(
   if (typeof params.context.assertCurrent !== "function") {
     throw new Error("memory provider requires caller authority with assertCurrent");
   }
-  params.context.assertCurrent();
-  params.context.signal?.throwIfAborted();
+  if (
+    params.context.authority.kind === "session" &&
+    params.context.authority.audience !== undefined &&
+    !isHostMemoryAudience(params.context.authority.audience)
+  ) {
+    throw new Error("memory provider requires a host-minted memory audience");
+  }
+  const audience =
+    params.context.authority.kind === "session" ? params.context.authority.audience : undefined;
+  if (audience && params.context.authority.kind === "session") {
+    assertMemoryAudienceSession(audience, params.context.authority.sessionKey);
+  }
+  // The audience is part of the caller's authority: a stale grant never reaches open().
+  const assertCallerCurrent = () => {
+    params.context.assertCurrent();
+    if (audience) {
+      assertMemoryAudienceCurrent(audience);
+    }
+    params.context.signal?.throwIfAborted();
+  };
+  assertCallerCurrent();
   const owner = ensureMemoryRuntime(params);
   if (!owner?.runtime && !owner?.providerRuntime) {
     return { provider: null, error: owner?.error ?? "memory plugin unavailable" };
@@ -305,8 +326,7 @@ export async function getActiveMemoryProviderCore(
     ? await owner.providerRuntime.open(params)
     : await adaptLegacyMemoryProvider(owner.runtime!, providerId, params);
   try {
-    params.context.assertCurrent();
-    params.context.signal?.throwIfAborted();
+    assertCallerCurrent();
     if (
       result.provider &&
       (typeof result.provider.search !== "function" ||
@@ -342,18 +362,6 @@ export async function getActiveMemoryProviderCore(
   };
 }
 
-/** Applies the selected memory plugin's authorization policy to raw search hits. */
-export async function authorizeActiveMemorySearchHits(
-  params: MemorySearchAuthorization,
-): Promise<MemorySearchAuthorization["hits"]> {
-  const owner = ensureMemoryRuntime(params);
-  // Session artifacts need plugin-owned identity mapping before they are safe
-  // to expose. Runtimes without that capability may still return memory hits.
-  return owner?.runtime?.authorizeSearchHits
-    ? await owner.runtime.authorizeSearchHits(params)
-    : params.hits.filter((hit) => hit.source !== "sessions");
-}
-
 /** Classifies workspace memory paths through the selected memory plugin's provenance owner. */
 export async function classifyActiveMemoryWorkspacePaths(
   params: WorkspaceMemoryPathClassification,
@@ -382,6 +390,11 @@ export async function classifyActiveMemoryWorkspacePaths(
 /** Resolves current memory backend config without constructing a manager. */
 export function resolveActiveMemoryBackendConfig(params: { cfg: OpenClawConfig; agentId: string }) {
   const owner = ensureMemoryRuntime(params);
+  if (owner?.providerRuntime) {
+    const providerId =
+      owner.providerId ?? normalizePluginsConfig(params.cfg.plugins).slots.memory?.trim();
+    return providerId ? ({ backend: "provider-runtime", providerId } as const) : null;
+  }
   return owner?.runtime ? owner.runtime.resolveMemoryBackendConfig(params) : null;
 }
 

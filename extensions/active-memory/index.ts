@@ -56,7 +56,20 @@ export default definePluginEntry({
   description: "Proactively surfaces relevant memory before eligible conversational replies.",
   register(api: OpenClawPluginApi) {
     const readCurrentConfig = () => readActiveMemoryConfig(api);
-    let config = normalizePluginConfig(api.pluginConfig, readCurrentConfig());
+    const resolveSelectedRecallToolNames = (cfg: OpenClawConfig) => {
+      const selectedPluginId = normalizePluginsConfig(cfg.plugins).slots.memory;
+      const registration = getMemoryCapabilityRegistration();
+      if (!registration || registration.pluginId !== selectedPluginId) {
+        return undefined;
+      }
+      return registration.capability.recallToolNames;
+    };
+    const initialConfig = readCurrentConfig();
+    let config = normalizePluginConfig(
+      api.pluginConfig,
+      initialConfig,
+      resolveSelectedRecallToolNames(initialConfig),
+    );
     const warnDeprecatedModelFallbackPolicy = (pluginConfig: unknown) => {
       if (hasDeprecatedModelFallbackPolicy(pluginConfig)) {
         // modelFallback is a last model-selection candidate, never runtime failover.
@@ -81,7 +94,11 @@ export default definePluginEntry({
       const effectivePluginConfig = !isActiveMemoryPluginEnabled(liveConfig)
         ? { enabled: false }
         : (livePluginConfig ?? {});
-      config = normalizePluginConfig(effectivePluginConfig, liveConfig);
+      config = normalizePluginConfig(
+        effectivePluginConfig,
+        liveConfig,
+        resolveSelectedRecallToolNames(liveConfig),
+      );
       if (livePluginConfig) {
         warnDeprecatedModelFallbackPolicy(livePluginConfig);
       }
@@ -349,8 +366,7 @@ export default definePluginEntry({
             if (
               activeMemoryConfigured &&
               effectiveAgentId &&
-              deterministicRecallToolName &&
-              authorityAllowedRecallTools.includes(deterministicRecallToolName) &&
+              resolvedSessionKey &&
               privateDestination &&
               chatIdAllowed
             ) {
@@ -364,12 +380,19 @@ export default definePluginEntry({
                   cfg: liveConfig,
                   agentId: effectiveAgentId,
                   context: {
-                    authority: { kind: "host", operation: "active-memory-trigger-recall" },
+                    authority: {
+                      kind: "session",
+                      sessionKey: resolvedSessionKey,
+                      sessionId: ctx.sessionId,
+                      sandboxed: ctx.sandboxed === true,
+                      audience: ctx.memoryAudience,
+                    },
                     signal: deadlineController.signal,
                     assertCurrent() {
                       deadlineController.signal.throwIfAborted();
                       toolAuthority.assertActive();
                       ctx.hookInvocation?.assertActive();
+                      ctx.assertMemoryAudienceCurrent?.();
                     },
                   },
                   query: searchQuery,
@@ -379,6 +402,7 @@ export default definePluginEntry({
                   runId: ctx.runId,
                   requestKey,
                   authorityFingerprint: toolAuthority.fingerprint,
+                  debug: (message) => api.logger.debug?.(message),
                 }).catch((error: unknown) => {
                   api.logger.debug?.(
                     `active-memory: lane-1 trigger recall failed: ${toSingleLineErrorMessage(error)}`,
@@ -489,6 +513,7 @@ export default definePluginEntry({
               authorityFingerprint: toolAuthority.fingerprint,
               memorySlot: memorySlot ?? undefined,
               activeProjectKeys: ctx.activeProjectKeys,
+              memoryAudience: ctx.memoryAudience,
             });
             deadlineController.signal.throwIfAborted();
             toolAuthority.assertActive();

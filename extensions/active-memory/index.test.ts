@@ -83,6 +83,11 @@ const hoisted = vi.hoisted(() => {
     rawDeltaReads: [] as Array<{ maxBytes?: number; maxEvents?: number; sessionId: string }>,
     runtimeTranscriptFiles: {} as Record<string, string>,
     sessionStore,
+    memoryCapability: {
+      deterministicRecallToolName: "memory_search" as string | undefined,
+      recallToolNames: undefined as readonly string[] | undefined,
+      supportsPrivateTranscriptRecall: true,
+    },
     updateSessionStore: vi.fn(
       async (
         _storePath: string,
@@ -107,10 +112,7 @@ vi.mock("openclaw/plugin-sdk/memory-host-core", async () => {
     ...actual,
     getMemoryCapabilityRegistration: () => ({
       pluginId: "memory-core",
-      capability: {
-        deterministicRecallToolName: "memory_search",
-        supportsPrivateTranscriptRecall: true,
-      },
+      capability: hoisted.memoryCapability,
     }),
   };
 });
@@ -620,10 +622,16 @@ describe("active-memory plugin", () => {
   };
 
   registerActiveMemoryProviderTests({
+    memoryCapability: hoisted.memoryCapability,
     getActiveMemoryProvider: hoisted.getActiveMemoryProvider,
     runEmbeddedAgent,
     registerPluginConfig,
     runPromptBuild,
+    writeUsableMemoryTranscript,
+    seedSession,
+    expectPrependContextContains,
+    lastEmbeddedRunParams,
+    lastRuntimeEmbeddedRunParams,
   });
 
   beforeAll(async () => {
@@ -635,6 +643,8 @@ describe("active-memory plugin", () => {
   beforeEach(async () => {
     vi.resetAllMocks();
     api.pluginConfig = { agents: ["main"] };
+    hoisted.memoryCapability.deterministicRecallToolName = "memory_search";
+    hoisted.memoryCapability.recallToolNames = undefined;
     closeOpenClawAgentDatabasesForTest();
     await fs.rm(stateDir, { recursive: true, force: true });
     await fs.mkdir(stateDir, { recursive: true });
@@ -1816,6 +1826,11 @@ describe("active-memory plugin", () => {
   );
 
   it("logs deterministic trigger injections when invocation logging is enabled", async () => {
+    const assertMemoryAudienceCurrent = vi.fn();
+    const memoryAudience = {
+      kind: "owner-private",
+      agentId: "main",
+    } as const;
     hoisted.getActiveMemoryProvider.mockResolvedValueOnce({
       provider: {
         search: vi.fn(async () => ({ hits: [] })),
@@ -1838,12 +1853,29 @@ describe("active-memory plugin", () => {
       { prompt: "Help when booking a flight" },
       {
         sessionKey: "agent:main:telegram:direct:owner",
+        sessionId: "owner-session",
         messageProvider: "telegram",
         channelId: "owner",
+        memoryAudience,
+        assertMemoryAudienceCurrent,
       },
     );
 
     expectPrependContextContains(result, "Prefer aisle seats.");
+    expect(hoisted.getActiveMemoryProvider).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          authority: {
+            kind: "session",
+            sessionKey: "agent:main:telegram:direct:owner",
+            sessionId: "owner-session",
+            sandboxed: false,
+            audience: memoryAudience,
+          },
+        }),
+      }),
+    );
+    expect(assertMemoryAudienceCurrent).toHaveBeenCalled();
     expect(
       vi
         .mocked(api.logger.info)

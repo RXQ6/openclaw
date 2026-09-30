@@ -91,6 +91,43 @@ describe("project memory bootstrap", () => {
     expect(rendered).toContain("Foreign fact.");
   });
 
+  it("filters every project key without requesting unsupported provider filtering", async () => {
+    runtimeMocks.getManager.mockResolvedValue({
+      provider: {
+        capabilities: { candidates: ["trigger", "project"], projectFilter: false },
+        candidates: runtimeMocks.listCurated,
+        close: vi.fn(),
+      },
+    });
+    runtimeMocks.listCurated.mockResolvedValue({
+      hits: [
+        {
+          ...entries[0]!,
+          automaticRecall: { eligible: true, projectKeys: ["alpha", "beta"] },
+        },
+        {
+          ...entries[1]!,
+          automaticRecall: { eligible: true, projectKeys: ["alpha", "inactive"] },
+        },
+      ],
+    });
+
+    const rendered = (
+      await prepareProjectMemoryBootstrap({
+        cfg: {},
+        agentId: "main",
+        activeProjectKeys: ["alpha", "beta"],
+      })
+    ).join("\n");
+
+    expect(runtimeMocks.listCurated).toHaveBeenCalledExactlyOnceWith({
+      kind: "project",
+      limit: 48,
+    });
+    expect(rendered).toContain("Use the release helper.");
+    expect(rendered).not.toContain("Foreign fact.");
+  });
+
   it("never emits a partial entry or exceeds the hard budget", async () => {
     const crowded = Array.from({ length: 10 }, (_, index) => ({
       ...entries[0]!,
@@ -192,7 +229,7 @@ describe("project memory bootstrap", () => {
     runtimeMocks.listCurated.mockResolvedValue({ hits: [entries[0]] });
     runtimeMocks.getManager.mockResolvedValue({
       provider: {
-        capabilities: { candidates: ["project"] },
+        capabilities: { candidates: ["project"], projectFilter: true },
         search: runtimeMocks.search,
         candidates: runtimeMocks.listCurated,
         close: vi.fn(),
@@ -232,6 +269,28 @@ describe("project memory bootstrap", () => {
       }),
     ).toEqual([]);
     expect(runtimeMocks.listCurated).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("omits optional project recall when provider cleanup rejects", async () => {
+    const close = vi.fn().mockRejectedValue(new Error("provider cleanup failed"));
+    runtimeMocks.getManager.mockResolvedValue({
+      provider: {
+        capabilities: { candidates: ["project"] },
+        candidates: runtimeMocks.listCurated,
+        close,
+      },
+    });
+    runtimeMocks.listCurated.mockResolvedValue({ hits: entries });
+
+    await expect(
+      prepareProjectMemoryBootstrap({
+        cfg: {},
+        agentId: "main",
+        activeProjectKeys: ["github.com/OpenClaw/OpenClaw"],
+      }),
+    ).resolves.toEqual([]);
+    expect(runtimeMocks.listCurated).toHaveBeenCalledOnce();
     expect(close).toHaveBeenCalledOnce();
   });
 

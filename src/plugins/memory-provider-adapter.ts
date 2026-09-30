@@ -3,6 +3,7 @@ import {
   isAutomaticMemoryEntryEligible,
   type MemorySearchResult,
 } from "../memory-host-sdk/host/types.js";
+import { assertMemoryAudienceCurrent, assertMemoryAudienceSession } from "./memory-audience.js";
 import type {
   MemoryCallerContext,
   MemoryProviderHandle,
@@ -32,6 +33,10 @@ export function bindMemoryProvider(
       throw new Error("memory provider handle is closed");
     }
     context.assertCurrent();
+    if (context.authority.kind === "session" && context.authority.audience) {
+      assertMemoryAudienceSession(context.authority.audience, context.authority.sessionKey);
+      assertMemoryAudienceCurrent(context.authority.audience);
+    }
     context.signal?.throwIfAborted();
     if (
       instance &&

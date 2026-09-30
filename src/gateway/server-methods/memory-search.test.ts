@@ -24,9 +24,13 @@ import {
 import type { GatewayRequestContext, RespondFn } from "./types.js";
 
 const getActiveMemorySearchManagerCore = vi.hoisted(() => vi.fn());
+const resolveActiveMemoryBackendConfig = vi.hoisted(() => vi.fn());
 const resolveDefaultAgentId = vi.hoisted(() => vi.fn(() => "main"));
 
-vi.mock("../../plugins/memory-runtime.js", () => ({ getActiveMemorySearchManagerCore }));
+vi.mock("../../plugins/memory-runtime.js", () => ({
+  getActiveMemorySearchManagerCore,
+  resolveActiveMemoryBackendConfig,
+}));
 vi.mock("../../agents/agent-scope.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../agents/agent-scope.js")>()),
   resolveDefaultAgentId,
@@ -87,6 +91,7 @@ describe("memory.search gateway method", () => {
       layout: "state-only",
     });
     getActiveMemorySearchManagerCore.mockReset();
+    resolveActiveMemoryBackendConfig.mockReset().mockReturnValue({ backend: "builtin" });
     resolveDefaultAgentId.mockClear();
   });
 
@@ -110,6 +115,29 @@ describe("memory.search gateway method", () => {
     }
     expect(getActiveMemorySearchManagerCore).not.toHaveBeenCalled();
   });
+
+  it.each([undefined, 1])(
+    "directs version %s searches to v2 for a native provider",
+    async (version) => {
+      const cfg = createConfig(testState.workspaceDir);
+      resolveActiveMemoryBackendConfig.mockReturnValue({
+        backend: "provider-runtime",
+        providerId: "records",
+      });
+
+      const respond = await invokeMemorySearch({ query: "lantern", version }, cfg);
+
+      expect(respond).toHaveBeenCalledWith(
+        false,
+        undefined,
+        expect.objectContaining({
+          code: "INVALID_REQUEST",
+          message: expect.stringMatching(/records.*version: 2/u),
+        }),
+      );
+      expect(getActiveMemorySearchManagerCore).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps automatic rebuild disclosure when subsequent retrieval fails", async () => {
     const cfg = createConfig(testState.workspaceDir);

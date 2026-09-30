@@ -130,6 +130,9 @@ type ActiveRecallParams = {
   authorityFingerprint: string;
   memorySlot?: string;
   activeProjectKeys?: string[];
+  memoryAudience?: Parameters<
+    OpenClawPluginApi["runtime"]["agent"]["runEmbeddedAgent"]
+  >[0]["memoryAudience"];
 };
 
 async function recordRecallResult(
@@ -174,6 +177,7 @@ async function resolveActiveRecall(
         sessionId: params.sessionId,
         query: params.query,
         authorityFingerprint: params.authorityFingerprint,
+        memoryAudience: params.memoryAudience,
         memorySlot: params.memorySlot,
         activeProjectKeys: params.activeProjectKeys,
         modelProviderId: resolvedModelRef?.provider,
@@ -465,6 +469,7 @@ export async function maybeResolveActiveRecall(
     // Run-local reuse follows request identity; the cross-turn content cache stays query-based.
     query: params.requestKey ?? params.query,
     authorityFingerprint: params.authorityFingerprint,
+    memoryAudience: params.memoryAudience,
     memorySlot: params.memorySlot,
     activeProjectKeys: params.activeProjectKeys,
     modelProviderId: model?.provider,

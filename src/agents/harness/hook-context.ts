@@ -1,6 +1,7 @@
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { buildAgentHookContextIdentityFields } from "../../plugins/hook-agent-context.js";
 import type { PluginHookAgentContext } from "../../plugins/hook-types.js";
+import { assertMemoryAudienceSession } from "../../plugins/memory-audience.js";
 
 /**
  * Input facts used to build the agent portion of plugin hook events.
@@ -17,6 +18,9 @@ export type AgentHarnessHookContext = Omit<
 
 /** Builds the sparse hook context object passed to agent harness plugin hooks. */
 export function buildAgentHookContext(params: AgentHarnessHookContext): PluginHookAgentContext {
+  if (params.memoryAudience) {
+    assertMemoryAudienceSession(params.memoryAudience, params.sessionKey);
+  }
   return {
     ...(params.runId ? { runId: params.runId } : {}),
     ...(params.trace ? { trace: params.trace } : {}),
@@ -24,6 +28,11 @@ export function buildAgentHookContext(params: AgentHarnessHookContext): PluginHo
     ...(params.agentId ? { agentId: params.agentId } : {}),
     ...(params.sessionKey ? { sessionKey: params.sessionKey } : {}),
     ...(params.sessionId ? { sessionId: params.sessionId } : {}),
+    ...(params.memoryAudience ? { memoryAudience: params.memoryAudience } : {}),
+    ...(params.assertMemoryAudienceCurrent
+      ? { assertMemoryAudienceCurrent: params.assertMemoryAudienceCurrent }
+      : {}),
+    ...(params.sandboxed !== undefined ? { sandboxed: params.sandboxed } : {}),
     ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
     ...(params.modelProviderId ? { modelProviderId: params.modelProviderId } : {}),
     ...(params.modelId ? { modelId: params.modelId } : {}),

@@ -6,6 +6,7 @@ read_when:
   - You are registering a context engine or a memory capability
   - You need the durable admitted-turn contract for context engines
   - You are exposing memory embedding or public-artifact adapters
+  - You need to authorize provider memory by owner or conversation audience
 ---
 
 The registrars that allow only one active implementation at a time, and the
@@ -120,19 +121,78 @@ Capabilities are enforced before provider code runs:
 | Automatic recall  | `candidates` array containing `"trigger"` and/or `"project"`        | `candidates({ kind })` names an undeclared kind                           |
 | Project filtering | `projectFilter: boolean`                                            | non-empty `activeProjectKeys` is supplied when project filtering is false |
 
+The selected memory slot owner can also declare `recallToolNames`. These are
+the concrete agent tools Active Memory uses for deep recall. A valid explicit
+Active Memory `toolsAllow` list takes precedence, followed by the selected
+provider's `recallToolNames`, then the built-in fallback. Unselected sidecars
+cannot contribute this field, and it does not gate provider-direct trigger
+recall.
+
+### Host consumers
+
+| Host consumer                          | Provider runtime use                              | Native provider declaration                                                                                |
+| -------------------------------------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| Gateway `memory.search` v2             | `search()`                                        | Requested `sources`; `pagination: true` for cursors                                                        |
+| Gateway `memory.get` / `memory.status` | `get()` / `health()`                              | Required handle methods                                                                                    |
+| Doctor and CLI status                  | `health()` with operator or host/status authority | Health must accept status callers                                                                          |
+| Post-compaction refresh                | Optional `refresh()`                              | No capability flag; omission or denial is logged                                                           |
+| Project recall                         | `candidates({ kind: "project" })`                 | `candidates: ["project"]` and `projectFilter: true` when project keys are supplied                         |
+| Active Memory trigger recall           | Lexical `search()` plus trigger candidates        | `sources: ["memory"]`, `candidates: ["trigger"]`, and `projectFilter: true` when project keys are supplied |
+| Active Memory deep recall              | Agent tools                                       | Selected owner declares and registers `recallToolNames`                                                    |
+| Voice fast context                     | `search()`                                        | Every configured source                                                                                    |
+| Memory Wiki                            | `search()`                                        | Requested sources; protected transcript recall requires `"sessions"`                                       |
+
 The required `MemoryCallerContext` carries an `assertCurrent()` callback, an
 optional abort signal, and `MemoryCallerAuthority`:
 
 - `operator`: authenticated operator scopes and optional connection identity;
-- `session`: actual session key, sandbox state, and available trusted session
-  incarnation, owner, and chat-type facts;
+- `session`: the actual session key, optional session ID, sandbox state, and an
+  optional host-resolved memory audience;
 - `host`: a named host operation, not an operator or private-session grant.
 
 The host rechecks caller and plugin lifetime before and after asynchronous
-operations. Providers apply visibility policy from these trusted facts and
-revalidate before releasing data. Missing owner or chat facts are unknown, not
-evidence of a private conversation. Never reconstruct authority from a session
-lookup, record ID, or cached fingerprint.
+operations. Providers apply visibility policy from the supplied authority and
+revalidate before releasing data. A session authority without an audience has no
+private or conversation grant. A host authority also grants neither private nor
+conversation access.
+
+### Memory audience
+
+OpenClaw resolves memory audience once from trusted turn facts and durable
+session lineage. Providers and plugin tools consume the resulting host-minted
+value:
+
+```ts
+type MemoryAudience =
+  | { kind: "owner-private"; agentId: string }
+  | { kind: "conversation"; agentId: string; sessionKey: string; sessionId: string };
+```
+
+- A direct turn from the trusted agent owner has `owner-private` audience.
+- A direct turn from another sender, or a group, channel, or thread turn, has
+  `conversation` audience for the durable root session.
+- A spawned child inherits its root audience only after the host validates each
+  recorded parent key, session ID, and lifecycle revision.
+- Missing, malformed, cross-agent, cyclic, or stale lineage produces no
+  audience. Unknown or missing durable chat type also produces no audience.
+
+Audience is separate from sandbox policy. A provider can deny sandboxed callers
+even when they have a valid audience. Operator authority is also separate and
+explicit; it does not become owner-private session authority.
+
+Providers must not reconstruct audience from session lookups, session-key
+patterns, record IDs, or cached fingerprints. They must also reject an audience
+for another agent. The host binds each audience to its invocation session and
+rejects it when presented for another session. Host-mediated child runs receive
+a new audience bound to the child session's current session ID and lifecycle
+revision (or, for a detached child run, to the absence of a row for its key),
+sharing the parent's lineage and revocation state; a child reset or
+reassignment rejects it as well. The host rejects audience objects that it did
+not mint and invalidates a captured audience when any session in its lineage
+changes incarnation or lifecycle, or when the run that owns it ends. The host
+checks audience currency before and after opening a provider and around every
+provider call, so the next call fails its `assertCurrent()` check instead of
+releasing data under stale authority.
 
 ### Compatibility and host integration
 
@@ -156,7 +216,9 @@ lookup, record ID, or cached fingerprint.
   In-process agent-tool and agent-runtime callers use their admitted run's
   operator authority instead. Request abort, connection close, and revoked
   client authority are rechecked before and after every provider call. Omitting
-  the search version retains the old file-shaped response for existing clients.
+  the search version, or sending `version: 1`, retains the old file-shaped
+  response for legacy providers. A native provider returns an error naming the
+  selected plugin and directs the client to retry with `version: 2`.
 - Voice fast context, project recall, Active Memory trigger recall, and Memory Wiki
   use the neutral interface when their required capabilities are declared.
 - A record-only provider keeps its own tools, skills, and UI; selection does not

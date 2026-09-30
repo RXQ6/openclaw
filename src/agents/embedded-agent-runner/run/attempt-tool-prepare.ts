@@ -293,6 +293,7 @@ export async function prepareEmbeddedAttemptToolBase(params: {
             computerTransport,
             pairedNodeComputerUse,
             conversationRecall: attempt.conversationRecall,
+            memoryAudience: attempt.memoryAudience,
             oneShotCliRun: attempt.oneShotCliRun,
             toolSearchCatalogRef,
             codeModeSkills,

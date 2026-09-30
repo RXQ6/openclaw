@@ -4,6 +4,8 @@ import {
   splitCuratedMarkdownEntries,
 } from "../../packages/memory-host-sdk/src/engine-storage.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { createSubsystemLogger } from "../logging/subsystem.js";
+import { normalizePluginsConfig } from "../plugins/config-state.js";
 import type {
   MemoryCallerContext,
   MemorySearchHit,
@@ -13,6 +15,7 @@ import type { EmbeddedContextFile } from "./embedded-agent-helpers/context-file.
 
 const PROJECT_MEMORY_BOOTSTRAP_MAX_CHARS = 2_000;
 const PROJECT_MEMORY_ENTRY_MAX_CHARS = 600;
+const log = createSubsystemLogger("agents/project-memory-bootstrap");
 
 function isCuratedProjectContextPath(value: unknown): boolean {
   if (typeof value !== "string" || !value.trim()) {
@@ -146,6 +149,7 @@ export async function prepareProjectMemoryBootstrap(params: {
   };
   let provider: MemoryProviderHandle | null = null;
   let lines: string[] = [];
+  const selectedPluginId = normalizePluginsConfig(params.cfg.plugins).slots.memory;
   try {
     const { getActiveMemoryProviderCore } = await import("../plugins/memory-runtime.js");
     const lookup = await getActiveMemoryProviderCore({
@@ -154,13 +158,20 @@ export async function prepareProjectMemoryBootstrap(params: {
       context,
     });
     provider = lookup.provider;
-    if (
-      lookup.provider?.candidates &&
+    if (!lookup.provider) {
+      log.debug(
+        `project memory recall denied by ${lookup.providerId ?? selectedPluginId ?? "selected memory plugin"}: ${lookup.error ?? "provider unavailable"}`,
+      );
+    } else if (
+      lookup.provider.candidates &&
       lookup.provider.capabilities.candidates.includes("project")
     ) {
       const results = await lookup.provider.candidates({
         kind: "project",
-        activeProjectKeys: [...params.activeProjectKeys],
+        // buildProjectMemoryBootstrap applies the all-of key check when the provider cannot filter.
+        ...(lookup.provider.capabilities.projectFilter
+          ? { activeProjectKeys: [...params.activeProjectKeys] }
+          : {}),
         limit: 48,
       });
       context.assertCurrent();
@@ -168,19 +179,36 @@ export async function prepareProjectMemoryBootstrap(params: {
         entries: results.hits,
         activeProjectKeys: params.activeProjectKeys,
       });
+    } else {
+      log.debug(
+        `project memory recall unsupported by ${lookup.providerId ?? selectedPluginId ?? "selected memory plugin"}`,
+      );
     }
-  } catch {
+  } catch (error) {
+    log.debug(
+      `project memory recall failed for ${selectedPluginId ?? "selected memory plugin"}: ${String(error)}`,
+    );
     lines = [];
   } finally {
     active = false;
-    await provider?.close();
+    try {
+      await provider?.close();
+    } catch (error) {
+      log.debug(
+        `project memory cleanup failed for ${selectedPluginId ?? "selected memory plugin"}: ${String(error)}`,
+      );
+      lines = [];
+    }
   }
   try {
     // Cleanup may yield after selection; the owning run still controls release.
     params.context?.signal?.throwIfAborted();
     params.context?.assertCurrent();
     return lines;
-  } catch {
+  } catch (error) {
+    log.debug(
+      `project memory recall denied after provider close for ${selectedPluginId ?? "selected memory plugin"}: ${String(error)}`,
+    );
     return [];
   }
 }
