@@ -64,8 +64,15 @@
   align-self: flex-start;
 }
 .mcp-app-context {
+  max-height: 160px;
+  overflow-y: auto;
   padding: 8px 12px;
   border-bottom: 1px solid var(--border);
+}
+.mcp-app-context svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
 }
 .mcp-app-context__header {
   color: var(--muted);

@@ -71,6 +71,20 @@ describe("MCP App one-shot approvals", () => {
     await pending;
     expect(f.manager.consumeAllowOnce).toHaveBeenCalledOnce();
   });
+  it("uses the shared bounded preview for large App payloads without skipping approval", async () => {
+    const f = fixture();
+    const input = { preview: "x".repeat(20_000) };
+    await requestMcpAppToolApproval({ ...f.params, input });
+    const record = f.manager.create.mock.results[0]!.value;
+    expect(record.request.detail.length).toBeLessThanOrEqual(16_384);
+    expect(record.request.detail).toContain("[truncated]");
+    expect(record.request.allowedDecisions).toEqual(["allow-once", "deny"]);
+    expect(f.manager.consumeAllowOnce).toHaveBeenCalledExactlyOnceWith(
+      record.id,
+      "mcp.app:" + record.request.toolCallId,
+    );
+    expect(input.preview).toHaveLength(20_000);
+  });
   it("does not consume denied approvals", async () => {
     const f = fixture(Promise.resolve("deny"));
     await expect(requestMcpAppToolApproval(f.params)).rejects.toThrow("denied");

@@ -4,7 +4,10 @@ import {
   sanitizeExecApprovalDisplayText,
   sanitizeExecApprovalWarningText,
 } from "../infra/exec-approval-text-sanitize.js";
-import type { PluginApprovalRequestPayload } from "../infra/plugin-approvals.js";
+import {
+  truncatePluginApprovalDetail,
+  type PluginApprovalRequestPayload,
+} from "../infra/plugin-approvals.js";
 import { handlePendingApprovalRequestWithDelivery } from "./server-methods/approval-request-delivery.js";
 import { bindApprovalRequesterMetadata } from "./server-methods/approval-shared.js";
 import type { GatewayRequestHandlerOptions } from "./server-methods/types.js";
@@ -26,16 +29,15 @@ export async function requestMcpAppToolApproval(params: {
   if (!manager) {
     throw new Error("MCP App approval service is unavailable");
   }
-  const detail = sanitizeExecApprovalWarningText(
-    JSON.stringify(
-      { server: params.serverName, tool: params.toolName, arguments: params.input },
-      null,
-      2,
+  const detail = truncatePluginApprovalDetail(
+    sanitizeExecApprovalWarningText(
+      JSON.stringify(
+        { server: params.serverName, tool: params.toolName, arguments: params.input },
+        null,
+        2,
+      ),
     ),
   );
-  if (detail.length > 16_384) {
-    throw new Error("MCP App arguments exceed the approval preview limit");
-  }
   const timeoutMs = 120_000;
   const toolCallId = randomUUID();
   const payload: PluginApprovalRequestPayload = {
