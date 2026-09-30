@@ -8,6 +8,17 @@ type SubagentSettleToolPolicyBatch = {
   isCurrent: () => boolean;
 };
 
+export type TrustedSubagentCompletionHandoff = {
+  kind: "subagent-completion";
+  sourceSessionKey: string;
+  sourceSessionId?: string;
+  targetSessionKey: string;
+  targetSessionId: string;
+  provider: string;
+  model: string;
+  settleBatch?: SubagentSettleToolPolicyBatch;
+};
+
 export type SubagentCompletionToolHandoffRegistration = {
   sourceSessionKey: string;
   sourceSessionId?: string;
@@ -15,15 +26,6 @@ export type SubagentCompletionToolHandoffRegistration = {
   targetSessionId: string;
   idempotencyKey: string;
   settleBatch?: SubagentSettleToolPolicyBatch;
-};
-
-export type TrustedSubagentCompletionHandoff = Omit<
-  SubagentCompletionToolHandoffRegistration,
-  "idempotencyKey"
-> & {
-  kind: "subagent-completion";
-  provider: string;
-  model: string;
 };
 
 export function resolveExactSubagentCompletionEvent(params: {

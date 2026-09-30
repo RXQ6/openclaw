@@ -34,11 +34,38 @@ export type SessionCapabilityLookup = {
   getById: (sessionId: string) => SessionCapabilityEntry | undefined;
 };
 
+export type SessionCapabilityStore =
+  | Record<string, SessionCapabilityEntry>
+  | SessionCapabilityLookup;
+
 /** Facts from an owning read in the same synchronous policy resolution. */
 export type PreparedSessionCapabilityEntry = {
   sessionKey: string;
   entry: SessionCapabilityEntry;
 };
+
+export function isSessionCapabilityLookup(
+  store: SessionCapabilityStore | undefined,
+): store is SessionCapabilityLookup {
+  return typeof store?.get === "function" && typeof store.getById === "function";
+}
+
+export function asSessionCapabilityLookup(store: SessionCapabilityStore): SessionCapabilityLookup {
+  if (isSessionCapabilityLookup(store)) {
+    return store;
+  }
+  return {
+    get: (key) => store[key],
+    getById: (id) => {
+      const normalizedId = normalizeOptionalString(id);
+      return normalizedId
+        ? Object.values(store).find(
+            (entry) => normalizeOptionalString(entry?.sessionId) === normalizedId,
+          )
+        : undefined;
+    },
+  };
+}
 
 /** Lazily read metadata through the session owner, never a whole-store listing. */
 export function createSubagentSessionStore(

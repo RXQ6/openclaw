@@ -9,6 +9,7 @@ import {
   getSubagentRunByChildSessionKeyFromRuns,
   listRunsForControllerFromRuns,
   listRunsForRequesterFromRuns,
+  resolveRequesterForChildSessionFromRuns,
   shouldIgnorePostCompletionAnnounceForSessionFromRuns,
   type LatestSubagentRunReadIndex,
   type SubagentRunReadIndex,
@@ -118,7 +119,7 @@ export function resolveRequesterForChildSession(childSessionKey: string): {
   requesterAgentId?: string;
   requesterOrigin?: DeliveryContext;
 } | null {
-  const resolved = getLatestSubagentRunByChildSessionKeyFromRuns(
+  const resolved = resolveRequesterForChildSessionFromRuns(
     getSubagentRunsSnapshotForChildSession(subagentRuns, childSessionKey),
     childSessionKey,
   );

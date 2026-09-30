@@ -202,6 +202,35 @@ describe("persisted subagent capability lookups", () => {
     },
   );
 
+  it("keeps canonical depth fallback for a partial explicit record", () => {
+    const storePath = path.join(tempDirs.make("subagent-capability-partial-"), "sessions.sqlite");
+    const cfg = { session: { store: storePath } };
+    const key = "agent:main:subagent:child";
+    runOpenClawAgentWriteTransaction(
+      (database) => {
+        writeSessionEntry(database, key, { sessionId: "child", updatedAt: 1, spawnDepth: 3 });
+      },
+      { agentId: "main", path: storePath },
+    );
+    expect(
+      resolveStoredSubagentCapabilities(key, {
+        cfg,
+        store: { [key]: { spawnedBy: "agent:main:main" } },
+      }).depth,
+    ).toBe(3);
+  });
+
+  it("uses the first matching normalized session ID in an explicit record", () => {
+    expect(
+      getSubagentDepthFromSessionStore(" duplicate-session ", {
+        store: {
+          "agent:main:subagent:first": { sessionId: "\tduplicate-session\n", spawnDepth: 2 },
+          "agent:main:subagent:later": { sessionId: "duplicate-session", spawnDepth: 4 },
+        },
+      }),
+    ).toBe(2);
+  });
+
   it.each(["", " ", "\t\r\n", "\u00a0\u2003\u2028\ufeff"])(
     "matches explicit stores for nested and by-id lineage without listing unrelated sessions (padding=%j)",
     (padding) => {
@@ -236,7 +265,6 @@ describe("persisted subagent capability lookups", () => {
         [cycle]: { sessionId: "cycle-one", updatedAt: 1, spawnedBy: "agent:main:acp:cycle-two" },
         "agent:main:acp:cycle-two": { sessionId: "cycle-two", updatedAt: 1, spawnedBy: cycle },
       };
-      const store = createSessionCapabilityLookup(entries);
       runOpenClawAgentWriteTransaction(
         (database) => {
           for (const [key, entry] of Object.entries(entries)) {
@@ -253,24 +281,27 @@ describe("persisted subagent capability lookups", () => {
         { agentId: "main", path: storePath },
       );
       const listing = vi.spyOn(sessionAccessor, "listSessionEntriesReadOnly");
+      const stores = [entries, createSessionCapabilityLookup(entries)];
       for (const key of [parent, child, acp, dashboard, byId, "child-id", cycle]) {
         const persisted = resolveSubagentCapabilityStore(key, { cfg });
-        expect(resolveStoredSubagentCapabilities(key, { cfg, store: persisted })).toEqual(
-          resolveStoredSubagentCapabilities(key, { store }),
-        );
-        expect(getSubagentDepthFromSessionStore(key, { cfg, store: persisted })).toBe(
-          getSubagentDepthFromSessionStore(key, { store }),
-        );
-        if (key !== "child-id") {
-          expect(isSubagentEnvelopeSession(key, { cfg, store: persisted })).toBe(
-            isSubagentEnvelopeSession(key, { store }),
+        for (const store of stores) {
+          expect(resolveStoredSubagentCapabilities(key, { cfg, store: persisted })).toEqual(
+            resolveStoredSubagentCapabilities(key, { store }),
           );
-          expect(
-            resolveStoredSubagentInheritedToolAllowlist(key, { cfg, store: persisted }),
-          ).toEqual(resolveStoredSubagentInheritedToolAllowlist(key, { store }));
-          expect(
-            resolveStoredSubagentInheritedToolDenylist(key, { cfg, store: persisted }),
-          ).toEqual(resolveStoredSubagentInheritedToolDenylist(key, { store }));
+          expect(getSubagentDepthFromSessionStore(key, { cfg, store: persisted })).toBe(
+            getSubagentDepthFromSessionStore(key, { store }),
+          );
+          if (key !== "child-id") {
+            expect(isSubagentEnvelopeSession(key, { cfg, store: persisted })).toBe(
+              isSubagentEnvelopeSession(key, { store }),
+            );
+            expect(
+              resolveStoredSubagentInheritedToolAllowlist(key, { cfg, store: persisted }),
+            ).toEqual(resolveStoredSubagentInheritedToolAllowlist(key, { store }));
+            expect(
+              resolveStoredSubagentInheritedToolDenylist(key, { cfg, store: persisted }),
+            ).toEqual(resolveStoredSubagentInheritedToolDenylist(key, { store }));
+          }
         }
       }
       expect(

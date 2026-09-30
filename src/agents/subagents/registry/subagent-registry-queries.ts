@@ -1,3 +1,4 @@
+import type { DeliveryContext } from "../../../utils/delivery-context.types.js";
 import { isDeliverySuspended } from "./subagent-delivery-state.js";
 import {
   buildSubagentRunReadTopology,
@@ -447,6 +448,25 @@ export function getSubagentRunByChildSessionKeyFromRuns(
     latestSubagentRun(runs.values(), (entry) => entry.childSessionKey === key) ??
     null
   );
+}
+
+export function resolveRequesterForChildSessionFromRuns(
+  runs: Map<string, SubagentRunRecord>,
+  childSessionKey: string,
+): {
+  requesterSessionKey: string;
+  requesterAgentId?: string;
+  requesterOrigin?: DeliveryContext;
+} | null {
+  const latest = getLatestSubagentRunByChildSessionKeyFromRuns(runs, childSessionKey);
+  if (!latest) {
+    return null;
+  }
+  return {
+    requesterSessionKey: latest.requesterSessionKey,
+    requesterAgentId: latest.requesterAgentId,
+    requesterOrigin: latest.requesterOrigin,
+  };
 }
 
 export function shouldIgnorePostCompletionAnnounceForSessionFromRuns(
