@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 import OpenClawKit
 import Testing
@@ -232,10 +233,11 @@ struct BundledRuntimeTests {
         let state = profile.stateDirectoryURL(homeDirectory: home)
         let cli = state.appendingPathComponent("bin/openclaw")
         try FileManager.default.createDirectory(at: cli.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let managedEntry = state.appendingPathComponent("tools/node-v24.16.0/lib/node_modules/openclaw/dist/entry.js")
         let managed = """
         #!/usr/bin/env bash
         set -euo pipefail
-        exec "\(state.path)/tools/node/bin/node" "\(state.path)/tools/node-v24.16.0/lib/node_modules/openclaw/dist/entry.js" "$@"
+        exec "\(state.path)/tools/node/bin/node" "\(managedEntry.path)" "$@"
 
         """
         try managed.write(to: cli, atomically: true, encoding: .utf8)
@@ -260,7 +262,8 @@ struct BundledRuntimeTests {
         #expect(try String(contentsOf: operatorTarget, encoding: .utf8) == managed)
     }
 
-    @Test func `shell integration conflicts preserve operator files without blocking runtime preparation`() async throws {
+    @Test
+    func `shell integration conflicts preserve operator files without blocking runtime preparation`() async throws {
         let root = try makeTempDirForTests()
         defer { try? FileManager.default.removeItem(at: root) }
         let home = root.appendingPathComponent("home")
@@ -301,6 +304,117 @@ struct BundledRuntimeTests {
         _ = try await BundledRuntime.seed(
             bundle: #require(Bundle(url: app)), profile: profile, homeDirectory: home)
         #expect(try FileManager.default.destinationOfSymbolicLink(atPath: macCLI.path) == missingOperatorCLI.path)
+    }
+
+    @Test(arguments: [false, true])
+    @MainActor
+    func `declined transient integration preserves Mac CLI links and the portable Bun shim`(
+        existingLink: Bool) async throws
+    {
+        let root = try makeTempDirForTests()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let home = root.appendingPathComponent("home")
+        let profile = AppProfile(environment: ["OPENCLAW_PROFILE": "deferred-cli"])
+        let state = profile.stateDirectoryURL(homeDirectory: home)
+        let app = root.appendingPathComponent("Installed.app")
+        _ = try self.makeBundle(
+            at: app, builtAt: "2026-08-27T00:00:00.000Z", buildID: "installed-build", command: "unused")
+        let stableBundle = try #require(Bundle(url: app))
+        let runtime = try await BundledRuntime.seed(bundle: stableBundle, profile: profile, homeDirectory: home)
+        let link = state.appendingPathComponent("bin/openclaw-mac")
+        let previousTarget = try FileManager.default.destinationOfSymbolicLink(atPath: link.path)
+        if !existingLink { try FileManager.default.removeItem(at: link) }
+        let shim = state.appendingPathComponent("bin/openclaw")
+        try FileManager.default.removeItem(at: shim)
+        let temporaryApp = home.appendingPathComponent("Downloads/OpenClaw.app")
+        _ = try self.makeBundle(
+            at: temporaryApp, builtAt: "2026-08-27T00:00:01.000Z", buildID: "download-build", command: "unused")
+        let temporaryBundle = try #require(Bundle(url: temporaryApp))
+        let allowed = !ApplicationRelocator.isTransientLocation(
+            temporaryBundle.bundleURL, homeDirectory: home, isReadOnlyVolume: false)
+        try #require(!allowed)
+
+        BundledRuntime.refreshOwnedMacCLILink(
+            bundle: temporaryBundle, profile: profile, homeDirectory: home, allowsPersistentIntegration: allowed)
+        #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: link.path)) ==
+            (existingLink ? previousTarget : nil))
+        #expect(!FileManager.default.fileExists(atPath: shim.path))
+        runtime.installCLI(
+            bundle: temporaryBundle, profile: profile, homeDirectory: home, allowsPersistentIntegration: allowed)
+        #expect((try? FileManager.default.destinationOfSymbolicLink(atPath: link.path)) ==
+            (existingLink ? previousTarget : nil))
+        #expect(FileManager.default.isExecutableFile(atPath: shim.path))
+        let seeded = try #require(try BundledRuntime.seeded(profile: profile, homeDirectory: home))
+        #expect(seeded.root.path == runtime.root.path)
+    }
+
+    @Test func `owned mac CLI link follows app moves without seeding or creating terminal commands`() throws {
+        let root = try makeTempDirForTests()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let home = root.appendingPathComponent("home")
+        let profile = AppProfile(environment: ["OPENCLAW_PROFILE": "mac-cli-move"])
+        let state = profile.stateDirectoryURL(homeDirectory: home)
+        var app = root.appendingPathComponent("Original.app")
+        _ = try self.makeBundle(
+            at: app, builtAt: "2026-08-27T00:00:00.000Z", buildID: "move-build", command: "unused")
+        let bundle = try #require(Bundle(url: app))
+        BundledRuntime.refreshOwnedMacCLILink(
+            bundle: bundle, profile: profile, homeDirectory: home, allowsPersistentIntegration: true)
+        #expect(!FileManager.default.fileExists(atPath: state.path))
+        let runtime = BundledRuntime(root: app.appendingPathComponent("Contents/Resources/runtime"))
+        runtime.installCLI(bundle: bundle, profile: profile, homeDirectory: home, allowsPersistentIntegration: true)
+        let command = state.appendingPathComponent("bin/openclaw-mac")
+        try #require(FileManager.default.isExecutableFile(atPath: command.path))
+        let terminalCLI = state.appendingPathComponent("bin/openclaw")
+        try FileManager.default.removeItem(at: terminalCLI)
+
+        for name in ["Moved.app", "MovedAgain.app"] {
+            let moved = root.appendingPathComponent(name)
+            try FileManager.default.moveItem(at: app, to: moved)
+            #expect(!FileManager.default.isExecutableFile(atPath: command.path))
+            let movedBundle = try #require(Bundle(url: moved))
+            BundledRuntime.refreshOwnedMacCLILink(
+                bundle: movedBundle, profile: profile, homeDirectory: home, allowsPersistentIntegration: true)
+            #expect(try FileManager.default.destinationOfSymbolicLink(atPath: command.path) ==
+                movedBundle.bundleURL.appendingPathComponent("Contents/MacOS/openclaw-mac").path)
+            #expect(FileManager.default.isExecutableFile(atPath: command.path))
+            #expect(!FileManager.default.fileExists(atPath: terminalCLI.path))
+            #expect(!FileManager.default.fileExists(atPath: state.appendingPathComponent("runtime").path))
+            app = moved
+        }
+    }
+
+    @Test(arguments: [false, true])
+    func `matching operator mac CLI links are never adopted`(mismatchedOwnership: Bool) throws {
+        let root = try makeTempDirForTests()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let home = root.appendingPathComponent("home")
+        let profile = AppProfile(environment: ["OPENCLAW_PROFILE": "operator-mac-cli"])
+        let command = profile.stateDirectoryURL(homeDirectory: home).appendingPathComponent("bin/openclaw-mac")
+        let app = root.appendingPathComponent("Original.app")
+        _ = try self.makeBundle(
+            at: app, builtAt: "2026-08-27T00:00:00.000Z", buildID: "operator-build", command: "unused")
+        let bundle = try #require(Bundle(url: app))
+        let originalTarget = bundle.bundleURL.appendingPathComponent("Contents/MacOS/openclaw-mac").path
+        try FileManager.default.createDirectory(
+            at: command.deletingLastPathComponent(),
+            withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: command.path, withDestinationPath: originalTarget)
+        if mismatchedOwnership {
+            let metadata = Data("/different/app/openclaw-mac".utf8)
+            let result = metadata.withUnsafeBytes {
+                setxattr(command.path, "ai.openclaw.mac-cli-target", $0.baseAddress, metadata.count, 0, XATTR_NOFOLLOW)
+            }
+            try #require(result == 0)
+        }
+        BundledRuntime(root: app.appendingPathComponent("Contents/Resources/runtime"))
+            .installCLI(bundle: bundle, profile: profile, homeDirectory: home, allowsPersistentIntegration: true)
+        let moved = root.appendingPathComponent("Moved.app")
+        try FileManager.default.moveItem(at: app, to: moved)
+        let movedBundle = try #require(Bundle(url: moved))
+        BundledRuntime.refreshOwnedMacCLILink(
+            bundle: movedBundle, profile: profile, homeDirectory: home, allowsPersistentIntegration: true)
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: command.path) == originalTarget)
     }
 
     @Test func `healthy collection retains the previous build and any live runtime executable`() async throws {
@@ -355,5 +469,24 @@ struct BundledRuntimeTests {
             atPath: directory.appendingPathComponent("current").path) == "gc-2")
         #expect(try FileManager.default.destinationOfSymbolicLink(
             atPath: directory.appendingPathComponent("previous").path) == "gc-1")
+
+        try FileManager.default.removeItem(at: directory.appendingPathComponent("current"))
+        for index in 3...4 {
+            let app = home.appendingPathComponent("GC-\(index).app")
+            _ = try self.makeBundle(
+                at: app, builtAt: "2026-08-27T00:00:0\(index).000Z", buildID: "gc-\(index)", command: "unused")
+            let seeded = try await BundledRuntime.seed(
+                bundle: #require(Bundle(url: app)), profile: profile, homeDirectory: home)
+            let resolved = try #require(try BundledRuntime.seeded(profile: profile, homeDirectory: home))
+            #expect(resolved.root.path == seeded.root.path)
+            try await BundledRuntime.garbageCollectAfterHealthy(profile: profile, homeDirectory: home)
+            for retainedAfterRecovery in ["gc-1", "gc-2"] {
+                #expect(FileManager.default.fileExists(atPath: directory
+                        .appendingPathComponent(retainedAfterRecovery).path) == (index == 3))
+            }
+            #expect((try? FileManager.default.destinationOfSymbolicLink(
+                atPath: directory.appendingPathComponent("previous").path)) == (index == 3 ? nil : "gc-3"))
+            #expect(FileManager.default.fileExists(atPath: directory.appendingPathComponent("gc-3").path))
+        }
     }
 }

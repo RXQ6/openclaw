@@ -23,7 +23,8 @@ struct GatewayHostingTests {
     @Test(arguments: [
         Fixture(stored: nil, bundled: true, serviceExists: false, expected: .app),
         Fixture(stored: nil, bundled: true, serviceExists: true, expected: .service),
-        Fixture(stored: "app", bundled: true, serviceExists: true, expected: .app),
+        Fixture(stored: "app", bundled: true, serviceExists: true, expected: .service),
+        Fixture(stored: "app", bundled: true, serviceExists: false, expected: .app),
         Fixture(stored: "service", bundled: true, serviceExists: false, expected: .service),
         Fixture(stored: "unknown", bundled: true, serviceExists: false, expected: .app),
         Fixture(stored: "unknown", bundled: true, serviceExists: true, expected: .service),

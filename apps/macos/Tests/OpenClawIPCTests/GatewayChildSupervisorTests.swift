@@ -170,6 +170,55 @@ struct GatewayChildSupervisorTests {
         await supervisor.stop()
     }
 
+    @Test func `readiness retry keeps child restart and terminal failure events attached`() async throws {
+        let clock = ManualTestClock()
+        let manager = GatewayProcessManager(readinessClock: clock)
+        var children: [FakeGatewayChild] = []
+        let supervisor = GatewayChildSupervisor(clock: clock, launcher: { _ in
+            let child = FakeGatewayChild(pid: Int32(500 + children.count))
+            children.append(child)
+            return child.child
+        })
+        let (events, continuation) = AsyncStream<GatewayChildSupervisor.Event>.makeStream()
+        defer {
+            continuation.finish()
+            manager._testResetGatewayStartTask()
+        }
+        var iterator = events.makeAsyncIterator()
+        manager._testBeginGatewayStartGeneration()
+        _ = try await supervisor.start(configuration: self.configuration()) { event in
+            manager.handleChildEvent(event, port: 19487)
+            continuation.yield(event)
+        }
+        manager.setTestingStatus(.failed("initial readiness failed"))
+        // Retry advances readiness ownership while retaining the original child and callback.
+        manager._testBeginGatewayStartGeneration()
+
+        for seconds in [1, 2, 4, 8] {
+            children.last?.exited.open()
+            #expect(await iterator.next() == .restarting(delay: .seconds(seconds)))
+            #expect(manager.status == .starting)
+            await clock.waitForSleep(until: clock.now + .seconds(seconds))
+            clock.advance(by: .seconds(seconds))
+            #expect(await iterator.next() == .started(Int32(499 + children.count)))
+            await manager.waitForStartupAttempt()
+            #expect(manager.status == .starting)
+        }
+        children.last?.exited.open()
+        guard case let .failed(reason) = await iterator.next() else {
+            Issue.record("expected the current lifecycle to receive the supervisor failure")
+            await supervisor.stop()
+            return
+        }
+        #expect(manager.status == .failed(reason))
+        #expect(manager.lastFailureReason == reason)
+
+        manager._testResetGatewayStartTask()
+        manager.handleChildEvent(.restarting(delay: .seconds(1)), port: 19487)
+        #expect(manager.status == .failed(reason))
+        await supervisor.stop()
+    }
+
     @Test(arguments: [59, 60])
     func `failure backoff resets only after sixty healthy seconds`(healthySeconds: Int) async throws {
         let clock = ManualTestClock()

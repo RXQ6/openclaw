@@ -308,6 +308,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         DockIconManager.shared.updateDockVisibility()
         if launchPlan.allowsInteractiveServices, let state {
+            BundledRuntime.refreshOwnedMacCLILink(
+                allowsPersistentIntegration: ApplicationRelocator.currentBundleAllowsPersistentIntegration())
             let controller = StatusMenuController(state: state, updater: self.updaterController)
             controller.start()
             self.statusMenuController = controller

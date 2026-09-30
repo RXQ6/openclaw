@@ -1,6 +1,19 @@
 import Foundation
 
 extension GatewayProcessManager {
+    enum GatewayReadinessPurpose {
+        case attach
+        case launchd
+        case child
+        case audit
+    }
+
+    enum GatewayProbeFailureDisposition: Equatable {
+        case retryWithoutRepair
+        case retryWithRepair
+        case fail
+    }
+
     enum GatewayReadinessDeadlinePolicy {
         case migration(window: TimeInterval, tolerance: TimeInterval)
         case fixed(timeout: TimeInterval)

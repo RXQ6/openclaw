@@ -7,9 +7,12 @@ enum GatewayLaunchAgentManager {
         let reusablePID: Int32?
     }
 
-    struct InstalledServiceCLI: Sendable {
+    struct InstalledServiceCLI: Sendable, Equatable {
         let prefix: [String]
         let sqliteLibrary: String?
+        var environment: [String: String] = [:]
+        var usesGeneratedEnvironment = false
+        var hadRuntimePin = false
     }
 
     private static let logger = Logger(subsystem: "ai.openclaw", category: "gateway.launchd")
@@ -187,7 +190,8 @@ enum GatewayLaunchAgentManager {
     static func set(
         enabled: Bool,
         port: Int,
-        allowUnconfigured: Bool = false) async -> String?
+        allowUnconfigured: Bool = false,
+        whenMissingCLI: InstalledServiceCLI? = nil) async -> String?
     {
         if enabled, CommandResolver.connectionModeIsRemote(), !allowUnconfigured {
             self.logger.info("launchd change skipped (remote mode)")
@@ -221,11 +225,12 @@ enum GatewayLaunchAgentManager {
                 }
                 installedCLI = cli
             } else {
-                installedCLI = nil
+                installedCLI = existed ? nil : whenMissingCLI
             }
             let runtime: BundledRuntime?
             do {
-                runtime = BundledRuntime.isBundledApp && !existed ? try await BundledRuntime.seed() : nil
+                runtime = BundledRuntime.isBundledApp && !existed && installedCLI == nil
+                    ? try await BundledRuntime.seed() : nil
             } catch {
                 return error.localizedDescription
             }
@@ -238,11 +243,23 @@ enum GatewayLaunchAgentManager {
                       self.launchdConfigSnapshot() == existing
                 else { return "Gateway service changed during setup; retry" }
             }
-            let arguments = self.installArguments(
+            var arguments = self.installArguments(
                 port: port,
                 allowUnconfigured: allowUnconfigured,
                 runtime: runtime,
                 launchAgentExists: existed)
+            if !existed, let preserved = whenMissingCLI {
+                guard let executable = preserved.prefix.first, executable.hasPrefix("/"),
+                      ["node", "bun"].contains(URL(fileURLWithPath: executable).lastPathComponent)
+                else { return "The retained Gateway runtime could not be inspected." }
+                arguments += ["--runtime", URL(fileURLWithPath: executable).lastPathComponent]
+                // The historical app-tools Node install remains unpinned so it can migrate later.
+                if preserved.hadRuntimePin ||
+                    !self.isManagedNode(executable, stateDirectory: AppProfile.current.stateDirectoryURL())
+                {
+                    arguments += ["--runtime-path", executable]
+                }
+            }
             return await self.runDaemonCommand(arguments, runtime: runtime, installedCLI: installedCLI)
         }
 
@@ -357,20 +374,32 @@ enum GatewayLaunchAgentManager {
         return Array(command)
     }
 
+    static func installedServiceCLI() -> InstalledServiceCLI? {
+        let artifacts = self.generatedEnvironmentArtifacts(
+            directory: self.generatedEnvironmentDirectoryURL, profile: .current)
+        return self.launchdConfigSnapshot().flatMap {
+            self.installedServiceCLI(
+                snapshot: $0,
+                environmentFile: artifacts.environment,
+                environmentWrapper: artifacts.wrapper)
+        }
+    }
+
     static func installedServiceCLI(
         snapshot: LaunchAgentPlistSnapshot,
         environmentFile: URL,
-        environmentWrapper: URL) -> InstalledServiceCLI?
+        environmentWrapper: URL,
+        subcommand: String = "gateway") -> InstalledServiceCLI?
     {
         guard let command = self.installedGatewayCommand(
             programArguments: snapshot.programArguments,
             environmentFile: environmentFile,
             environmentWrapper: environmentWrapper),
-            let gateway = command.firstIndex(of: "gateway"), gateway >= 2,
+            let service = command.firstIndex(of: subcommand), service >= 2,
             let executable = command.first,
             ["node", "bun"].contains(URL(fileURLWithPath: executable).lastPathComponent)
         else { return nil }
-        let prefix = Array(command[..<gateway])
+        let prefix = Array(command[..<service])
         let entry = prefix.dropFirst().drop(while: {
             $0.hasPrefix("--max-old-space-size=") ||
                 $0.hasPrefix("--max-old-space-size-percentage=") || $0.hasPrefix("--max-heap-size=")
@@ -381,7 +410,12 @@ enum GatewayLaunchAgentManager {
             (url.deletingLastPathComponent().lastPathComponent == "dist" &&
                 ["index.js", "index.mjs", "entry.js", "entry.mjs"].contains(url.lastPathComponent))
         else { return nil }
-        return InstalledServiceCLI(prefix: prefix, sqliteLibrary: snapshot.environment["OPENCLAW_SQLITE_LIBRARY"])
+        return InstalledServiceCLI(
+            prefix: prefix,
+            sqliteLibrary: snapshot.environment["OPENCLAW_SQLITE_LIBRARY"],
+            environment: snapshot.environment,
+            usesGeneratedEnvironment: snapshot.programArguments.first == "/bin/sh" ||
+                snapshot.programArguments.first == environmentWrapper.path)
     }
 
     static func kickstart() async -> String? {
@@ -610,7 +644,7 @@ extension GatewayLaunchAgentManager {
         profile: AppProfile,
         searchPaths: [String]) -> [String: String]
     {
-        var result = environment
+        var result = environment.merging(installedCLI?.environment ?? [:]) { _, installed in installed }
         var paths = searchPaths
         if let runtime {
             paths.insert(runtime.bun.deletingLastPathComponent().path, at: 0)
@@ -629,8 +663,7 @@ extension GatewayLaunchAgentManager {
             result["OPENCLAW_STATE_DIR"] = directory.path
             result["OPENCLAW_CONFIG_PATH"] = directory.appendingPathComponent("openclaw.json").path
         }
-        result.removeValue(forKey: "OPENCLAW_GATEWAY_HOST_LIFELINE")
-        return result
+        return GatewayChildSupervisor.environmentWithoutSupervisorMarkers(result)
     }
 
     private static func withJsonFlag(_ args: [String]) -> [String] {

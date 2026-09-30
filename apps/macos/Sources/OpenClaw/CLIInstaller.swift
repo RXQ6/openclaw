@@ -67,6 +67,8 @@ enum ManagedCLIUpdateOutcome: Equatable {
 
 @MainActor
 enum CLIInstaller {
+    static let managedUpdateTimeout: TimeInterval = 7200
+
     enum Channel: String, CaseIterable, Equatable {
         case stable
         case beta
@@ -213,13 +215,36 @@ enum CLIInstaller {
         return fallbackStatus ?? .missing(location: self.managedExecutableLocation())
     }
 
-    static func managedStatus() async -> Status {
-        await self.managedStatus(expectedVersion: GatewayEnvironment.expectedGatewayVersionString())
+    static func managedStatus(
+        installedCLI: GatewayLaunchAgentManager.InstalledServiceCLI? = nil,
+        usesBundledRuntime: Bool = true) async -> Status
+    {
+        await self.managedStatus(
+            expectedVersion: GatewayEnvironment.expectedGatewayVersionString(),
+            installedCLI: installedCLI,
+            usesBundledRuntime: usesBundledRuntime)
     }
 
-    private static func managedStatus(expectedVersion: String?) async -> Status {
-        if BundledRuntime.isBundledApp { return self.bundledStatus() }
+    static func managedStatus(
+        expectedVersion: String?,
+        installedCLI: GatewayLaunchAgentManager.InstalledServiceCLI? = nil,
+        usesBundledRuntime: Bool = true) async -> Status
+    {
         let location = self.managedExecutableLocation()
+        if let installedCLI {
+            let environment = GatewayLaunchAgentManager.daemonEnvironment(
+                runtime: nil,
+                installedCLI: installedCLI,
+                environment: ProcessInfo.processInfo.environment,
+                profile: .current,
+                searchPaths: CommandResolver.preferredPaths())
+            let response = await ShellExecutor.runDetailed(
+                command: installedCLI.prefix + ["--version"], cwd: nil, env: environment, timeout: 15)
+            return response.success
+                ? self.classifyVersion(location: location, output: response.stdout, expectedVersion: expectedVersion)
+                : .unusable(location: location)
+        }
+        if usesBundledRuntime, BundledRuntime.isBundledApp { return self.bundledStatus() }
         guard FileManager.default.isExecutableFile(atPath: location) else {
             return .missing(location: location)
         }
@@ -351,7 +376,7 @@ enum CLIInstaller {
         if BundledRuntime.isBundledApp {
             await statusHandler("Preparing OpenClaw…")
             do {
-                _ = try await BundledRuntime.seed()
+                _ = try await self.prepareBundledGateway(statusHandler: statusHandler)
                 NotificationCenter.default.post(name: .openclawCLIInstalled, object: nil)
                 await statusHandler("OpenClaw is ready.")
                 return true
@@ -547,6 +572,9 @@ enum CLIInstaller {
         targetVersion: String,
         restartGateway: Bool = true,
         repair: Bool = false,
+        installedCLI: GatewayLaunchAgentManager.InstalledServiceCLI? = nil,
+        checkCurrent: (@MainActor @Sendable () async throws -> Void)? = nil,
+        onDispatch: (@MainActor @Sendable () -> Void)? = nil,
         statusHandler: @escaping @MainActor @Sendable (String) async -> Void) async
         -> ManagedCLIUpdateOutcome
     {
@@ -554,19 +582,33 @@ enum CLIInstaller {
         await statusHandler(repair
             ? String(localized: "Repairing the OpenClaw Gateway update…")
             : String(format: String(localized: "Updating the OpenClaw Gateway to %@…"), targetVersion))
-        let command = self.managedUpdateCommand(
+        var command = self.managedUpdateCommand(
             executable: executable,
             targetVersion: targetVersion,
             restartGateway: restartGateway,
             repair: repair)
-        let environment = self.probeEnvironment(location: executable)
+        if let installedCLI { command = installedCLI.prefix + command.dropFirst() }
+        let environment = installedCLI.map {
+            GatewayLaunchAgentManager.daemonEnvironment(
+                runtime: nil,
+                installedCLI: $0,
+                environment: ProcessInfo.processInfo.environment,
+                profile: .current,
+                searchPaths: CommandResolver.preferredPaths())
+        } ?? self.probeEnvironment(location: executable)
+        do { try await checkCurrent?() } catch {
+            let message = String(localized: "Gateway update failed.")
+            await statusHandler(message)
+            return .failure(message: message, details: error.localizedDescription)
+        }
+        onDispatch?()
         let response = await ShellExecutor.runDetailed(
             command: command,
             cwd: nil,
             env: environment,
             // The CLI timeout is per step. Keep the aggregate watchdog above
             // the full package, plugin, doctor, and restart sequence.
-            timeout: 7200)
+            timeout: self.managedUpdateTimeout)
         let summary = self.parseManagedUpdateSummary(response.stdout)
 
         let reportedStatus = summary?.status
@@ -589,7 +631,10 @@ enum CLIInstaller {
             return .failure(message: message, details: details.map(self.limitDiagnostic))
         }
 
-        let managedStatus = await self.managedStatus(expectedVersion: targetVersion)
+        let managedStatus = await self.managedStatus(
+            expectedVersion: targetVersion,
+            installedCLI: installedCLI,
+            usesBundledRuntime: false)
         guard case let .ready(_, installedVersion) = managedStatus else {
             let message = String(localized: "Gateway update finished, but verification failed.")
             await statusHandler(message)

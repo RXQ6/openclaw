@@ -75,11 +75,22 @@ extension BundledRuntime {
             _ = try self.resolve(root: target, bundle: bundle)
         }
         if previous != buildID {
-            if let previous { try self.replaceBuildLink("previous", target: previous, in: directory) }
+            if let previous {
+                try self.replaceBuildLink("previous", target: previous, in: directory)
+            } else if try self.buildLink("previous", in: directory) != nil {
+                // With current missing, this link cannot identify the immediately previous build.
+                try fileManager.removeItem(at: directory.appendingPathComponent("previous"))
+            }
             try self.replaceBuildLink("current", target: buildID, in: directory)
         }
         let runtime = try self.resolve(root: target, bundle: bundle)
-        runtime.installCLI(bundle: bundle, profile: profile, homeDirectory: homeDirectory)
+        let allowsPersistentIntegration = await ApplicationRelocator.currentBundleAllowsPersistentIntegration(
+            bundle: bundle)
+        runtime.installCLI(
+            bundle: bundle,
+            profile: profile,
+            homeDirectory: homeDirectory,
+            allowsPersistentIntegration: allowsPersistentIntegration)
         return runtime
     }
 
@@ -90,9 +101,12 @@ extension BundledRuntime {
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser) async throws
     {
         let directory = profile.stateDirectoryURL(homeDirectory: homeDirectory).appendingPathComponent("runtime")
-        let retained = try Set([self.buildLink("current", in: directory), self.buildLink("previous", in: directory)]
-            .compactMap(\.self))
-        guard !retained.isEmpty, let liveExecutables = self.liveExecutablePaths() else { return }
+        // A recovered missing current link needs one successful update cycle to reestablish retention.
+        guard let current = try self.buildLink("current", in: directory),
+              let previous = try self.buildLink("previous", in: directory),
+              let liveExecutables = self.liveExecutablePaths()
+        else { return }
+        let retained = Set([current, previous])
         for entry in try FileManager.default.contentsOfDirectory(
             at: directory, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey])
         {

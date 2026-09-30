@@ -15,21 +15,6 @@ private struct GatewayHealthProbeTimeout: LocalizedError, Sendable {
 final class GatewayProcessManager {
     static let shared = GatewayProcessManager()
 
-    private struct LaunchAgentEnableRequest: Sendable {
-        let port: Int
-        let allowUnconfigured: Bool
-        let generation: UInt64
-        let runtimeForUpdate: BundledRuntime?
-        var invocationIDs: [UInt64]
-
-        func hasSameConfiguration(as other: LaunchAgentEnableRequest) -> Bool {
-            self.port == other.port &&
-                self.allowUnconfigured == other.allowUnconfigured &&
-                self.generation == other.generation &&
-                self.runtimeForUpdate?.root == other.runtimeForUpdate?.root
-        }
-    }
-
     private struct LaunchAgentReadinessFailure: Equatable {
         let port: Int
         let pid: Int32
@@ -38,33 +23,6 @@ final class GatewayProcessManager {
     private struct LaunchAgentReadinessCandidate: Equatable {
         let failure: LaunchAgentReadinessFailure
         let generation: UInt64
-    }
-
-    private enum LaunchAgentEnableResult: Sendable {
-        case skipped
-        case installedService
-        case failed(String)
-        case deferred(String)
-
-        var error: String? {
-            if case let .failed(message) = self {
-                message
-            } else { nil }
-        }
-
-        var installed: Bool {
-            if case .installedService = self {
-                true
-            } else {
-                false
-            }
-        }
-
-        var inspectionFailure: String? {
-            if case let .deferred(message) = self {
-                message
-            } else { nil }
-        }
     }
 
     private struct GatewayReadinessContext {
@@ -78,19 +36,6 @@ final class GatewayProcessManager {
         let endpointPIDBeforeProbe: Int32?
         let launchAgentInstalled: Bool
         let inspectionFailure: String?
-    }
-
-    private enum GatewayReadinessPurpose {
-        case attach
-        case launchd
-        case child
-        case audit
-    }
-
-    private enum GatewayProbeFailureDisposition: Equatable {
-        case retryWithoutRepair
-        case retryWithRepair
-        case fail
     }
 
     private enum GatewayReadinessFailure {
@@ -131,11 +76,16 @@ final class GatewayProcessManager {
     private(set) var existingGatewayDetails: String?
     private(set) var lastFailureReason: String?
 
-    enum Installation {
-        case managed, external, unreadable
-
-        static let ownershipFailure =
-            "Could not read the Gateway service ownership record. Check the Gateway LaunchAgent and retry."
+    var retainedServiceCLI: GatewayLaunchAgentManager.InstalledServiceCLI? {
+        didSet {
+            if let cli = self.retainedServiceCLI {
+                AppDefaults.standard.set(
+                    try? GatewayLaunchAgentManager.resumeData(for: cli),
+                    forKey: GatewayLaunchAgentManager.resumeCommandKey)
+            } else {
+                AppDefaults.standard.removeObject(forKey: GatewayLaunchAgentManager.resumeCommandKey)
+            }
+        }
     }
 
     var installation: Installation {
@@ -143,7 +93,12 @@ final class GatewayProcessManager {
     }
 
     var gatewayHosting: GatewayHosting {
-        GatewayHosting.resolve(
+        if self.retainedServiceCLI != nil ||
+            AppDefaults.standard.object(forKey: GatewayLaunchAgentManager.resumeCommandKey) != nil
+        {
+            return .service
+        }
+        return GatewayHosting.resolve(
             stored: AppDefaults.standard.string(forKey: GatewayHosting.defaultsKey),
             bundled: BundledRuntime.isBundledApp,
             serviceExists: GatewayLaunchAgentManager.launchdProgramArguments()?.isEmpty != true)
@@ -154,9 +109,18 @@ final class GatewayProcessManager {
     }
 
     var usesSeededGateway: Bool {
-        BundledRuntime.isBundledApp && (try? BundledRuntime.seeded()) != nil &&
-            self.installation == .managed &&
-            (!CommandResolver.connectionModeIsRemote() || self.hostsLocalGatewayWithRemotePrimary)
+        guard BundledRuntime.isBundledApp, self.installation == .managed,
+              !CommandResolver.connectionModeIsRemote() || self.hostsLocalGatewayWithRemotePrimary,
+              let arguments = GatewayLaunchAgentManager.launchdProgramArguments()
+        else { return false }
+        return GatewayHosting.usesSeededGateway(
+            hasService: !arguments.isEmpty,
+            installedCLI: GatewayLaunchAgentManager.installedServiceCLI(),
+            hasCurrentSeed: self.childSupervisor.isActive || (try? BundledRuntime.seeded()) != nil,
+            stateDirectory: OpenClawPaths.stateDirURL,
+            hasRetainedService: self.retainedServiceCLI != nil ||
+                AppDefaults.standard.object(forKey: GatewayLaunchAgentManager.resumeCommandKey) != nil,
+            retainedCLI: self.retainedServiceCLI)
     }
 
     private func installation(for port: Int, whenMissing: Installation) -> Installation {
@@ -170,7 +134,7 @@ final class GatewayProcessManager {
     }
 
     private var desiredActive = false
-    private var isTerminating = false
+    private(set) var isTerminating = false
     private var environmentRefreshTask: Task<Void, Never>?
     private var lastEnvironmentRefresh: Date?
     private var logRefreshTask: Task<Void, Never>?
@@ -297,6 +261,9 @@ final class GatewayProcessManager {
         generation expectedGeneration: UInt64? = nil,
         runtimeForUpdate: BundledRuntime? = nil) async -> LaunchAgentEnableResult
     {
+        do { try self.loadRetainedServiceForResume() } catch {
+            return .failed(error.localizedDescription)
+        }
         let generation = expectedGeneration ?? self.gatewayStartGeneration
         await self.waitForPendingLaunchAgentDisable()
         guard generation == self.gatewayStartGeneration else { return .skipped }
@@ -438,7 +405,8 @@ final class GatewayProcessManager {
         if let error = await GatewayLaunchAgentManager.set(
             enabled: true,
             port: request.port,
-            allowUnconfigured: request.allowUnconfigured)
+            allowUnconfigured: request.allowUnconfigured,
+            whenMissingCLI: self.retainedServiceCLI)
         {
             return .failed(error)
         }
@@ -488,6 +456,11 @@ final class GatewayProcessManager {
 
     func startIfNeeded() {
         guard self.desiredActive, !self.isTerminating else { return }
+        do { try self.loadRetainedServiceForResume() } catch {
+            self.status = .failed(error.localizedDescription)
+            self.lastFailureReason = error.localizedDescription
+            return
+        }
         guard !CommandResolver.connectionModeIsRemote() || self.hostsLocalGatewayWithRemotePrimary else {
             self.status = .stopped
             return
@@ -583,12 +556,21 @@ final class GatewayProcessManager {
             _ = await priorDisableTask?.value
             _ = await enableTask?.value
             if self.launchAgentDisableGeneration == stopGeneration {
-                if hosting == .app {
-                    await self.childSupervisor.stop()
-                } else {
-                    _ = await GatewayLaunchAgentManager.set(
-                        enabled: false,
-                        port: GatewayEnvironment.gatewayPort())
+                // A service can be installed while our child still runs. Pause owns both teardowns.
+                await self.childSupervisor.stop()
+                if hosting == .service, self.launchAgentDisableGeneration == stopGeneration {
+                    do {
+                        try await self.retainManagedServiceForResume()
+                        if self.launchAgentDisableGeneration == stopGeneration {
+                            _ = await GatewayLaunchAgentManager.set(
+                                enabled: false, port: GatewayEnvironment.gatewayPort())
+                        }
+                    } catch {
+                        if self.launchAgentDisableGeneration == stopGeneration {
+                            self.lastFailureReason = error.localizedDescription
+                            self.status = .failed(error.localizedDescription)
+                        }
+                    }
                 }
             }
             if self.launchAgentDisableGeneration == stopGeneration {
@@ -1360,7 +1342,7 @@ extension GatewayProcessManager {
                 port: port,
                 allowUnconfigured: self.hostsLocalGatewayWithRemotePrimary))
             { [weak self] event in
-                self?.handleChildEvent(event, port: port, generation: startGeneration)
+                self?.handleChildEvent(event, port: port)
             }
             guard self.isCurrentGatewayStart(startGeneration) else { return }
             await self.observeChildReadiness(pid: pid, port: port, generation: startGeneration)
@@ -1373,8 +1355,11 @@ extension GatewayProcessManager {
         }
     }
 
-    private func handleChildEvent(_ event: GatewayChildSupervisor.Event, port: Int, generation: UInt64) {
-        guard self.isCurrentGatewayStart(generation) else { return }
+    func handleChildEvent(_ event: GatewayChildSupervisor.Event, port: Int) {
+        // A readiness retry can attach the same child. Its supervisor remains the event owner
+        // until stop drains it, independently of which readiness attempt created the child.
+        let generation = self.gatewayStartGeneration
+        guard self.isCurrentGatewayStart(generation), self.launchAgentDisableTask == nil else { return }
         self.setLaunchAgentReadinessState(candidate: nil, failure: nil)
         self.gatewayStartTask?.cancel()
         switch event {
@@ -1438,11 +1423,20 @@ extension GatewayProcessManager {
         await self.waitForStartupAttempt()
         guard !self.isTerminating, !Task.isCancelled,
               self.gatewayStartGeneration == updateGeneration else { throw CancellationError() }
+        try self.loadRetainedServiceForResume()
         guard self.usesSeededGateway else { return }
+        let pausedUpdate = AppStateStore.shared.isPaused ? try self.preparePausedServiceUpdate() : nil
         let runtime = try await BundledRuntime.seed()
         guard !self.isTerminating, !Task.isCancelled,
               self.gatewayStartGeneration == updateGeneration else { throw CancellationError() }
-        if AppStateStore.shared.isPaused { return }
+        if AppStateStore.shared.isPaused {
+            try await self.completePausedServiceUpdate(pausedUpdate, runtime: runtime) {
+                guard !self.isTerminating, !Task.isCancelled,
+                      self.gatewayStartGeneration == updateGeneration, AppStateStore.shared.isPaused
+                else { throw CancellationError() }
+            }
+            return
+        }
         if self.gatewayHosting == .app {
             self.stop()
             let stopGeneration = self.gatewayStartGeneration

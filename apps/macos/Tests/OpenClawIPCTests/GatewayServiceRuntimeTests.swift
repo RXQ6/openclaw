@@ -80,6 +80,44 @@ struct GatewayServiceRuntimeTests {
             stateDirectory: stateDirectory) == "Gateway service runtime could not be inspected")
     }
 
+    @Test func `installed service ownership outranks a retained resume command`() {
+        let state = URL(fileURLWithPath: "/profile")
+        let service = GatewayLaunchAgentManager.InstalledServiceCLI(
+            prefix: ["/operator/bun", "/profile/runtime/build-one/lib/node_modules/openclaw/openclaw.mjs"],
+            sqliteLibrary: nil)
+        #expect(GatewayHosting.usesSeededGateway(
+            hasService: true,
+            installedCLI: service,
+            hasCurrentSeed: true,
+            stateDirectory: state,
+            hasRetainedService: true))
+        for (prefix, expected) in [
+            (["/profile/runtime/build/bin/bun", "/profile/runtime/build/lib/openclaw.mjs"], true),
+            (["/profile/tools/node/bin/node", "/profile/lib/node_modules/openclaw/openclaw.mjs"], false),
+            (["/profile/runtime/build/bin/bun", "/profile/lib/node_modules/openclaw/openclaw.mjs"], false),
+            (service.prefix, true),
+        ] {
+            let retained = GatewayLaunchAgentManager.InstalledServiceCLI(prefix: prefix, sqliteLibrary: nil)
+            #expect(GatewayHosting.usesSeededGateway(
+                hasService: false,
+                installedCLI: nil,
+                hasCurrentSeed: true,
+                stateDirectory: state,
+                hasRetainedService: true,
+                retainedCLI: retained) == expected)
+        }
+        #expect(!GatewayHosting.usesSeededGateway(
+            hasService: false,
+            installedCLI: nil,
+            hasCurrentSeed: true,
+            stateDirectory: state,
+            hasRetainedService: true))
+        #expect(GatewayLaunchAgentManager.bundledRuntimeReplacementError(
+            appManaged: true,
+            installedRuntimePath: service.prefix.first,
+            stateDirectory: state) == "Gateway service uses an operator-pinned runtime; update it yourself")
+    }
+
     @Test func `existing service CLI keeps its runtime package flags and SQLite selection`() throws {
         let fixtures: [([String], String?)] = [
             (["/old/bin/bun", "/old/lib/node_modules/openclaw/openclaw.mjs"], "/old/lib/libsqlite3.dylib"),

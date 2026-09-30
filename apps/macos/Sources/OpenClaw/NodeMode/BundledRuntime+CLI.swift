@@ -4,9 +4,15 @@ import OSLog
 
 extension BundledRuntime {
     private static let shimSignature = "# OpenClaw.app managed CLI (bundled runtime)"
+    private static let macCLITargetAttribute = "ai.openclaw.mac-cli-target"
     private static let cliLogger = Logger(subsystem: "ai.openclaw", category: "bundled-runtime.cli")
 
-    func installCLI(bundle: Bundle, profile: AppProfile, homeDirectory: URL) {
+    func installCLI(
+        bundle: Bundle,
+        profile: AppProfile,
+        homeDirectory: URL,
+        allowsPersistentIntegration: Bool)
+    {
         let fileManager = FileManager.default
         let state = profile.stateDirectoryURL(homeDirectory: homeDirectory)
         let bin = state.appendingPathComponent("bin")
@@ -32,25 +38,89 @@ extension BundledRuntime {
         }
 
         do {
-            let source = bundle.bundleURL.appendingPathComponent("Contents/MacOS/openclaw-mac")
-            guard fileManager.isExecutableFile(atPath: source.path) else {
-                throw CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: source.path])
-            }
-            let macCommand = bin.appendingPathComponent("openclaw-mac")
-            if let existing = try? fileManager.destinationOfSymbolicLink(atPath: macCommand.path) {
-                if existing != source.path {
-                    Self.cliLogger.warning("Keeping existing macOS CLI link at \(macCommand.path, privacy: .public)")
-                }
-                return
-            }
-            if !fileManager.fileExists(atPath: macCommand.path) {
-                try fileManager.createSymbolicLink(at: macCommand, withDestinationURL: source)
-            } else {
-                Self.cliLogger.warning("Keeping operator-managed macOS CLI at \(macCommand.path, privacy: .public)")
-            }
+            try Self.updateMacCLILink(
+                bundle: bundle,
+                profile: profile,
+                homeDirectory: homeDirectory,
+                createIfMissing: true,
+                allowsPersistentIntegration: allowsPersistentIntegration)
         } catch {
             Self.cliLogger.warning("macOS CLI link setup failed: \(error.localizedDescription, privacy: .public)")
         }
+    }
+
+    static func refreshOwnedMacCLILink(
+        bundle: Bundle = .main,
+        profile: AppProfile = .current,
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
+        allowsPersistentIntegration: Bool)
+    {
+        guard bundle.bundleURL.pathExtension == "app" else { return }
+        do {
+            try self.updateMacCLILink(
+                bundle: bundle,
+                profile: profile,
+                homeDirectory: homeDirectory,
+                createIfMissing: false,
+                allowsPersistentIntegration: allowsPersistentIntegration)
+        } catch {
+            self.cliLogger.warning("macOS CLI link refresh failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private static func updateMacCLILink(
+        bundle: Bundle,
+        profile: AppProfile,
+        homeDirectory: URL,
+        createIfMissing: Bool,
+        allowsPersistentIntegration: Bool) throws
+    {
+        // The Bun shim uses portable seeded state; this link depends on a persistent app location.
+        guard allowsPersistentIntegration else { return }
+        let fileManager = FileManager.default
+        let source = bundle.bundleURL.appendingPathComponent("Contents/MacOS/openclaw-mac")
+        guard fileManager.isExecutableFile(atPath: source.path) else {
+            throw CocoaError(.fileNoSuchFile, userInfo: [NSFilePathErrorKey: source.path])
+        }
+        let command = profile.stateDirectoryURL(homeDirectory: homeDirectory).appendingPathComponent("bin/openclaw-mac")
+        let existing = try? fileManager.destinationOfSymbolicLink(atPath: command.path)
+        if let existing {
+            // Matching an unmarked link is not ownership; leave it unadopted.
+            if existing == source.path { return }
+            guard self.ownsMacCLILink(command, target: existing) else {
+                self.cliLogger.warning("Keeping operator-managed macOS CLI link at \(command.path, privacy: .public)")
+                return
+            }
+        } else {
+            guard createIfMissing, !fileManager.fileExists(atPath: command.path) else { return }
+        }
+        let temporary = command.deletingLastPathComponent().appendingPathComponent(".openclaw-mac-\(UUID().uuidString)")
+        defer { try? fileManager.removeItem(at: temporary) }
+        try fileManager.createSymbolicLink(at: temporary, withDestinationURL: source)
+        let target = Data(source.path.utf8)
+        let marked = target.withUnsafeBytes {
+            setxattr(temporary.path, self.macCLITargetAttribute, $0.baseAddress, target.count, 0, XATTR_NOFOLLOW)
+        }
+        guard marked == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        if let existing {
+            guard (try? fileManager.destinationOfSymbolicLink(atPath: command.path)) == existing,
+                  self.ownsMacCLILink(command, target: existing)
+            else { return }
+            guard rename(temporary.path, command.path) == 0 else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+        } else if renamex_np(temporary.path, command.path, UInt32(RENAME_EXCL)) != 0, errno != EEXIST {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+    }
+
+    private static func ownsMacCLILink(_ link: URL, target: String) -> Bool {
+        let expected = Array(target.utf8)
+        var stored = [UInt8](repeating: 0, count: expected.count)
+        let size = stored.withUnsafeMutableBytes {
+            getxattr(link.path, self.macCLITargetAttribute, $0.baseAddress, $0.count, 0, XATTR_NOFOLLOW)
+        }
+        return size == expected.count && stored == expected
     }
 
     private static func cliShim(profile: AppProfile, homeDirectory: URL) -> String {

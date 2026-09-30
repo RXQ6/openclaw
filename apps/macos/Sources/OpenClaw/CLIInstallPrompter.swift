@@ -34,8 +34,10 @@ final class CLIInstallPrompter {
             guard userInitiated else { return }
             self.installStatus = String(localized: "Preparing OpenClaw…")
             do {
-                _ = try await BundledRuntime.seed()
-                self.installStatus = await Self.activationMessage(CLIInstaller.activateLocalGateway())
+                _ = try await CLIInstaller.prepareBundledGateway { self.installStatus = $0 }
+                let activation = await CLIInstaller.activateLocalGateway()
+                CLIInstaller.completeBundledSetup(after: activation)
+                self.installStatus = Self.activationMessage(activation)
             } catch {
                 self.installStatus = error.localizedDescription
             }
@@ -222,6 +224,7 @@ final class CLIInstallPrompter {
                 self.logger.info("managed CLI repair: Starting OpenClaw Gateway…")
             }
             let activation = await CLIInstaller.activateLocalGateway()
+            if BundledRuntime.isBundledApp { CLIInstaller.completeBundledSetup(after: activation) }
             if case .failed = activation { activated = false } else { activated = true }
             if shouldRestartManagedGateway {
                 // Only proven gateway health closes the recovery loop; the

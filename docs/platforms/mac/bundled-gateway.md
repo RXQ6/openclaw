@@ -117,6 +117,11 @@ missing or incompatible, reinstall OpenClaw.app. Installing a global CLI does
 not repair the app's bundled payload. The manual Node installation above is for
 an independently managed Gateway or unbundled development setup.
 
+For an existing app-managed Gateway using the app's exact-version policy,
+**Retry setup** updates an older package through its installed CLI before starting
+it. Failed updates remain retryable; channel policies and operator runtime pins
+keep their existing update path.
+
 ## Launchd (Gateway as LaunchAgent)
 
 Label: `ai.openclaw.gateway` (default profile), or `ai.openclaw.<profile>`
@@ -258,7 +263,19 @@ After an app update, including a rebuild with the same public version, the app
 seeds the new runtime and restarts its Gateway in the selected hosting mode.
 It verifies health before removing old builds. A paused Gateway stays paused.
 Seeded installations never run npm self-update; update OpenClaw.app to update
-their Gateway. Existing Node services continue to use their installed runtime.
+their Gateway. Existing app-managed Node services continue through their installed
+CLI's update and repair flow, including health verification, and keep their runtime
+pin. A seed left on disk does not adopt an attached Node service. If that legacy
+runtime cannot be verified, the update window keeps the failure retryable instead
+of replacing it with a fresh bundled installation. A missing `runtime/current`
+link is repaired by seeding; old builds stay until a later successful update
+reestablishes the previous-build record. Invalid existing metadata remains a
+retryable failure. External services and channel policies keep their existing
+ownership rules. With a remote primary, an installed legacy Mac node service is
+updated and verified through its own captured CLI. The app-owned local companion
+Gateway is then updated separately; the update receipt stays pending until both
+required runtimes are healthy. The bundled private worker is not a Node LaunchAgent,
+and absent node services or named profiles do not trigger legacy node lifecycle work.
 
 ## Version compatibility
 
