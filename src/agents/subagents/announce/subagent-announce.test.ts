@@ -195,7 +195,6 @@ vi.mock("./subagent-announce-delivery.js", () => ({
 vi.mock("../registry/subagent-registry-read.js", () => subagentRegistryRuntimeMock);
 vi.mock("../registry/subagent-registry-runtime.js", () => subagentRegistryRuntimeMock);
 import { defaultRuntime } from "../../../runtime.js";
-import { applySubagentWaitOutcome } from "./subagent-announce-output.js";
 import { testing as outputTesting } from "./subagent-announce-output.test-support.js";
 import { runSubagentAnnounceFlow } from "./subagent-announce.js";
 
@@ -207,41 +206,14 @@ function requireAgentCall() {
   return call;
 }
 
-describe("subagent wait outcome timing", () => {
-  it.each([
-    { wait: { status: "ok" }, expected: { status: "ok" } },
-    { wait: { status: "timeout" }, expected: { status: "timeout" } },
-    {
-      wait: { status: "error", error: "boom" },
-      expected: { status: "error", error: "boom" },
-    },
-  ] as const)("adds timing to $wait.status outcomes", ({ wait, expected }) => {
-    const result = applySubagentWaitOutcome({
-      wait,
-      outcome: undefined,
-      startedAt: 1_000,
-      endedAt: 1_250,
-    });
-
-    expect(result.outcome).toEqual({
-      ...expected,
-      startedAt: 1_000,
-      endedAt: 1_250,
-      elapsedMs: 250,
-    });
-  });
-});
-
 function runAnnounceFlow(overrides: Partial<Parameters<typeof runSubagentAnnounceFlow>[0]>) {
   return runSubagentAnnounceFlow({
     childSessionKey: "agent:main:subagent:test",
     childRunId: "run-test",
     requesterSessionKey: "agent:main:main",
-    requesterDisplayKey: "main",
     task: "do thing",
     timeoutMs: 10,
     cleanup: "keep",
-    waitForCompletion: false,
     outcome: { status: "ok" },
     ...overrides,
   });
@@ -347,11 +319,9 @@ describe("subagent announce seam flow", () => {
           childSessionKey: parentKey,
           childRunId: "parent-run",
           requesterSessionKey: "agent:main:main",
-          requesterDisplayKey: "main",
           task: "parent work",
           timeoutMs: 10,
           cleanup: "keep",
-          waitForCompletion: false,
           outcome: { status: "ok" },
           expectsCompletionMessage: true,
           terminalReply: { disposition: "visible", text: "parent reviewed and approved" },
@@ -364,7 +334,7 @@ describe("subagent announce seam flow", () => {
   );
 
   it.each([false, true])(
-    "suppresses ANNOUNCE_SKIP delivery while deleting the child: terminal=%s",
+    "delivers the result while deleting the child: terminal=%s",
     async (terminal) => {
       loadSessionStoreMock.mockReturnValue({
         "agent:main:subagent:test": {
@@ -377,17 +347,18 @@ describe("subagent announce seam flow", () => {
         endedAt: 20,
         childRunId: "run-direct-skip-whitespace",
         cleanup: "delete",
-        roundOneReply: "  ANNOUNCE_SKIP  ",
+        roundOneReply: "  child result  ",
         ...(terminal
           ? {
-              terminalReply: { disposition: "visible" as const, text: "ANNOUNCE_SKIP" },
+              terminalReply: { disposition: "visible" as const, text: "child result" },
               fallbackReply: "stale result",
             }
           : {}),
       });
 
       expect(didAnnounce).toBe("delivered");
-      expect(agentSpy).not.toHaveBeenCalled();
+      expect(agentSpy).toHaveBeenCalledTimes(1);
+      expect(requireAgentCall().params?.message).toContain("child result");
       expect(sessionsDeleteSpy).toHaveBeenCalledTimes(1);
       expect(sessionsDeleteSpy).toHaveBeenCalledWith({
         method: "sessions.delete",
@@ -409,7 +380,7 @@ describe("subagent announce seam flow", () => {
     const didAnnounce = await runAnnounceFlow({
       childRunId: "run-invalidated-delete",
       cleanup: "delete",
-      roundOneReply: "ANNOUNCE_SKIP",
+      roundOneReply: "child result",
       onBeforeDeleteChildSession: () => false,
     });
 
@@ -474,13 +445,11 @@ describe("subagent announce seam flow", () => {
         childSessionKey: "agent:main:subagent:private",
         childRunId: "private-stable-run",
         requesterSessionKey: "agent:main:main",
-        requesterDisplayKey: "main",
         completionTarget: "parent" as const,
         completionRequesterSessionId: "private-parent",
         task: "private task",
         timeoutMs: 10,
         cleanup: "keep" as const,
-        waitForCompletion: false,
         outcome: { status: "ok" as const },
         roundOneReply: "private child result",
         expectsCompletionMessage: true,
@@ -497,48 +466,6 @@ describe("subagent announce seam flow", () => {
       expect(agentSpy.mock.calls[1]?.[0].params?.message).toBe(first);
     },
   );
-
-  it("warns when ANNOUNCE_SKIP suppresses a cron job completion", async () => {
-    const logSpy = vi.spyOn(defaultRuntime, "log").mockImplementation(() => {});
-
-    const didAnnounce = await runAnnounceFlow({
-      startedAt: 10,
-      endedAt: 20,
-      childSessionKey: "agent:main:subagent:cron-worker",
-      childRunId: "run-cron-announce-skip",
-      requesterSessionKey: "agent:main:cron:daily-report",
-      requesterDisplayKey: "cron:daily-report",
-      task: "cron job",
-      roundOneReply: "ANNOUNCE_SKIP",
-    });
-
-    expect(didAnnounce).toBe("delivered");
-    expect(logSpy).toHaveBeenCalledWith(
-      expect.stringContaining("cron job completion for session=agent:main:cron:daily-report"),
-    );
-    expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("suppressed by ANNOUNCE_SKIP"));
-    logSpy.mockRestore();
-  });
-
-  it("does not warn when fallback reply is delivered for a cron ANNOUNCE_SKIP", async () => {
-    const logSpy = vi.spyOn(defaultRuntime, "log").mockImplementation(() => {});
-
-    const didAnnounce = await runAnnounceFlow({
-      startedAt: 10,
-      endedAt: 20,
-      childSessionKey: "agent:main:subagent:cron-worker",
-      childRunId: "run-cron-announce-skip-fallback",
-      requesterSessionKey: "agent:main:cron:daily-report",
-      requesterDisplayKey: "cron:daily-report",
-      task: "cron job",
-      roundOneReply: "ANNOUNCE_SKIP",
-      fallbackReply: "an actual fallback result",
-    });
-
-    expect(didAnnounce).toBe("delivered");
-    expect(logSpy).not.toHaveBeenCalled();
-    logSpy.mockRestore();
-  });
 
   it("keeps lifecycle hooks enabled when deleting a completed session-mode child session", async () => {
     loadSessionStoreMock.mockReturnValue({

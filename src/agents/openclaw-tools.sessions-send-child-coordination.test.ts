@@ -97,7 +97,6 @@ import {
 } from "../test-utils/openclaw-test-state.js";
 import { createSessionConversationTestRegistry } from "../test-utils/session-conversation-registry.js";
 import { observeSessionSendContinuations } from "./openclaw-tools.sessions-timeout.test-support.js";
-import { testing as agentStepTesting } from "./tools/agent-step.test-support.js";
 import { createSessionsSendTool } from "./tools/sessions-send-tool.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
@@ -118,10 +117,6 @@ type AgentCallParams = {
   inputProvenance?: { sourceSessionKey?: string; sourceRole?: string };
 };
 const calls: GatewayCall[] = [];
-const finalAnnounce = vi.fn(async () => ({
-  payloads: [{ text: "ANNOUNCE_SKIP", mediaUrl: null }],
-  meta: { durationMs: 1 },
-}));
 function mockGatewayReply(
   waitResult: Record<string, unknown> = {
     status: "ok",
@@ -152,16 +147,25 @@ function send(requesterKey: string, targetKey: string, timeoutSeconds = 1) {
 }
 function expectCoordination(
   result: Awaited<ReturnType<typeof send>>,
-  child: boolean,
   requesterChild: boolean,
+  deliveredChild?: boolean,
 ) {
-  expect.soft(result.details).toMatchObject({
-    status: "ok",
-    reply: "Requested result",
-    delivery: { status: child ? "skipped" : "pending" },
-  });
+  expect.soft(result.details).toMatchObject(
+    deliveredChild === undefined
+      ? {
+          status: "ok",
+          reply: "Requested result",
+          delivery: { status: "skipped" },
+        }
+      : { status: "accepted", delivery: { status: "pending" } },
+  );
   const agentCalls = calls.filter((call) => call.method === "agent");
-  expect.soft(agentCalls).toHaveLength(child ? 1 : 6);
+  expect.soft(agentCalls).toHaveLength(deliveredChild === undefined ? 1 : 2);
+  if (deliveredChild !== undefined) {
+    expect(agentParams(agentCalls[1] ?? {}).inputProvenance?.sourceRole).toBe(
+      deliveredChild ? "subagent" : undefined,
+    );
+  }
   expect
     .soft(agentParams(agentCalls[0] ?? {}).inputProvenance?.sourceRole)
     .toBe(requesterChild ? "subagent" : undefined);
@@ -196,18 +200,15 @@ describe("sessions_send child coordination", () => {
     callGatewayMock.mockReset();
     calls.length = 0;
     mockGatewayReply();
-    finalAnnounce.mockClear();
     readAcpSessionMetaMock.mockReset().mockReturnValue(undefined);
     readAcpSessionMetaForEntryMock
       .mockReset()
       .mockImplementation((params: unknown) => readAcpSessionMetaMock(params));
     setActivePluginRegistry(createSessionConversationTestRegistry());
-    await agentStepTesting.setDepsForTest({ agentCommandFromIngress: finalAnnounce });
   });
   afterEach(async () => {
     await settleSessionWork();
     resetGatewayWorkAdmission();
-    await agentStepTesting.setDepsForTest();
     closeOpenClawStateDatabaseForTest();
     await state.cleanup();
   });
@@ -245,13 +246,16 @@ describe("sessions_send child coordination", () => {
       ).toBeUndefined();
       const requesterKey = direction === "requester" ? alternateKey : peerKey;
       const targetKey = direction === "target" ? alternateKey : peerKey;
-      const result = await send(requesterKey, targetKey);
+      const result = await send(requesterKey, targetKey, direction === "target" ? 0 : 1);
       await settleSessionWork();
-      const agentCalls = expectCoordination(result, child, direction === "requester" && child);
+      const agentCalls = expectCoordination(
+        result,
+        direction === "requester" && child,
+        direction === "target" ? child : undefined,
+      );
       if (child) {
-        expect(result.details).toMatchObject({ delivery: { mode: "announce" } });
+        expect(result.details).toMatchObject({ delivery: { status: "skipped" } });
         expect(agentParams(agentCalls[0] ?? {}).extraSystemPrompt).toBeUndefined();
-        expect(finalAnnounce).not.toHaveBeenCalled();
         expect(calls.some((call) => call.method === "send")).toBe(false);
       }
       if (direction === "target") {
@@ -337,9 +341,13 @@ describe("sessions_send child coordination", () => {
           metadataRead.readAcpSessionMetaForEntry({ ...params, databasePath }),
       );
       await writeEntry(reusedKey, currentEntry);
-      const result = await send(requesterKey, targetKey);
+      const result = await send(requesterKey, targetKey, direction === "target" ? 0 : 1);
       await settleSessionWork();
-      expectCoordination(result, expectedChild, direction === "requester" && expectedChild);
+      expectCoordination(
+        result,
+        direction === "requester" && expectedChild,
+        direction === "target" ? expectedChild : undefined,
+      );
     },
   );
 
@@ -365,7 +373,7 @@ describe("sessions_send child coordination", () => {
       const result = await send(requesterKey, targetKey, timeoutSeconds);
       expect(result.details).toMatchObject({
         status: "accepted",
-        delivery: { status: "skipped", mode: "announce" },
+        delivery: { status: "skipped" },
       });
       expect(getActiveGatewayRootWorkCount()).toBe(0);
       const agentCalls = calls.filter((call) => call.method === "agent");

@@ -1,23 +1,18 @@
-/**
- * Active-requester wake and steering for subagent announcements.
- */
 import { isFastTestRuntimeEnv } from "../../../infra/env.js";
 import type { UserTurnTranscriptRecorder } from "../../../sessions/user-turn-transcript.types.js";
 import { sessionDeliveryChannel } from "../../../utils/delivery-context.read.js";
 import type { EmbeddedAgentQueueMessageOptions } from "../../embedded-agent-runner/run-state.js";
-import type { EmbeddedAgentQueueMessageOutcome } from "../../embedded-agent-runner/runs.js";
+import {
+  resolveEmbeddedRunAbandonment,
+  type EmbeddedAgentQueueMessageOutcome,
+} from "../../embedded-agent-runner/runs.js";
 import { waitForAnnounceRetryDelay } from "./subagent-announce-delivery-retry.js";
 import {
-  formatEmbeddedAgentQueueFailureSummary,
-  getSubagentAnnounceRuntimeConfig,
   getSubagentRequesterSessionActivity as resolveRequesterSessionActivity,
-  resolveSubagentRequesterSessionAbandonment,
   loadRequesterSessionEntry,
   queueSubagentAnnounceMessage,
   resolveQueueSettings,
-  tryResolveSubagentRequesterAgentId,
 } from "./subagent-announce-delivery.runtime.js";
-import { resolveRequesterStoreKey } from "./subagent-requester-store-key.js";
 
 const SOURCE_OWNER_CHANGED = Symbol("source_owner_changed");
 
@@ -99,7 +94,11 @@ export async function resolveActiveWakeWithRetries(
       const activeRunOptions = { ...currentOptions };
       delete activeRunOptions.sourceReplyDeliveryMode;
       currentOptions = activeRunOptions;
-      outcome = await attemptWake(currentOptions);
+      const retryOptions = resolveRetryOptions();
+      if (!retryOptions) {
+        break;
+      }
+      outcome = await attemptWake(retryOptions);
       continue;
     }
     if (outcome.reason === "compacting") {
@@ -161,22 +160,13 @@ export async function maybeSteerSubagentAnnounce(params: {
   if (params.signal?.aborted) {
     return { status: "none" };
   }
-  const cfg = getSubagentAnnounceRuntimeConfig();
-  const requesterAgentId = tryResolveSubagentRequesterAgentId(
-    cfg,
-    params.requesterSessionKey,
-    params.requesterAgentId,
-  );
-  if (!requesterAgentId) {
-    return { status: "none" };
-  }
-  const { entry } = loadRequesterSessionEntry(params.requesterSessionKey, requesterAgentId);
-  const canonicalKey = resolveRequesterStoreKey(cfg, params.requesterSessionKey, requesterAgentId);
+  const requester = loadRequesterSessionEntry(params.requesterSessionKey, params.requesterAgentId);
+  const { cfg, entry, canonicalKey } = requester;
   const { sessionId, isActive } = resolveRequesterSessionActivity(
     params.requesterSessionKey,
-    requesterAgentId,
+    requester,
   );
-  if (resolveSubagentRequesterSessionAbandonment(canonicalKey, sessionId)) {
+  if (resolveEmbeddedRunAbandonment({ sessionKey: canonicalKey, sessionId })) {
     return { status: "none" };
   }
   if (!sessionId || !isActive) {
@@ -233,17 +223,9 @@ export async function maybeSteerSubagentAnnounce(params: {
   }
   const currentActivity = resolveRequesterSessionActivity(
     params.requesterSessionKey,
-    requesterAgentId,
+    loadRequesterSessionEntry(params.requesterSessionKey, params.requesterAgentId),
   );
   return { status: currentActivity.isActive ? "dropped" : "none" };
-}
-
-export function formatActiveWakeFailure(
-  fallback: string,
-  outcome: EmbeddedAgentQueueMessageOutcome,
-): string {
-  const summary = formatEmbeddedAgentQueueFailureSummary(outcome);
-  return summary ? `${fallback}: ${summary}` : fallback;
 }
 
 export function isSourceOwnerChangedWake(

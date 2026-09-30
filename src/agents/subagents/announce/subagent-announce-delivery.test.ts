@@ -204,7 +204,6 @@ describe("queued completion handoff", () => {
         requesterIsSubagent: true,
         expectsCompletionMessage: true,
         triggerMessage: "Child result ready",
-        steerMessage: "Child result ready",
         directIdempotencyKey: "busy-parent-completion",
         ...(outcome === "private"
           ? { completionTarget: "parent" as const, completionRequesterSessionId: "busy-parent" }
@@ -528,7 +527,6 @@ async function deliverSlackThreadAnnouncement(params: {
     requesterSessionKey: "agent:main:slack:channel:C123:thread:171.222",
     targetRequesterSessionKey: "agent:main:slack:channel:C123:thread:171.222",
     triggerMessage: "child done",
-    steerMessage: "child done",
     requesterSessionOrigin: slackThreadOrigin,
     completionDirectOrigin: slackThreadOrigin,
     directOrigin: slackThreadOrigin,
@@ -594,7 +592,6 @@ async function deliverDiscordDirectMessageCompletion(params: {
     requesterAgentId: params.requesterAgentId,
     targetRequesterSessionKey: requesterSessionKey,
     triggerMessage: "child done",
-    steerMessage: "child done",
     requesterSessionOrigin: origin,
     completionDirectOrigin: params.completionDirectOrigin ?? origin,
     directOrigin: origin,
@@ -665,7 +662,6 @@ async function deliverTelegramDirectMessageCompletion(params: {
     requesterSessionKey,
     targetRequesterSessionKey: requesterSessionKey,
     triggerMessage: "child done",
-    steerMessage: "child done",
     requesterSessionOrigin: origin,
     completionDirectOrigin: origin,
     directOrigin: origin,
@@ -738,7 +734,6 @@ async function deliverSlackChannelAnnouncement(params: {
     requesterSessionKey: params.requesterSessionKey ?? "agent:main:slack:channel:C123",
     targetRequesterSessionKey: params.requesterSessionKey ?? "agent:main:slack:channel:C123",
     triggerMessage: "child done",
-    steerMessage: "child done",
     requesterSessionOrigin: params.requesterOrigin ?? origin,
     completionDirectOrigin: params.completionDirectOrigin ?? params.requesterOrigin ?? origin,
     directOrigin: params.requesterOrigin ?? origin,
@@ -827,7 +822,6 @@ describe("deliverSubagentAnnouncement active requester steering", () => {
       requesterSessionKey: "agent:eng:paperclip:issue:123",
       targetRequesterSessionKey: "agent:eng:paperclip:issue:123",
       triggerMessage: "child done",
-      steerMessage: "child done",
       requesterSessionOrigin: params.requesterOrigin,
       requesterIsSubagent: false,
       expectsCompletionMessage: false,
@@ -896,21 +890,15 @@ describe("deliverSubagentAnnouncement active requester steering", () => {
         list: [{ id: "ops" }, { id: "research" }],
       },
     } as never;
-    const getRequesterSessionActivity = vi.fn(
-      (_requesterSessionKey: string, requesterAgentId?: string) => ({
-        sessionId: requesterAgentId === "research" ? "research-session" : "ops-session",
-        isActive: true,
-      }),
-    );
+    const loadSessionEntry = vi.fn(({ agentId }: { agentId?: string }) => ({
+      sessionId: agentId === "research" ? "research-session" : "ops-session",
+      updatedAt: 1,
+    }));
     const queueEmbeddedAgentMessageWithOutcome = createQueueOutcomeMock(true);
     testing.setDepsForTest({
       getRuntimeConfig: () => cfg,
-      getRequesterSessionActivity,
-      loadRequesterSessionEntry: (sessionKey: string) => ({
-        cfg,
-        entry: undefined,
-        canonicalKey: sessionKey,
-      }),
+      loadSessionEntry,
+      isEmbeddedAgentRunActive: () => true,
       queueEmbeddedAgentMessageWithOutcome,
     });
 
@@ -919,14 +907,12 @@ describe("deliverSubagentAnnouncement active requester steering", () => {
       requesterAgentId: "research",
       targetRequesterSessionKey: "global",
       triggerMessage: "child done",
-      steerMessage: "child done",
       requesterIsSubagent: false,
       expectsCompletionMessage: false,
       directIdempotencyKey: "announce-bare-key-agent-owner",
     });
 
     expectDeliveryPath(result, "steered");
-    expect(getRequesterSessionActivity).toHaveBeenCalledWith("global", "research");
     expect(queueEmbeddedAgentMessageWithOutcome).toHaveBeenCalledWith(
       "research-session",
       "child done",
@@ -959,7 +945,6 @@ describe("deliverSubagentAnnouncement active requester steering", () => {
       requesterSessionKey: "global",
       targetRequesterSessionKey: "global",
       triggerMessage: "child done",
-      steerMessage: "child done",
       requesterIsSubagent: false,
       expectsCompletionMessage: false,
       directIdempotencyKey: "announce-ownerless-restored-entry",
@@ -980,15 +965,11 @@ describe("deliverSubagentAnnouncement active requester steering", () => {
         list: [{ id: "ops" }, { id: "research" }],
       },
     } as never;
-    const getRequesterSessionActivity = vi.fn(() => ({
-      sessionId: "ops-session",
-      isActive: true,
-    }));
     const loadSessionEntry = vi.fn(() => ({ sessionId: "ops-session", updatedAt: 1 }));
     const queueEmbeddedAgentMessageWithOutcome = createQueueOutcomeMock(true);
     testing.setDepsForTest({
       getRuntimeConfig: () => cfg,
-      getRequesterSessionActivity,
+      isEmbeddedAgentRunActive: () => true,
       loadSessionEntry,
       queueEmbeddedAgentMessageWithOutcome,
     });
@@ -997,14 +978,12 @@ describe("deliverSubagentAnnouncement active requester steering", () => {
       requesterSessionKey: "global",
       targetRequesterSessionKey: "global",
       triggerMessage: "child done",
-      steerMessage: "child done",
       requesterIsSubagent: false,
       expectsCompletionMessage: false,
       directIdempotencyKey: "announce-retained-restored-entry",
     });
 
     expectDeliveryPath(result, "steered");
-    expect(getRequesterSessionActivity).toHaveBeenCalledWith("global", "ops");
     expect(queueEmbeddedAgentMessageWithOutcome).toHaveBeenCalledWith(
       "ops-session",
       "child done",
@@ -1021,10 +1000,6 @@ describe("deliverSubagentAnnouncement active requester steering", () => {
         entries: { ops: {}, research: {} },
       },
     } as never;
-    const getRequesterSessionActivity = vi.fn(() => ({
-      sessionId: "ops-incident-session",
-      isActive: true,
-    }));
     const loadSessionEntry = vi.fn(() => ({
       sessionId: "ops-incident-session",
       updatedAt: 1,
@@ -1032,7 +1007,7 @@ describe("deliverSubagentAnnouncement active requester steering", () => {
     const queueEmbeddedAgentMessageWithOutcome = createQueueOutcomeMock(true);
     testing.setDepsForTest({
       getRuntimeConfig: () => cfg,
-      getRequesterSessionActivity,
+      isEmbeddedAgentRunActive: () => true,
       loadSessionEntry,
       queueEmbeddedAgentMessageWithOutcome,
     });
@@ -1041,7 +1016,6 @@ describe("deliverSubagentAnnouncement active requester steering", () => {
       requesterSessionKey: "incident-42",
       targetRequesterSessionKey: "incident-42",
       triggerMessage: "child done",
-      steerMessage: "child done",
       requesterIsSubagent: false,
       expectsCompletionMessage: false,
       directIdempotencyKey: "announce-persisted-bare-requester",
@@ -1051,7 +1025,6 @@ describe("deliverSubagentAnnouncement active requester steering", () => {
     expect(loadSessionEntry).toHaveBeenCalledWith(
       expect.objectContaining({ agentId: "ops", sessionKey: "incident-42" }),
     );
-    expect(getRequesterSessionActivity).toHaveBeenCalledWith("incident-42", "ops");
     expect(queueEmbeddedAgentMessageWithOutcome).toHaveBeenCalledWith(
       "ops-incident-session",
       "child done",
@@ -1086,7 +1059,6 @@ describe("deliverSubagentAnnouncement active requester steering", () => {
       requesterAgentId: "research",
       targetRequesterSessionKey: "global",
       triggerMessage: "child done",
-      steerMessage: "child done",
       requesterIsSubagent: false,
       expectsCompletionMessage: false,
       directIdempotencyKey: "announce-conflicting-restored-entry",
@@ -1124,7 +1096,6 @@ describe("deliverSubagentAnnouncement active requester steering", () => {
       requesterSessionKey: "global",
       targetRequesterSessionKey: "global",
       triggerMessage: "child done",
-      steerMessage: "child done",
       requesterIsSubagent: false,
       expectsCompletionMessage: false,
       directIdempotencyKey: "announce-retired-restored-entry",
@@ -1163,7 +1134,6 @@ describe("deliverSubagentAnnouncement active requester steering", () => {
       requesterSessionKey: "agent:eng:paperclip:issue:123",
       targetRequesterSessionKey: "agent:eng:paperclip:issue:123",
       triggerMessage: "child done",
-      steerMessage: "child done",
       requesterIsSubagent: false,
       expectsCompletionMessage: false,
       directIdempotencyKey: "announce-no-external-route",
@@ -1264,7 +1234,6 @@ describe("deliverSubagentAnnouncement active requester steering", () => {
       requesterSessionKey: "agent:eng:paperclip:issue:123",
       targetRequesterSessionKey: "agent:eng:paperclip:issue:123",
       triggerMessage: "child done",
-      steerMessage: "child done",
       requesterIsSubagent: false,
       expectsCompletionMessage: false,
       directIdempotencyKey: "announce-no-active-run-no-retry",
@@ -1301,7 +1270,6 @@ describe("deliverSubagentAnnouncement active requester steering", () => {
       requesterSessionKey: "agent:eng:paperclip:issue:123",
       targetRequesterSessionKey: "agent:eng:paperclip:issue:123",
       triggerMessage: "child done",
-      steerMessage: "child done",
       requesterIsSubagent: false,
       expectsCompletionMessage: false,
       directIdempotencyKey: "announce-compaction-retired-source",
@@ -1373,7 +1341,6 @@ describe("deliverSubagentAnnouncement active requester steering", () => {
         requesterSessionKey: "agent:eng:paperclip:issue:123",
         targetRequesterSessionKey: "agent:eng:paperclip:issue:123",
         triggerMessage: "child done",
-        steerMessage: "child done",
         requesterIsSubagent: false,
         expectsCompletionMessage: false,
         directIdempotencyKey,
@@ -2229,7 +2196,6 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
       requesterSessionKey: "agent:main:slack:channel:C123:thread:171.222",
       targetRequesterSessionKey: "agent:main:slack:channel:C123:thread:171.222",
       triggerMessage: "child done",
-      steerMessage: "child done",
       requesterSessionOrigin: slackThreadOrigin,
       completionDirectOrigin: slackThreadOrigin,
       directOrigin: slackThreadOrigin,
@@ -2304,7 +2270,6 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
       requesterSessionKey: "agent:main:slack:channel:C123:thread:171.222",
       targetRequesterSessionKey: "agent:main:slack:channel:C123:thread:171.222",
       triggerMessage: "child done",
-      steerMessage: "child done",
       requesterSessionOrigin: slackThreadOrigin,
       completionDirectOrigin: slackThreadOrigin,
       directOrigin: slackThreadOrigin,
@@ -2366,7 +2331,6 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
         requesterSessionKey: "agent:main:local-session",
         targetRequesterSessionKey: "agent:main:local-session",
         triggerMessage: "child done",
-        steerMessage: "child done",
         requesterIsSubagent: false,
         expectsCompletionMessage: true,
         bestEffortDeliver: true,
@@ -2497,7 +2461,6 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
       requesterSessionKey: "agent:main:local-session",
       targetRequesterSessionKey: "agent:main:local-session",
       triggerMessage: "child done",
-      steerMessage: "child done",
       requesterIsSubagent: false,
       expectsCompletionMessage: true,
       bestEffortDeliver: true,
@@ -2533,7 +2496,6 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
       requesterSessionKey: "agent:main:local-session",
       targetRequesterSessionKey: "agent:main:local-session",
       triggerMessage: "child done",
-      steerMessage: "child done",
       requesterIsSubagent: false,
       expectsCompletionMessage: true,
       bestEffortDeliver: true,
@@ -2605,7 +2567,6 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
       requesterSessionKey: "agent:main:local-session",
       targetRequesterSessionKey: "agent:main:local-session",
       triggerMessage: "child done",
-      steerMessage: "child done",
       requesterIsSubagent: false,
       expectsCompletionMessage: true,
       bestEffortDeliver: true,
@@ -3526,7 +3487,6 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
       requesterSessionKey: "agent:worker:subagent:parent",
       targetRequesterSessionKey: "agent:worker:subagent:parent",
       triggerMessage: "child done",
-      steerMessage: "child done",
       requesterIsSubagent: true,
       expectsCompletionMessage: true,
       bestEffortDeliver: true,
@@ -4496,6 +4456,48 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     expect(callGateway).not.toHaveBeenCalled();
   });
 
+  it("keeps the remaining wake budget after compaction and delivery-mode mismatch", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(0);
+    const callGateway = createGatewayMock();
+    let attempt = 0;
+    const queueEmbeddedAgentMessageWithOutcome = vi.fn<QueueEmbeddedAgentMessageWithOutcome>(
+      (sessionId) => {
+        attempt += 1;
+        if (attempt === 1) {
+          vi.setSystemTime(118_000);
+          return { queued: false, sessionId, reason: "compacting", gatewayHealth: "live" };
+        }
+        if (attempt === 2) {
+          vi.setSystemTime(119_500);
+          return {
+            queued: false,
+            sessionId,
+            reason: "source_reply_delivery_mode_mismatch",
+            gatewayHealth: "live",
+          };
+        }
+        return { queued: true, sessionId, target: "embedded_run", gatewayHealth: "live" };
+      },
+    );
+    const delivery = deliverDiscordDirectMessageCompletion({
+      callGateway,
+      isActive: true,
+      queueEmbeddedAgentMessageWithOutcome,
+      sourceTool: "subagent_announce",
+      internalEvents: taskCompletionEvents({ childSessionId: "child-session-id" }),
+    });
+    await vi.runAllTimersAsync();
+
+    expectDeliveryPath(await delivery, "steered");
+    expect(queueEmbeddedAgentMessageWithOutcome).toHaveBeenCalledTimes(3);
+    const retryOptions = mockCallArg(queueEmbeddedAgentMessageWithOutcome, 2, 2);
+    expect(retryOptions.deliveryTimeoutMs).toBe(500);
+    expect(retryOptions.sourceReplyDeliveryMode).toBeUndefined();
+    expect(retryOptions.waitForTranscriptCommit).toBe(true);
+    expect(callGateway).not.toHaveBeenCalled();
+  });
+
   it("falls back to the external requester route when completion origin is internal", async () => {
     const callGateway = createPayloadGatewayMock({ text: "child completion output" });
     const result = await deliverSlackChannelAnnouncement({
@@ -4759,7 +4761,6 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
       requesterIsSubagent: false,
       expectsCompletionMessage: true,
       triggerMessage: "worker completed",
-      steerMessage: "worker completed",
       directIdempotencyKey: "announce-missing-destination",
     });
 
@@ -5262,7 +5263,6 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
       requesterSessionKey: route.sessionKey,
       targetRequesterSessionKey: route.sessionKey,
       triggerMessage: "all spawned subagents settled",
-      steerMessage: "all spawned subagents settled",
       requesterSessionOrigin: origin,
       directOrigin: origin,
       requesterIsSubagent: "requesterIsSubagent" in route && route.requesterIsSubagent === true,

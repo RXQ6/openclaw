@@ -12,7 +12,6 @@ const announcement = {
   requesterSessionKey,
   targetRequesterSessionKey: requesterSessionKey,
   triggerMessage: "child done",
-  steerMessage: "child done",
   requesterSessionOrigin: origin,
   completionDirectOrigin: origin,
   directOrigin: origin,

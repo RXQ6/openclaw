@@ -1,8 +1,3 @@
-/**
- * Subagent announcement origin resolver.
- *
- * Merges requester and session delivery context while avoiding stale thread ids after retargeting.
- */
 import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,

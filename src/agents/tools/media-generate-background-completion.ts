@@ -239,7 +239,6 @@ export async function wakeMediaGenerationTaskCompletion(params: {
     targetRequesterSessionKey: target.sessionKey,
     preparedRequester: { binding: requesterBinding, entry: requesterEntry },
     triggerMessage,
-    steerMessage: triggerMessage,
     internalEvents,
     requesterSessionOrigin: handle.requesterOrigin,
     completionDirectOrigin: handle.requesterOrigin,

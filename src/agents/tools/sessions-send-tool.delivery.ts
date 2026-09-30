@@ -20,7 +20,6 @@ import type { DeliveryContext } from "../../utils/delivery-context.types.js";
 import { resolveActiveEmbeddedRunSessionId } from "../embedded-agent-runner/active-run-projections.js";
 import {
   type EmbeddedAgentQueueMessageOptions,
-  type EmbeddedAgentQueueMessageOutcome,
   formatEmbeddedAgentQueueFailureSummary,
   queueEmbeddedAgentMessageWithOutcomeAsync,
   queueGuardedEmbeddedAgentMessageWithOutcomeAsync,
@@ -95,17 +94,6 @@ function resolveCronRunScopedFallbackSessionKey(sessionKey: string): string | un
   const parsed = parseAgentSessionKey(sessionKey);
   const fallbackRest = parsed?.rest.match(/^([\s\S]+):run:[^:]+$/)?.[1];
   return parsed && fallbackRest ? `agent:${parsed.agentId}:${fallbackRest}` : undefined;
-}
-
-function shouldFallbackCronRunScopedActiveDelivery(
-  outcome: EmbeddedAgentQueueMessageOutcome,
-): boolean {
-  return (
-    !outcome.queued &&
-    (outcome.reason === "not_streaming" ||
-      outcome.reason === "no_active_run" ||
-      outcome.reason === "stale_run")
-  );
 }
 
 type SessionsSendDeliveryParams = {
@@ -239,7 +227,10 @@ export async function trySessionsSendActiveRunDelivery(
       if (
         params.mode === "steer" ||
         (!ownChild && (params.expectedSessionId || !fallbackSessionKey)) ||
-        (!ownChild && !shouldFallbackCronRunScopedActiveDelivery(queueOutcome))
+        (!ownChild &&
+          queueOutcome.reason !== "not_streaming" &&
+          queueOutcome.reason !== "no_active_run" &&
+          queueOutcome.reason !== "stale_run")
       ) {
         throw new Error(
           formatEmbeddedAgentQueueFailureSummary(queueOutcome) ?? "active run queue rejected",

@@ -1,7 +1,7 @@
 import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import { MAX_TIMER_TIMEOUT_MS } from "@openclaw/normalization-core/number-coercion";
-// Sessions tool tests cover list/send helpers and announce-target resolution.
+// Sessions tool tests cover list/send helpers and session delivery target resolution.
 import { createRequireRecord } from "openclaw/plugin-sdk/test-fixtures";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveSessionThreadInfo } from "../../channels/plugins/session-conversation.js";
@@ -86,7 +86,6 @@ type SessionsToolTestConfig = {
     scope: "per-sender";
     mainKey: string;
     dmScope?: "main" | "per-peer" | "per-channel-peer" | "per-account-channel-peer";
-    agentToAgent?: { maxPingPongTurns: number };
   };
   tools: {
     agentToAgent: { enabled: boolean };
@@ -116,7 +115,7 @@ vi.mock("../../sessions/session-participant-recording.js", () => ({
 
 let createSessionsListTool: typeof import("./sessions-list-tool.js").createSessionsListTool;
 let createSessionsSendTool: typeof import("./sessions-send-tool.js").createSessionsSendTool;
-let resolveAnnounceTarget: (typeof import("./sessions-announce-target.js"))["resolveAnnounceTarget"];
+let resolveSessionDeliveryTarget: (typeof import("./sessions-delivery-target.js"))["resolveSessionDeliveryTarget"];
 let setActivePluginRegistry: (typeof import("../../plugins/runtime.js"))["setActivePluginRegistry"];
 const MAIN_AGENT_SESSION_KEY = "agent:main:main";
 const MAIN_AGENT_CHANNEL = "whatsapp";
@@ -177,7 +176,7 @@ function requireGatewayRequest(index = 0) {
 beforeAll(async () => {
   ({ createSessionsListTool } = await import("./sessions-list-tool.js"));
   ({ createSessionsSendTool } = await import("./sessions-send-tool.js"));
-  ({ resolveAnnounceTarget } = await import("./sessions-announce-target.js"));
+  ({ resolveSessionDeliveryTarget } = await import("./sessions-delivery-target.js"));
   ({ setActivePluginRegistry } = await import("../../plugins/runtime.js"));
 });
 
@@ -239,6 +238,7 @@ async function executeFireAndForgetA2AFrom(
   requesterSessionKey: string,
   options?: {
     mainKey?: string;
+    expectReplyFlow?: boolean;
     dmScope?: NonNullable<SessionsToolTestConfig["session"]["dmScope"]>;
     bindingDmScope?: NonNullable<SessionsToolTestConfig["session"]["dmScope"]>;
     defaultBindingDmScope?: NonNullable<SessionsToolTestConfig["session"]["dmScope"]>;
@@ -339,10 +339,13 @@ async function executeFireAndForgetA2AFrom(
     }),
   );
   const flowParams = vi.mocked(runSessionsSendA2AFlow).mock.calls[0]?.[0];
-  if (!flowParams) {
+  if (!flowParams && options?.expectReplyFlow !== false) {
     throw new Error("expected A2A flow");
   }
-  return flowParams;
+  if (options?.expectReplyFlow === false) {
+    expect(requireDetails(result)).toMatchObject({ delivery: { status: "skipped" } });
+  }
+  return flowParams!;
 }
 
 beforeEach(() => {
@@ -552,14 +555,14 @@ it("authorizes an arbitrary bare key against its persisted fixed-store owner", a
   ]);
 });
 
-describe("resolveAnnounceTarget", () => {
+describe("resolveSessionDeliveryTarget", () => {
   beforeEach(async () => {
     callGatewayMock.mockClear();
     await installRegistry();
   });
 
-  it("derives non-WhatsApp announce targets from the session key", async () => {
-    const target = await resolveAnnounceTarget({
+  it("derives non-WhatsApp delivery targets from the session key", async () => {
+    const target = await resolveSessionDeliveryTarget({
       sessionKey: "agent:main:discord:group:dev",
       displayKey: "agent:main:discord:group:dev",
       callGateway: callGatewayMock,
@@ -568,24 +571,28 @@ describe("resolveAnnounceTarget", () => {
     expect(callGatewayMock).not.toHaveBeenCalled();
   });
 
-  it("hydrates WhatsApp accountId from sessions.list when available", async () => {
-    callGatewayMock.mockResolvedValueOnce({
-      sessions: [
-        {
-          key: "agent:main:whatsapp:group:123@g.us",
-          deliveryContext: {
-            channel: "whatsapp",
-            to: "123@g.us",
-            accountId: "work",
-            threadId: 99,
-          },
-        },
-      ],
-    });
+  it("hydrates the exact saved route beyond the first 200 sessions", async () => {
+    const sessionKey = "agent:main:whatsapp:group:123@g.us";
+    const saved = {
+      key: sessionKey,
+      agentId: "main",
+      deliveryContext: { channel: "whatsapp", to: "123@g.us", accountId: "work", threadId: 99 },
+    };
+    const sessions = [
+      ...Array.from({ length: 200 }, (_, index) => ({ key: `agent:main:other-${index}` })),
+      saved,
+    ];
+    callGatewayMock.mockImplementation(
+      async (request: { method: string; params: { key?: string; limit?: number } }) =>
+        request.method === "sessions.describe"
+          ? { session: sessions.find((session) => session.key === request.params.key) ?? null }
+          : { sessions: sessions.slice(0, request.params.limit) },
+    );
 
-    const target = await resolveAnnounceTarget({
-      sessionKey: "agent:main:whatsapp:group:123@g.us",
-      displayKey: "agent:main:whatsapp:group:123@g.us",
+    const target = await resolveSessionDeliveryTarget({
+      sessionKey,
+      displayKey: sessionKey,
+      agentId: "main",
       callGateway: callGatewayMock,
     });
     expect(target).toEqual({
@@ -594,26 +601,22 @@ describe("resolveAnnounceTarget", () => {
       accountId: "work",
       threadId: "99",
     });
-    expect(callGatewayMock).toHaveBeenCalledTimes(1);
-    expect(requireGatewayRequest().method).toBe("sessions.list");
   });
 
-  it("hydrates announce delivery from the canonical external projection", async () => {
+  it("hydrates delivery from the canonical external projection", async () => {
     callGatewayMock.mockResolvedValueOnce({
-      sessions: [
-        {
-          key: "agent:main:feishu:direct:ou_user",
-          deliveryContext: {
-            channel: "feishu",
-            to: "user:ou_user",
-            accountId: "work",
-            threadId: "thread-77",
-          },
+      session: {
+        key: "agent:main:feishu:direct:ou_user",
+        deliveryContext: {
+          channel: "feishu",
+          to: "user:ou_user",
+          accountId: "work",
+          threadId: "thread-77",
         },
-      ],
+      },
     });
 
-    const target = await resolveAnnounceTarget({
+    const target = await resolveSessionDeliveryTarget({
       sessionKey: "agent:main:feishu:direct:ou_user",
       displayKey: "agent:main:feishu:direct:ou_user",
       callGateway: callGatewayMock,
@@ -626,21 +629,19 @@ describe("resolveAnnounceTarget", () => {
     });
   });
 
-  it("preserves threaded Slack session keys when sessions.list lacks stored thread metadata", async () => {
+  it("preserves threaded Slack session keys when sessions.describe lacks stored thread metadata", async () => {
     callGatewayMock.mockResolvedValueOnce({
-      sessions: [
-        {
-          key: "agent:main:slack:channel:C123:thread:1710000000.000100",
-          deliveryContext: {
-            channel: "slack",
-            to: "channel:C123",
-            accountId: "workspace",
-          },
+      session: {
+        key: "agent:main:slack:channel:C123:thread:1710000000.000100",
+        deliveryContext: {
+          channel: "slack",
+          to: "channel:C123",
+          accountId: "workspace",
         },
-      ],
+      },
     });
 
-    const target = await resolveAnnounceTarget({
+    const target = await resolveSessionDeliveryTarget({
       sessionKey: "agent:main:slack:channel:C123:thread:1710000000.000100",
       displayKey: "agent:main:slack:channel:C123:thread:1710000000.000100",
       callGateway: callGatewayMock,
@@ -1044,7 +1045,7 @@ describe("sessions_send gating", () => {
           status: "accepted",
           sessionKey: targetSessionKey,
           targetDisposition: "queued",
-          delivery: { status: "skipped", mode: "announce" },
+          delivery: { status: "skipped" },
           watched: false,
         });
         expect(runSessionsSendA2AFlow).not.toHaveBeenCalled();
@@ -1402,7 +1403,7 @@ describe("sessions_send gating", () => {
       expect(details.status).toBe("no_reply");
       expect(details.reply).toBeUndefined();
       expect(details.delivery).toBeUndefined();
-      expect(details.message).toContain("pending announcement");
+      expect(details.message).toContain("pending delivery");
       expect(details.sessionKey).toBe(targetSessionKey);
       expect(runSessionsSendA2AFlow).not.toHaveBeenCalled();
     },
@@ -1472,12 +1473,7 @@ describe("sessions_send gating", () => {
           reply: "Already delivered to the source",
           sessionKey: targetSessionKey,
         });
-        await vi.waitFor(() => expect(runSessionsSendA2AFlow).toHaveBeenCalledOnce());
-        expect(vi.mocked(runSessionsSendA2AFlow).mock.calls[0]?.[0]).toMatchObject({
-          roundOneReply: "Already delivered to the source",
-          sourceReplyDelivered: true,
-          targetSessionKey,
-        });
+        expect(runSessionsSendA2AFlow).not.toHaveBeenCalled();
       } else {
         expect(requireDetails(result)).toMatchObject({
           status: "no_reply",
@@ -1566,27 +1562,31 @@ describe("sessions_send gating", () => {
     {
       label: "canonical cron run",
       requesterSessionKey: "agent:main:cron:job:run:abc",
-      expected: 0,
+      expected: false,
       expectedRequesterSessionKey: "agent:main:cron:job:run:abc",
     },
     {
       label: "normal requester",
       requesterSessionKey: "agent:main:telegram:direct:user",
-      expected: 5,
+      expected: true,
       expectedRequesterSessionKey: "agent:main:main",
     },
     {
       label: "non-canonical cron-like requester",
       requesterSessionKey: "agent:main:slack:cron:job:run:uuid",
-      expected: 5,
+      expected: true,
       expectedRequesterSessionKey: "agent:main:slack:cron:job:run:uuid",
     },
   ] as const)(
-    "uses the expected ping-pong turns for a $label",
+    "starts requester delivery only when eligible for a $label",
     async ({ requesterSessionKey, expected, expectedRequesterSessionKey }) => {
+      if (!expected) {
+        const { runSessionsSendA2AFlow } = await import("./sessions-send-tool.a2a.js");
+        await executeFireAndForgetA2AFrom(requesterSessionKey, { expectReplyFlow: false });
+        expect(runSessionsSendA2AFlow).not.toHaveBeenCalled();
+        return;
+      }
       const flowParams = await executeFireAndForgetA2AFrom(requesterSessionKey);
-
-      expect(flowParams.maxPingPongTurns).toBe(expected);
       expect(flowParams.requesterSessionKey).toBe(expectedRequesterSessionKey);
     },
   );

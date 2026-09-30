@@ -184,7 +184,6 @@ export async function deliverAgentHarnessCompletion(params: {
           requesterAgentId: scope.requesterAgentId,
           isSourceSessionEffectsAllowed,
           triggerMessage: prompt,
-          steerMessage: prompt,
           internalEvents,
           requesterSessionOrigin: scope.requesterOrigin,
           completionDirectOrigin: completionDirectOrigin ?? directOrigin,

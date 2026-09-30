@@ -1,9 +1,3 @@
-/**
- * Subagent announcement dispatch strategy.
- *
- * Completion handoff and requester-visible replies use this to choose between
- * steering a subagent and directly delivering a message, with phase evidence.
- */
 type SubagentDeliveryPath = "steered" | "direct" | "queued" | "none";
 type SubagentAnnounceDeliveryDisposition =
   | "delivered"
