@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../../../../test/helpers/promise.js";
 import type { QuestionPrompt } from "../../../app/question-prompt.ts";
 import { createGatewayQuestionPanelProps } from "./chat-question-card.ts";
+import "./chat-question-panel.ts";
 
 type ChatQuestionPanelElement = HTMLElement & {
   updateComplete: Promise<unknown>;
