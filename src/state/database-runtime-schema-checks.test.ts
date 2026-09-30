@@ -1,18 +1,15 @@
 import { execFileSync } from "node:child_process";
 import { DatabaseSync } from "node:sqlite";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
-import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { listSessionEntriesCore } from "../config/sessions/session-accessor.entry.js";
 import {
   loadSessionEntryReadOnly,
   upsertSessionEntryCore,
 } from "../config/sessions/session-accessor.sqlite-entry.js";
+import { useSessionStoreTempDirs } from "../test-utils/session-state-cleanup.js";
 import { OPENCLAW_AGENT_SCHEMA_VERSION } from "./openclaw-agent-db-contract.js";
 import { withOpenClawAgentDatabaseReadOnly } from "./openclaw-agent-db-readonly.js";
-import {
-  closeOpenClawAgentDatabasesForTest,
-  openOpenClawAgentDatabase,
-} from "./openclaw-agent-db.js";
+import { openOpenClawAgentDatabase } from "./openclaw-agent-db.js";
 import { OPENCLAW_STATE_SCHEMA_VERSION } from "./openclaw-state-db-contract.js";
 import {
   closeOpenClawStateDatabaseForTest,
@@ -59,7 +56,8 @@ vi.mock("../infra/node-sqlite.js", async (importOriginal) => {
   };
 });
 
-const tempDirs = useAutoCleanupTempDirTracker(afterAll);
+const sessionDirs = useSessionStoreTempDirs(afterAll, "openclaw-schema-budget-");
+afterAll(() => vi.restoreAllMocks());
 const counts: Array<{
   owner: string;
   userVersion: number;
@@ -67,16 +65,10 @@ const counts: Array<{
   dataVersion: number;
 }> = [];
 
-afterAll(() => {
-  closeOpenClawAgentDatabasesForTest();
-  closeOpenClawStateDatabaseForTest();
-  vi.restoreAllMocks();
-});
-
 beforeAll(async () => {
   const scope = {
     agentId: "main",
-    env: { ...process.env, OPENCLAW_STATE_DIR: tempDirs.make("openclaw-schema-budget-") },
+    env: { ...process.env, OPENCLAW_STATE_DIR: sessionDirs.make() },
     sessionKey: "agent:main:schema-budget",
     projection: "list" as const,
   };
@@ -133,7 +125,7 @@ it("keeps admitted reads within the schema-query budget", () => {
 it("refuses schemas migrated by another process on the next read", () => {
   const scope = {
     agentId: "main",
-    env: { ...process.env, OPENCLAW_STATE_DIR: tempDirs.make("openclaw-schema-migration-") },
+    env: { ...process.env, OPENCLAW_STATE_DIR: sessionDirs.make() },
   };
   const databases: Array<[string, number]> = [];
   try {

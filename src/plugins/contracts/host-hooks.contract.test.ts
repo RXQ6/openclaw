@@ -1,12 +1,11 @@
 // Host hook contract tests cover plugin host hook registration and runtime behavior.
-import fs from "node:fs/promises";
 import path from "node:path";
 import { expectDefined } from "@openclaw/normalization-core";
 import {
   createPluginRegistryFixture,
   registerTestPlugin,
 } from "openclaw/plugin-sdk/plugin-test-contracts";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import {
   PROTOCOL_VERSION,
   validatePluginsUiDescriptorsResult,
@@ -36,9 +35,9 @@ import type { GatewayRequestContext } from "../../gateway/server-methods/types.j
 import { buildGatewaySessionRow } from "../../gateway/session-utils.js";
 import { withTempConfig } from "../../gateway/test-temp-config.js";
 import { emitAgentEvent, resetAgentEventsForTest } from "../../infra/agent-events.js";
-import { resolvePreferredOpenClawTmpDir } from "../../infra/tmp-openclaw-dir.js";
 import { createDeferredCore } from "../../shared/deferred.js";
 import { withEnvAsync } from "../../test-utils/env.js";
+import { useSessionStoreTempDirs } from "../../test-utils/session-state-cleanup.js";
 import type {
   AgentToolResultMiddlewareContext,
   AgentToolResultMiddlewareEvent,
@@ -164,27 +163,24 @@ type HostHookStateFixture = {
   tempConfig: { session: { store: string } } & Record<string, unknown>;
 };
 
+const sessionDirs = useSessionStoreTempDirs(afterAll, "openclaw-host-hooks-scope-");
+
 async function withHostHookState(
-  prefix: string,
   run: (fixture: HostHookStateFixture) => Promise<void>,
   createTempConfig: (storePath: string) => HostHookStateFixture["tempConfig"] = (storePath) => ({
     agents: { entries: { main: { default: true } } },
     session: { store: storePath },
   }),
 ): Promise<void> {
-  const stateDir = await fs.mkdtemp(path.join(resolvePreferredOpenClawTmpDir(), prefix));
+  const stateDir = sessionDirs.make();
   const storePath = path.join(stateDir, "sessions.json");
   const tempConfig = createTempConfig(storePath);
-  try {
-    await withEnvAsync({ OPENCLAW_STATE_DIR: stateDir }, async () => {
-      await withTempConfig({
-        cfg: tempConfig,
-        run: async () => await run({ stateDir, storePath, tempConfig }),
-      });
+  await withEnvAsync({ OPENCLAW_STATE_DIR: stateDir }, async () => {
+    await withTempConfig({
+      cfg: tempConfig,
+      run: async () => await run({ stateDir, storePath, tempConfig }),
     });
-  } finally {
-    await fs.rm(stateDir, { recursive: true, force: true });
-  }
+  });
 }
 
 describe("host-hook fixture plugin contract", () => {
@@ -1788,7 +1784,7 @@ describe("host-hook fixture plugin contract", () => {
       const scoped = createRegistry("scoped");
       setActivePluginRegistry(scoped.registry.registry);
       try {
-        await withHostHookState("openclaw-host-hooks-scope-", async ({ storePath, tempConfig }) => {
+        await withHostHookState(async ({ storePath, tempConfig }) => {
           const sessionKey = "agent:main:main";
           const access = { sessionKey, storePath };
           await replaceSessionEntry(access, {
@@ -1902,7 +1898,7 @@ describe("host-hook fixture plugin contract", () => {
     });
     setActivePluginRegistry(registry.registry);
 
-    await withHostHookState("openclaw-host-hooks-patch-", async ({ storePath, tempConfig }) => {
+    await withHostHookState(async ({ storePath, tempConfig }) => {
       await updateSessionStore(storePath, (store) => {
         store["agent:main:main"] = {
           sessionId: "session-1",
@@ -2119,7 +2115,6 @@ describe("host-hook fixture plugin contract", () => {
       });
       setActivePluginRegistry(registry);
       await withHostHookState(
-        "openclaw-host-hooks-owner-",
         async ({ tempConfig }) => {
           const scope = (agentId: string) => ({
             agentId,
@@ -2203,7 +2198,7 @@ describe("host-hook fixture plugin contract", () => {
   );
 
   it("reports duplicate next-turn injections as not newly enqueued", async () => {
-    await withHostHookState("openclaw-host-hooks-injection-", async ({ storePath, tempConfig }) => {
+    await withHostHookState(async ({ storePath, tempConfig }) => {
       await updateSessionStore(storePath, (store) => {
         store["agent:main:main"] = {
           sessionId: "session-1",
@@ -2270,7 +2265,6 @@ describe("host-hook fixture plugin contract", () => {
     );
     setActivePluginRegistry(registry);
     await withHostHookState(
-      "openclaw-host-hooks-stale-",
       async ({ storePath, tempConfig }) => {
         await updateSessionStore(storePath, (store) => {
           store["agent:main:main"] = {
@@ -2351,7 +2345,7 @@ describe("host-hook fixture plugin contract", () => {
       }),
     );
     setActivePluginRegistry(registry);
-    await withHostHookState("openclaw-host-hooks-order-", async ({ storePath, tempConfig }) => {
+    await withHostHookState(async ({ storePath, tempConfig }) => {
       await updateSessionStore(storePath, (store) => {
         store["agent:main:main"] = {
           sessionId: "session-1",
@@ -2832,7 +2826,7 @@ describe("host-hook fixture plugin contract", () => {
       ],
     });
 
-    await withHostHookState("openclaw-host-hooks-state-", async ({ tempConfig }) => {
+    await withHostHookState(async ({ tempConfig }) => {
       await runPluginHostCleanup({
         cfg: tempConfig,
         registry: registry.registry,
@@ -3187,7 +3181,7 @@ describe("host-hook fixture plugin contract", () => {
       },
     });
 
-    await withHostHookState("openclaw-host-hooks-store-", async ({ storePath, tempConfig }) => {
+    await withHostHookState(async ({ storePath, tempConfig }) => {
       await updateSessionStore(storePath, (store) => {
         store["agent:main:main"] = {
           sessionId: "session-1",
@@ -3263,7 +3257,7 @@ describe("host-hook fixture plugin contract", () => {
       }),
     ).toBe(true);
 
-    await withHostHookState("openclaw-host-hooks-run-context-", async ({ tempConfig }) => {
+    await withHostHookState(async ({ tempConfig }) => {
       await runPluginHostCleanup({
         cfg: tempConfig,
         registry,
@@ -3295,39 +3289,36 @@ describe("host-hook fixture plugin contract", () => {
         status: "loaded",
       }),
     );
-    await withHostHookState(
-      "openclaw-host-hooks-injection-only-",
-      async ({ storePath, tempConfig }) => {
-        await updateSessionStore(storePath, (store) => {
-          store["agent:main:main"] = {
-            sessionId: "session-1",
-            updatedAt: Date.now(),
-            pluginNextTurnInjections: {
-              "injection-only-fixture": [
-                {
-                  id: "resume",
-                  pluginId: "injection-only-fixture",
-                  text: "resume",
-                  placement: "prepend_context",
-                  createdAt: 1,
-                },
-              ],
-            },
-          };
-          return undefined;
-        });
+    await withHostHookState(async ({ storePath, tempConfig }) => {
+      await updateSessionStore(storePath, (store) => {
+        store["agent:main:main"] = {
+          sessionId: "session-1",
+          updatedAt: Date.now(),
+          pluginNextTurnInjections: {
+            "injection-only-fixture": [
+              {
+                id: "resume",
+                pluginId: "injection-only-fixture",
+                text: "resume",
+                placement: "prepend_context",
+                createdAt: 1,
+              },
+            ],
+          },
+        };
+        return undefined;
+      });
 
-        const cleanupResult = await createPluginHostRegistryRetirement({
-          cfg: tempConfig,
-          previousRegistry,
-          nextRegistry: createEmptyPluginRegistry(),
-        })();
-        expect(cleanupResult.failures).toEqual([]);
+      const cleanupResult = await createPluginHostRegistryRetirement({
+        cfg: tempConfig,
+        previousRegistry,
+        nextRegistry: createEmptyPluginRegistry(),
+      })();
+      expect(cleanupResult.failures).toEqual([]);
 
-        const stored = loadSessionStore(storePath, { skipCache: true });
-        expect(stored["agent:main:main"]?.pluginNextTurnInjections).toBeUndefined();
-      },
-    );
+      const stored = loadSessionStore(storePath, { skipCache: true });
+      expect(stored["agent:main:main"]?.pluginNextTurnInjections).toBeUndefined();
+    });
   });
 });
 /* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */
