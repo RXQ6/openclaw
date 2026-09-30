@@ -656,6 +656,87 @@ describe("subagent registry sqlite store", () => {
     });
   });
 
+  it("uses last duplicate metadata keys without decoding retained session-list results", () => {
+    const run = createRun();
+    saveSubagentRegistryToSqlite(new Map([[run.runId, run]]));
+    const { db } = openOpenClawStateDatabase();
+    const write = db.prepare("UPDATE subagent_runs SET payload_json = ? WHERE run_id = ?");
+    const retained = "retained-result-sentinel".repeat(4_096);
+    const payload = JSON.stringify({
+      ...run,
+      completion: { required: true, resultText: retained },
+      delivery: { status: "pending", payload: { task: retained } },
+    });
+    const duplicateExecution = payload.replace(
+      '"execution":',
+      '"execution":{"status":"invalid"},"execution":',
+    );
+    const privatePayload = payload.slice(0, -1) + ',"completionTarget":"parent"}';
+    const cases: Array<[string, string, "terminal" | "running" | undefined]> = [
+      ["valid last execution", duplicateExecution, "terminal"],
+      [
+        "invalid last execution",
+        payload.slice(0, -1) + ',"execution":{"status":"invalid"}}',
+        undefined,
+      ],
+      [
+        "nested status",
+        payload.replace('"status":"terminal"', '"status":"invalid","status":"running"'),
+        "running",
+      ],
+      [
+        "required and delivery status",
+        payload
+          .replace('"required":true', '"required":null,"required":true')
+          .replace('"status":"pending"', '"status":"invalid","status":"pending"'),
+        "terminal",
+      ],
+      [
+        "last private envelope",
+        `{"parentCompletion":{},"parentCompletion":${privatePayload}}`,
+        "terminal",
+      ],
+      [
+        "invalid last private envelope",
+        `{"parentCompletion":${privatePayload},"parentCompletion":{}}`,
+        undefined,
+      ],
+      [
+        "duplicate retained results",
+        payload.replace('"resultText":', `"resultText":${JSON.stringify(retained)},"resultText":`),
+        "terminal",
+      ],
+      [
+        "duplicate completion",
+        payload.slice(0, -1) +
+          `,"completion":{"required":true,"resultText":${JSON.stringify(retained)}}}`,
+        "terminal",
+      ],
+      [
+        "invalid completion array",
+        payload.slice(0, -1) + `,"completion":[${JSON.stringify(retained)}]}`,
+        undefined,
+      ],
+      ["literal NUL", payload + "\u0000invalid", undefined],
+    ];
+    for (const [name, text, executionStatus] of cases) {
+      write.run(text, run.runId);
+      const query = vi.spyOn(sqliteQueries, "executeSqliteQuerySync");
+      try {
+        const compact = loadSubagentSessionListRunsFromSqlite([run.requesterSessionKey]).get(
+          run.runId,
+        );
+        expect(compact?.execution.status, name).toBe(executionStatus);
+        expect(JSON.stringify(query.mock.results), name).not.toContain("retained-result-sentinel");
+      } finally {
+        query.mockRestore();
+      }
+      expect(loadSubagentRegistryFromSqlite().get(run.runId)?.execution.status, name).toBe(
+        executionStatus,
+      );
+    }
+  });
+
   it.each([undefined, "parent"] as const)(
     "retains yielded pause reason in cold compact reads (completion target: %s)",
     (completionTarget) => {
