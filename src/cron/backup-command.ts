@@ -29,6 +29,7 @@ export type BackupScheduleSpec = { everyMs: number } & (
       mode: "offsite";
       location: string;
       namespace: string;
+      claimNamespace?: boolean;
       includeWorkspace: boolean;
     })
 );
@@ -83,6 +84,9 @@ export function buildBackupScheduleJob(spec: BackupScheduleSpec): CronJobCreate 
     }
   } else {
     argv.push("--to", spec.location, "--namespace", spec.namespace);
+    if (spec.claimNamespace) {
+      argv.push("--claim-namespace");
+    }
     if (!spec.includeWorkspace) {
       argv.push("--no-include-workspace");
     }
@@ -159,6 +163,7 @@ function parseBackupScheduleJob(
       options: {
         to: { type: "string" },
         namespace: { type: "string" },
+        "claim-namespace": { type: "boolean" },
         "no-include-workspace": { type: "boolean" },
         "keep-daily": { type: "string" },
         "keep-weekly": { type: "string" },
@@ -173,6 +178,7 @@ function parseBackupScheduleJob(
       everyMs,
       location: values.to,
       namespace: resolveBackupNamespace(values.namespace),
+      claimNamespace: values["claim-namespace"] === true,
       includeWorkspace: values["no-include-workspace"] !== true,
       ...normalizeBackupRetention({
         keepDaily: values["keep-daily"],

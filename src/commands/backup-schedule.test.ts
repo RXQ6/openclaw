@@ -149,47 +149,30 @@ describe("scheduled backups", () => {
     expect(spec.payload.argv).not.toContain("--all");
   });
 
-  it("round-trips offsite CLI options through the persisted schedule and status projection", async () => {
-    let persisted: CronJobCreate | undefined;
-    gatewayRpc.call.mockImplementation(
-      async (method: string, _options: unknown, params: CronJobCreate) => {
-        if (method !== "cron.add") {
-          throw new Error(`unexpected method ${method}`);
-        }
-        persisted = params;
-        return { created: true, job: { id: "offsite-job" } };
-      },
-    );
-    vi.spyOn(defaultRuntime, "log").mockImplementation(() => {});
-    await runCli([
-      "backup",
-      "enable",
-      "--to",
-      "archive",
-      "--every",
-      "6h",
-      "--namespace",
-      "host-a",
-      "--no-include-workspace",
-      "--keep-daily",
-      "7",
-      "--keep-weekly",
-      "4",
-      "--keep-monthly",
-      "0",
-    ]);
-    const spec = expectDefined(persisted, "persisted offsite schedule");
-    expect(spec.declarationKey).toBe("openclaw-backup-offsite-scheduled");
-    expect(spec.payload).toEqual({
-      kind: "command",
-      argv: [
-        "openclaw",
+  it.each([false, true])(
+    "round-trips offsite CLI options with explicit claim=%s through the persisted schedule and status projection",
+    async (claim) => {
+      let persisted: CronJobCreate | undefined;
+      gatewayRpc.call.mockImplementation(
+        async (method: string, _options: unknown, params: CronJobCreate) => {
+          if (method !== "cron.add") {
+            throw new Error(`unexpected method ${method}`);
+          }
+          persisted = params;
+          return { created: true, job: { id: "offsite-job" } };
+        },
+      );
+      vi.spyOn(defaultRuntime, "log").mockImplementation(() => {});
+      await runCli([
         "backup",
-        "create",
+        "enable",
         "--to",
         "archive",
+        "--every",
+        "6h",
         "--namespace",
         "host-a",
+        ...(claim ? ["--claim-namespace"] : []),
         "--no-include-workspace",
         "--keep-daily",
         "7",
@@ -197,30 +180,52 @@ describe("scheduled backups", () => {
         "4",
         "--keep-monthly",
         "0",
-      ],
-    });
-    expect(
-      summarizeBackupSchedules([
+      ]);
+      const spec = expectDefined(persisted, "persisted offsite schedule");
+      expect(spec.declarationKey).toBe("openclaw-backup-offsite-scheduled");
+      expect(spec.payload).toEqual({
+        kind: "command",
+        argv: [
+          "openclaw",
+          "backup",
+          "create",
+          "--to",
+          "archive",
+          "--namespace",
+          "host-a",
+          ...(claim ? ["--claim-namespace"] : []),
+          "--no-include-workspace",
+          "--keep-daily",
+          "7",
+          "--keep-weekly",
+          "4",
+          "--keep-monthly",
+          "0",
+        ],
+      });
+      expect(
+        summarizeBackupSchedules([
+          {
+            ...spec,
+            id: "offsite-job",
+            createdAtMs: 1,
+            updatedAtMs: 1,
+            state: { nextRunAtMs: 21_600_001 },
+          },
+        ]),
+      ).toEqual([
         {
-          ...spec,
           id: "offsite-job",
-          createdAtMs: 1,
-          updatedAtMs: 1,
-          state: { nextRunAtMs: 21_600_001 },
+          mode: "offsite",
+          target: "archive",
+          namespace: "host-a",
+          enabled: true,
+          everyMs: 21_600_000,
+          nextRunAtMs: 21_600_001,
         },
-      ]),
-    ).toEqual([
-      {
-        id: "offsite-job",
-        mode: "offsite",
-        target: "archive",
-        namespace: "host-a",
-        enabled: true,
-        everyMs: 21_600_000,
-        nextRunAtMs: 21_600_001,
-      },
-    ]);
-  });
+      ]);
+    },
+  );
 
   it.each([{ argv: ["--all"] }, { argv: ["--global"] }, { argv: ["--agent", "main"] }])(
     "reports installed Git schedule argv $argv in status",

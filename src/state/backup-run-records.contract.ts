@@ -21,6 +21,11 @@ export type BackupRunManifest = Omit<
   "id" | "createdAt" | "archivePath" | "status"
 >;
 
+export function resolveBackupRunTarget(run: BackupRunRecord): string | undefined {
+  // Git's historical target is a commit, while archivePath names its repository.
+  return run.kind === "git" ? run.archivePath : run.target;
+}
+
 function boundedText(value: string | undefined, maxLength: number): string | undefined {
   const trimmed = value?.trim();
   return trimmed ? truncateUtf16Safe(trimmed, maxLength) : undefined;

@@ -1,9 +1,12 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { json } from "node:stream/consumers";
 import { Command } from "commander";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OffsiteBackupResult } from "../../commands/backup-remote.js";
+import { getRuntimeConfig } from "../../config/config.js";
+import { loadDeviceIdentityIfPresentAsync } from "../../infra/device-identity-async.js";
 import { defaultRuntime } from "../../runtime.js";
 import { readBackupRuns } from "../../state/backup-run-records.js";
 import {
@@ -11,6 +14,7 @@ import {
   closeOpenClawStateDatabaseAsync,
 } from "../../state/openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath } from "../../state/openclaw-state-db.paths.js";
+import { openStorageLocation } from "../../storage/locations.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import { registerBackupCommand } from "./register.backup.js";
 import { registerStorageCommand } from "./register.storage.js";
@@ -98,6 +102,53 @@ describe("offsite backup CLI", () => {
       await fs.writeFile(path.join(namespaceDir, oldKey), Buffer.alloc(200));
       await fs.writeFile(path.join(namespaceDir, "foreign.txt"), "foreign");
       await fs.writeFile(path.join(otherDir, oldKey), Buffer.alloc(200));
+      const location = await openStorageLocation({ name: "archive", config: getRuntimeConfig() });
+      const scoped = location.scope("backups/test-host");
+      const foreignClaim = {
+        version: 1,
+        deviceId: "another-installation-device-id",
+        hostname: "test-host",
+        claimedAt: 1,
+      };
+      const writeClaim = async (claim: typeof foreignClaim) => {
+        const bytes = Buffer.from(JSON.stringify(claim));
+        await scoped.putObject(
+          "owner.json",
+          (async function* () {
+            yield bytes;
+          })(),
+          {
+            sizeBytes: bytes.length,
+          },
+        );
+      };
+      await writeClaim(foreignClaim);
+      errors.mockClear();
+      await expect(
+        run(
+          "backup",
+          "create",
+          "--to",
+          "archive",
+          "--namespace",
+          "test-host",
+          "--output",
+          localCopy,
+          "--keep-daily",
+          "0",
+        ),
+      ).rejects.toThrow();
+      const collisionMessage =
+        'Backup namespace "test-host" in archive belongs to another OpenClaw installation (test-host, device another-inst). Pass --namespace <name> to use a separate namespace, or --claim-namespace to take it over deliberately (for example after moving to new hardware).';
+      expect(errors.mock.calls.flat().join(" ")).toContain(collisionMessage);
+      expect((await readBackupRuns(process.env))[0]).toMatchObject({
+        status: "failed",
+        target: "archive",
+        error: collisionMessage,
+      });
+      await expect(fs.stat(localCopy)).rejects.toMatchObject({ code: "ENOENT" });
+      expect(await fs.readdir(scratchRoot)).toEqual([]);
+      expect(await fs.readdir(namespaceDir)).toContain(oldKey);
       const created = (await run(
         "backup",
         "create",
@@ -105,6 +156,7 @@ describe("offsite backup CLI", () => {
         "archive",
         "--namespace",
         "test-host",
+        "--claim-namespace",
         "--no-include-workspace",
         "--keep-daily",
         "0",
@@ -125,6 +177,26 @@ describe("offsite backup CLI", () => {
       expect(await fs.readdir(otherDir)).toEqual([oldKey]);
       const stored = await fs.readFile(path.join(namespaceDir, created.location!.key));
       expect(stored.subarray(0, 8).toString()).toBe("OCSTOR1\n");
+      expect(
+        (await fs.readFile(path.join(namespaceDir, "owner.json"))).subarray(0, 8).toString(),
+      ).toBe("OCSTOR1\n");
+      expect(await json((await scoped.getObject("owner.json"))!)).toMatchObject({
+        version: 1,
+        deviceId: (await loadDeviceIdentityIfPresentAsync())!.deviceId,
+        hostname: os.hostname(),
+        claimedAt: expect.any(Number),
+      });
+      // Recovery must work without this installation owning the namespace.
+      await scoped.delete("owner.json");
+      await writeClaim(foreignClaim);
+      await location.close();
+      await fs.writeFile(path.join(otherDir, "owner.json"), "x");
+      expect(await run("backup", "list", "--from", "archive")).toMatchObject({
+        namespaces: expect.arrayContaining([
+          { namespace: "test-host", hostname: "test-host" },
+          { namespace: "test-host-other" },
+        ]),
+      });
       const listed = await run("backup", "list", "--from", "archive", "--namespace", "test-host");
       expect(listed).toMatchObject({
         backups: [{ key: created.location!.key, sizeBytes: created.location!.plaintextBytes }],
@@ -192,6 +264,29 @@ describe("offsite backup CLI", () => {
         assets: [{ kind: "config" }],
       });
       expect((await fs.stat(localCopy)).size).toBe(configOnly.location?.plaintextBytes);
+      await fs.writeFile(path.join(destination, "backups", "config", "owner.json"), "x");
+      expect(
+        await run(
+          "backup",
+          "create",
+          "--to",
+          "archive",
+          "--namespace",
+          "config",
+          "--claim-namespace",
+          "--only-config",
+        ),
+      ).toMatchObject({ verified: true });
+      const reopened = await openStorageLocation({ name: "archive", config: getRuntimeConfig() });
+      try {
+        expect(
+          await json((await reopened.scope("backups/config").getObject("owner.json"))!),
+        ).toMatchObject({
+          deviceId: (await loadDeviceIdentityIfPresentAsync())!.deviceId,
+        });
+      } finally {
+        await reopened.close();
+      }
     });
   });
 });

@@ -16,6 +16,7 @@ export type BackupCommandCreateOptions = BackupCreateOptions &
   BackupRetentionOptions & {
     to?: string;
     namespace?: string;
+    claimNamespace?: boolean;
   };
 
 /** Create a backup archive, optionally verify it, and emit text or JSON output. */
@@ -25,11 +26,11 @@ export async function backupCreateCommand(
 ): Promise<OffsiteBackupResult> {
   if (
     opts.to === undefined &&
-    [opts.namespace, opts.keepDaily, opts.keepWeekly, opts.keepMonthly].some(
+    [opts.namespace, opts.claimNamespace, opts.keepDaily, opts.keepWeekly, opts.keepMonthly].some(
       (value) => value !== undefined,
     )
   ) {
-    throw new Error("--namespace and retention flags require --to <location>.");
+    throw new Error("--namespace, --claim-namespace, and retention flags require --to <location>.");
   }
   let archivePath = opts.output ?? (opts.to === undefined ? process.cwd() : `storage://${opts.to}`);
   const releaseCustody = opts.dryRun ? undefined : beginLifecycleWriteCustody("backup");

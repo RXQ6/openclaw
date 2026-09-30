@@ -38,6 +38,7 @@ export type BackupScheduleOptions = GatewayRpcOpts &
     agent?: string;
     to?: string;
     namespace?: string;
+    claimNamespace?: boolean;
     includeWorkspace?: boolean;
   };
 
@@ -87,18 +88,22 @@ function resolveScheduleSpec(options: BackupScheduleOptions, everyMs: number): B
       everyMs,
       location,
       namespace: resolveBackupNamespace(options.namespace),
+      claimNamespace: options.claimNamespace === true,
       includeWorkspace: options.includeWorkspace !== false,
       ...normalizeBackupRetention(options),
     };
   }
   if (
     options.namespace !== undefined ||
+    options.claimNamespace ||
     options.includeWorkspace === false ||
     options.keepDaily !== undefined ||
     options.keepWeekly !== undefined ||
     options.keepMonthly !== undefined
   ) {
-    throw new Error("--namespace, --no-include-workspace, and --keep-* require --to <location>.");
+    throw new Error(
+      "--namespace, --claim-namespace, --no-include-workspace, and --keep-* require --to <location>.",
+    );
   }
   const repository = resolveRequiredBackupPath(options.repository, "--repository");
   const agent = options.agent?.trim();

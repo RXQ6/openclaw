@@ -237,56 +237,84 @@ describe("backup run records", () => {
     });
   });
 
-  it("records archive and Git outcomes and prunes the operational log to 200 rows", async () => {
-    const env = await testEnv({ bootstrap: true });
-    await recordBackupRunOutcome({
-      env,
-      archivePath: "/backups/archive.tar.gz",
-      status: "failed",
-      kind: "archive",
-      error: "archive failed",
-      createdAt: 1,
-    });
-    for (let index = 2; index <= 202; index += 1) {
+  it.each(["archive", "git", "local archive"] as const)(
+    "retains each target's newest attempt and success beyond the 200-row window (%s)",
+    async (mode) => {
+      const env = await testEnv({ bootstrap: true });
+      const frequentRun = (index: number) => ({
+        archivePath: mode === "git" ? "/backups/git" : `/backups/archive-${index}.tar.gz`,
+        kind: mode === "git" ? ("git" as const) : ("archive" as const),
+        ...(mode === "local archive"
+          ? {}
+          : { target: mode === "git" ? `commit-${index}` : "frequent" }),
+      });
       await recordBackupRunOutcome({
         env,
-        archivePath: "/backups/git",
+        archivePath: "/backups/archive.tar.gz",
         status: "ok",
-        kind: "git",
-        target: `commit-${index}`,
-        pushFailed: index === 202,
-        createdAt: index,
+        kind: "archive",
+        target: "occasional",
+        createdAt: 1,
       });
-    }
-    const rows = withExistingOpenClawStateDatabaseReadOnly(
-      ({ db }) =>
-        db
-          .prepare(
-            "SELECT created_at, status, manifest_json FROM backup_runs ORDER BY created_at ASC",
-          )
-          .all() as Array<{ created_at: number; status: string; manifest_json: string }>,
-      { env },
-    );
-    expect(rows).toHaveLength(200);
-    expect(rows?.[0]?.created_at).toBe(3);
-    expect(rows?.at(-1)).toMatchObject({ created_at: 202, status: "ok" });
-    expect(JSON.parse(rows?.at(-1)?.manifest_json ?? "{}")).toMatchObject({
-      kind: "git",
-      target: "commit-202",
-      pushFailed: true,
-    });
-    await recordBackupRunOutcome({
-      env,
-      archivePath: "/backups/failed.tar.gz",
-      kind: "archive",
-      status: "failed",
-      createdAt: 203,
-    });
-    expect(await readBackupRunFreshness(env)).toMatchObject({
-      latest: { createdAt: 203, status: "failed" },
-      latestOk: { createdAt: 202, pushFailed: true },
-    });
-  });
+      await recordBackupRunOutcome({
+        env,
+        archivePath: "/backups/archive.tar.gz",
+        status: "failed",
+        kind: "archive",
+        target: "occasional",
+        error: "archive failed",
+        createdAt: 2,
+      });
+      for (let index = 3; index <= 252; index += 1) {
+        await recordBackupRunOutcome({
+          env,
+          ...frequentRun(index),
+          status: "ok",
+          createdAt: index,
+        });
+      }
+      const targets = summarizeBackupTargets(await readBackupRuns(env));
+      expect(targets.find((entry) => entry.latest.createdAt === 252)).toMatchObject({
+        kind: mode === "git" ? "git" : "archive",
+        target:
+          mode === "git"
+            ? "/backups/git"
+            : mode === "local archive"
+              ? "/backups/archive-252.tar.gz"
+              : "frequent",
+        latest: expect.objectContaining({ createdAt: 252, status: "ok" }),
+        latestOk: expect.objectContaining({ createdAt: 252, status: "ok" }),
+      });
+      expect(targets.find((entry) => entry.target === "occasional")).toMatchObject({
+        kind: "archive",
+        target: "occasional",
+        latest: expect.objectContaining({ createdAt: 2, status: "failed" }),
+        latestOk: expect.objectContaining({ createdAt: 1, status: "ok" }),
+      });
+      const rows = withExistingOpenClawStateDatabaseReadOnly(
+        ({ db }) =>
+          db
+            .prepare(
+              "SELECT created_at, status, manifest_json FROM backup_runs ORDER BY created_at ASC",
+            )
+            .all() as Array<{ created_at: number; status: string; manifest_json: string }>,
+        { env },
+      );
+      expect(rows).toHaveLength(202);
+      expect(rows?.slice(0, 3).map((row) => row.created_at)).toEqual([1, 2, 53]);
+      expect(rows?.at(-1)).toMatchObject({ created_at: 252, status: "ok" });
+      await recordBackupRunOutcome({
+        env,
+        ...frequentRun(253),
+        status: "failed",
+        createdAt: 253,
+      });
+      expect(await readBackupRunFreshness(env)).toMatchObject({
+        latest: { createdAt: 253, status: "failed" },
+        latestOk: { createdAt: 252, status: "ok" },
+      });
+    },
+  );
 
   it("binds each outcome and read to its requested state directory", async () => {
     const firstEnv = await testEnv({ bootstrap: true });

@@ -106,6 +106,38 @@ Set `encryption: "none"` only as an explicit operator choice, such as a destinat
 already protected by disk encryption. **Backups can contain credentials.** Without
 storage encryption, anyone who can read the destination can read the stored bytes.
 
+## Share a location across installations
+
+Backups use `backups/<namespace>/` within a location. The namespace defaults to
+the sanitized hostname; use `--namespace <name>` to choose a stable, distinct
+name for each installation sharing the destination.
+
+The first upload creates an `owner.json` claim containing the installation's
+durable Gateway device ID, hostname, and claim time. It uses the same location
+encryption settings as the archives. Backup creation checks the claim before
+archiving and again before retention. A different device ID refuses the backup
+and records a failed attempt, preventing a hostname collision from sharing
+retention. Retention never deletes the claim.
+
+Pass `--claim-namespace` to `backup create --to <location>` to deliberately take
+over a namespace, for example after moving to new hardware. `backup enable --to`
+also accepts the flag and stores it in the scheduled command only when explicitly
+passed; those scheduled runs can then replace another installation's claim.
+Prefer a separate namespace when both installations will continue running.
+
+Recovery remains read-only: `backup list`, `backup verify`, and `backup restore`
+with `--from <location>` do not require or change the claim. Listing without
+`--namespace` also shows available namespaces and their claim hostnames. A
+restored installation carries its original device identity and can continue its
+namespace. A cloned copy running concurrently shares that identity and must use
+its own `--namespace` to avoid sharing retention.
+
+Backup status and Doctor preserve the newest attempt and newest successful result
+for every backup kind and target alongside the newest 200 global attempts. A busy
+job cannot hide an infrequent destination's last result. See
+[Backups](/install/backups#copy-backups-offsite) and the
+[Backup CLI](/cli/backup#recorded-runs-and-freshness) for commands and status details.
+
 ## Diagnose a location
 
 `openclaw storage list` probes configured locations. `openclaw storage test <name>`

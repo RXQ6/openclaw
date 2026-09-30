@@ -106,6 +106,7 @@ for recovery.
 | ------------------------ | ------------------------------------------------------------------------------------- |
 | `--to <location>`        | Upload the verified archive to a configured, initialized location.                    |
 | `--namespace <name>`     | Backup namespace; defaults to the sanitized hostname.                                 |
+| `--claim-namespace`      | Deliberately replace the namespace ownership claim with this installation's identity. |
 | `--output <path>`        | Also retain a local archive at a path or in a destination directory.                  |
 | `--no-include-workspace` | Omit workspace files while retaining state, config, credentials, and agent databases. |
 | `--only-config`          | Archive only the active config file; storage configuration must still be readable.    |
@@ -120,11 +121,31 @@ characters. The filename does not change when storage encryption is enabled.
 Choose a stable explicit namespace for a host that may be renamed, and use that
 same namespace when listing, verifying, or restoring from another host.
 
+The first upload creates `backups/<namespace>/owner.json` with the installation's
+durable Gateway device ID, hostname, and claim time. The claim uses the location's
+encryption settings. Before archiving and again before retention, OpenClaw checks
+that the claim matches this installation. A different device ID refuses the run
+before archiving and records a failed attempt naming the owner. Identical
+hostnames do not grant shared ownership.
+
+Use a different `--namespace` for a separate installation. To deliberately take
+over an existing namespace, such as after moving to new hardware, pass
+`--claim-namespace` with `--to`. This also replaces a damaged ownership claim:
+
+```bash
+openclaw backup create --to offsite --namespace gateway --claim-namespace
+```
+
+A restored installation retains its device identity and can continue using its
+namespace. A cloned copy running at the same time shares that identity and must
+use its own `--namespace` to avoid sharing retention.
+
 ### Offsite retention
 
 Retention runs after a successful upload and applies only within the selected
 namespace to keys matching `<yyyymmddThhmmssZ>-<8 lowercase hex>.tar.gz` with a
-valid UTC timestamp. Other objects and namespaces are never deleted.
+valid UTC timestamp. Other objects and namespaces, including the `owner.json`
+claim, are never deleted. Retention checks ownership again before pruning.
 
 The policies form a union: a backup retained by any policy stays. Each policy
 selects the newest backup in its most recent nonempty calendar buckets; days
@@ -140,6 +161,7 @@ openclaw backup create --to offsite --namespace gateway --keep-daily 7 --keep-we
 ### List and verify remote archives
 
 ```bash
+openclaw backup list --from offsite
 openclaw backup list --from offsite --namespace gateway
 openclaw backup list --from offsite --namespace gateway --json
 openclaw backup verify --from offsite --namespace gateway latest
@@ -147,12 +169,16 @@ openclaw backup verify --from offsite --namespace gateway 20260930T120000Z-a1b2c
 ```
 
 `list` requires `--from <location>` and accepts `--namespace <name>`. It lists
-matching backup keys newest first, with plaintext and stored sizes. `verify`
+matching backup keys newest first, with plaintext and stored sizes. Without
+`--namespace`, it also lists available namespaces under `backups/` with their
+claim hostnames, helping you locate backups from another machine. `verify`
 accepts those same options and either a listed key or `latest`, which selects
 the newest timestamp in the key.
 Use the key relative to the namespace, without the `backups/<namespace>/` prefix.
 Remote verification downloads and decrypts into managed scratch, applies the
 same archive verification as a local file, and removes the scratch copy.
+Listing, verifying, and restoring remote archives are read-only at the location;
+they neither require nor replace the namespace claim, including on a new machine.
 
 Without `--from`, `verify` and `restore` continue to accept local archive paths.
 
@@ -408,11 +434,15 @@ openclaw backup enable --repository ~/Backups/openclaw-git --every 24h --push
 
 The interval defaults to `24h` when `--every` is omitted. An explicitly empty or whitespace-only interval is rejected before a schedule is created or updated.
 
-Offsite schedules accept `--namespace <name>`, `--no-include-workspace`, and
+Offsite schedules accept `--namespace <name>`, `--claim-namespace`, `--no-include-workspace`, and
 `--keep-daily`, `--keep-weekly`, and `--keep-monthly`. They use the same archive,
 encryption, and [retention rules](/cli/backup#offsite-retention) as `backup create --to`.
 The location and its secrets must be accessible to the Gateway process. There
 is no retained local archive from scheduled offsite runs.
+`--claim-namespace` is stored in the schedule's command only when explicitly
+passed to `backup enable --to`; each scheduled run can then take over the
+namespace. Omit it for normal ownership checks. Re-enable the schedule without
+the flag when continuing takeover authority is no longer needed.
 
 For Git schedules, the default scope is every database. Use `--global-only` or
 `--agent <id>` to narrow it, and add `--exclude-secrets` for a redacted history.
@@ -447,7 +477,12 @@ Disabling a schedule finds the managed automation across all list pages, even af
 Every real archive, SQLite snapshot, and Git create attempt records a compact
 outcome in the existing shared state database. External jobs can also report
 their outcomes. Dry runs are not recorded. The log retains the newest 200
-attempts, so frequent schedules remain bounded.
+attempts plus the newest attempt and newest successful result for every backup
+kind and target. Frequent schedules cannot evict an infrequent destination's
+last attempt or last success; history stays bounded by the recent window and
+the number of distinct targets.
+Git history is grouped by repository. Local archives and SQLite snapshots
+without a named target share a bounded history group for their backup kind.
 
 Successful offsite outcomes include the location name, provider, location identity,
 key, namespace, plaintext archive bytes, and stored bytes. Runs with retention
@@ -462,11 +497,13 @@ attempt failed or whose newest success is older than three times its interval,
 naming the location and `openclaw storage test <name>` as the next check.
 
 Gateway RPC `backup.status` requires operator read scope. It returns the newest
-attempt and success per backup kind and target from the bounded recent window,
+attempt and success per backup kind and target from the whole retained ledger,
 configured backup schedules with their next run, and the configured storage
 locations. Listing configuration does not probe storage. The Control UI's
 Backups section on the Systems landing and Gateway host views uses this status and provides a **Check** action per location
 through `storage.locations.probe`.
+Doctor uses the same retained history, so per-target health survives more than
+200 newer outcomes from other jobs.
 
 Recording is best-effort: a record-write failure prints a warning but never
 changes a successful backup into a failed command. Recording uses an existing

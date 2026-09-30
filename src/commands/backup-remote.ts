@@ -18,6 +18,7 @@ import {
   finishBackupScratch,
   type BackupScratch,
 } from "../infra/backup-scratch.js";
+import { loadOrCreateProcessDeviceIdentityAsync } from "../infra/device-identity-async.js";
 import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
 import type { BackupRunLocation, BackupRunRetention } from "../state/backup-run-records.js";
 import {
@@ -25,11 +26,17 @@ import {
   type StorageLocation,
   type StorageLocationObjectInfo,
 } from "../storage/locations.js";
+import {
+  assertBackupNamespaceOwner,
+  claimBackupNamespace,
+  listBackupNamespaces,
+} from "./backup-namespace.js";
 
 export type OffsiteBackupOptions = BackupCreateOptions &
   BackupRetentionOptions & {
     to: string;
     namespace?: string;
+    claimNamespace?: boolean;
   };
 export type OffsiteBackupResult = BackupCreateResult & {
   location?: BackupRunLocation;
@@ -38,7 +45,7 @@ export type OffsiteBackupResult = BackupCreateResult & {
 };
 type RemoteBackupOptions = { from: string; namespace?: string; json?: boolean };
 
-async function openBackupLocation(name: string, namespace: string): Promise<StorageLocation> {
+async function openBackupLocation(name: string, namespace?: string): Promise<StorageLocation> {
   const location = await openStorageLocation({ name, config: getRuntimeConfig() });
   try {
     const probe = await location.probe();
@@ -48,7 +55,7 @@ async function openBackupLocation(name: string, namespace: string): Promise<Stor
           `Storage location ${name}: ${probe.state}. Run \`openclaw storage test ${name}\`.`,
       );
     }
-    return location.scope(`backups/${namespace}`);
+    return location.scope(namespace === undefined ? "backups" : `backups/${namespace}`);
   } catch (error) {
     await location.close();
     throw error;
@@ -79,6 +86,8 @@ export async function createOffsiteBackupArchive(
     if (opts.dryRun) {
       return await createBackupArchive(opts);
     }
+    const { deviceId } = await loadOrCreateProcessDeviceIdentityAsync();
+    await claimBackupNamespace(location, namespace, deviceId, opts.claimNamespace === true);
     if (!opts.output) {
       scratch = await createBackupScratchDirectory(os.tmpdir());
     }
@@ -91,6 +100,7 @@ export async function createOffsiteBackupArchive(
     result.verified = true;
     const plaintextBytes = (await fs.stat(result.archivePath)).size;
     const key = createRemoteBackupKey(Date.parse(result.createdAt));
+    await assertBackupNamespaceOwner(location, namespace, deviceId);
     const uploaded = await location.putObject(key, createReadStream(result.archivePath), {
       sizeBytes: plaintextBytes,
     });
@@ -126,7 +136,9 @@ export async function createOffsiteBackupArchive(
         (await listBackupObjects(location)).map((object) => object.key),
         retention,
       );
+      await assertBackupNamespaceOwner(location, namespace, deviceId);
       for (const expired of selected.deleted) {
+        await assertBackupNamespaceOwner(location, namespace, deviceId);
         await location.delete(expired);
       }
       output.retention = { kept: selected.kept.length, deleted: selected.deleted.length };
@@ -148,18 +160,33 @@ export async function createOffsiteBackupArchive(
 
 export async function backupListCommand(runtime: RuntimeEnv, opts: RemoteBackupOptions) {
   const namespace = resolveBackupNamespace(opts.namespace);
-  const location = await openBackupLocation(opts.from, namespace);
+  const backupsLocation = await openBackupLocation(opts.from);
+  const location = backupsLocation.scope(namespace);
   try {
+    const namespaces =
+      opts.namespace === undefined ? await listBackupNamespaces(backupsLocation) : undefined;
     const backups = (await listBackupObjects(location)).map((object) => ({
       key: object.key,
       sizeBytes: object.sizeBytes,
       storedBytes: object.storedBytes,
       createdAt: new Date(parseRemoteBackupTimestamp(object.key)!).toISOString(),
     }));
-    const result = { location: location.describe(), namespace, backups };
+    const result = {
+      location: location.describe(),
+      namespace,
+      backups,
+      ...(namespaces ? { namespaces } : {}),
+    };
     if (opts.json) {
       writeRuntimeJson(runtime, result);
     } else {
+      if (namespaces) {
+        runtime.log(
+          namespaces.length
+            ? `Available namespaces in ${opts.from}:\n${namespaces.map((entry) => `${entry.namespace}${entry.hostname ? ` (${entry.hostname})` : ""}`).join("\n")}`
+            : `No backup namespaces in ${opts.from}.`,
+        );
+      }
       runtime.log(
         backups.length
           ? backups

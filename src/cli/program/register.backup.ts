@@ -22,6 +22,10 @@ export function registerBackupCommand(program: Command) {
     .description("Write a backup archive for config, credentials, sessions, and workspaces")
     .option("--output <path>", "Archive path or destination directory")
     .option("--to <location>", "Upload the verified archive to a storage location")
+    .option(
+      "--claim-namespace",
+      "Deliberately take over the backup namespace for this installation",
+    )
     .option("--namespace <name>", "Backup namespace (default: sanitized hostname)")
     .option("--keep-daily <n>", "Retain the newest backup in N daily UTC buckets")
     .option("--keep-weekly <n>", "Retain the newest backup in N weekly UTC buckets")
@@ -173,6 +177,10 @@ function registerBackupScheduleCommands(backup: Command): void {
       .description("Provision a Gateway automation for offsite or Git backups")
       .option("--repository <path>", "Git backup repository directory")
       .option("--to <location>", "Storage location for offsite archive backups")
+      .option(
+        "--claim-namespace",
+        "Deliberately take over the backup namespace on each scheduled run",
+      )
       .option("--namespace <name>", "Backup namespace (default: sanitized hostname)")
       .option("--no-include-workspace", "Exclude workspace directories from offsite archives")
       .option("--keep-daily <n>", "Retain the newest backup in N daily UTC buckets")

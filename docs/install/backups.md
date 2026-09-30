@@ -163,6 +163,12 @@ Keep the location's credentials and encryption passphrase available to the
 Gateway process. Retention is optional; without any `--keep-*` flags, backups
 are never pruned. See [retention rules](/cli/backup#offsite-retention).
 
+Each namespace belongs to the installation that first uploads to it. To deliberately
+take over an existing namespace, pass `--claim-namespace` to `backup enable --to`.
+The schedule retains this flag only when explicitly passed; its runs can then
+replace an existing ownership claim. Prefer a separate `--namespace` for a
+different installation that is still running.
+
 For incremental database history in Git, initialize a private repository and
 enable the Git schedule instead. This backs up the shared database and every
 configured agent database, including custom agent roots:
@@ -229,6 +235,11 @@ freshness hint and also flags an offsite schedule after a failed attempt or
 when its last success is older than three schedule intervals. Diagnose that
 destination with `openclaw storage test <name>`.
 
+The recorded history keeps the newest 200 attempts plus the newest attempt and
+newest successful result for every backup kind and target. Status and Doctor
+retain an infrequently used destination's last outcome even when another job
+produces more than 200 newer results.
+
 ## Copy backups offsite
 
 Use a named [storage location](/concepts/storage-locations) for an external disk,
@@ -257,8 +268,8 @@ copy. Local copies are plaintext `.tar.gz` archives even when the storage
 location encrypts uploaded bytes; protect both destinations accordingly.
 
 Backups are stored under `backups/<namespace>/`, where the namespace defaults
-to the sanitized hostname. Use an explicit namespace to share a destination
-across machines without mixing their retention policies:
+to the sanitized hostname. Use a distinct explicit namespace for each installation
+sharing a destination:
 
 ```bash
 openclaw backup create --to offsite --namespace gateway --keep-daily 7 --keep-weekly 4 --keep-monthly 12
@@ -267,10 +278,25 @@ openclaw backup verify --from offsite --namespace gateway latest
 openclaw backup restore --from offsite --namespace gateway latest --target ./restored-openclaw
 ```
 
+The first upload claims the namespace for the installation's durable Gateway
+device identity. Its `owner.json` contains the device ID, hostname, and claim
+time, and uses the location's encryption settings. Before archiving and again
+before retention, OpenClaw checks ownership. A different device identity causes
+a failed attempt with the owner's hostname and abbreviated device ID, even if
+both machines use the same hostname.
+
+Choose another `--namespace` for a separate installation. To deliberately take
+over the existing namespace, for example after moving to new hardware, run:
+
+```bash
+openclaw backup create --to offsite --namespace gateway --claim-namespace
+```
+
 Retention runs only after a successful upload. It keeps the newest backup in
 each selected UTC day, week, or month, combining the policies and always
 preserving the newest backup. It never deletes other namespaces or objects
-whose keys do not match the backup filename pattern. No retention flags means
+whose keys do not match the backup filename pattern, including `owner.json`.
+No retention flags means
 no deletion; see [Backup CLI](/cli/backup#offsite-retention) for exact rules.
 
 Remote verification and restore download and decrypt into managed scratch,
@@ -278,6 +304,13 @@ then use the same archive checks as local files. Restore still stages into a
 fresh target; follow [Restore a full archive](/install/backups#restore-a-full-archive) before
 activating the result. When recovering on another host, specify the original
 namespace and retain the original encryption passphrase and location marker.
+`backup list --from offsite` without `--namespace` also lists available
+namespaces and their claim hostnames so you can find the original data.
+Listing, verifying, and restoring never require or change namespace ownership.
+
+A restored installation carries the original device identity and can continue
+using its namespace. A cloned copy running concurrently shares that identity;
+give it its own `--namespace` so the two copies do not share retention.
 
 Each archive is a full copy. For large installs where upload size matters,
 use Git-backed snapshots or continuous replication. Plain local archives and

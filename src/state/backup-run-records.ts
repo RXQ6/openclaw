@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import {
+  resolveBackupRunTarget,
   serializeBackupRunManifest,
   type BackupRunManifest,
   type BackupRunRecord,
@@ -103,10 +104,7 @@ export function summarizeBackupTargets(runs: readonly BackupRunRecord[]) {
     }
   >();
   for (const run of runs) {
-    // Git's historical target is a commit, while archivePath names its repository.
-    const target =
-      run.location?.name ??
-      (run.kind === "git" ? run.archivePath : (run.target ?? run.archivePath));
+    const target = run.location?.name ?? resolveBackupRunTarget(run) ?? run.archivePath;
     const key = JSON.stringify([run.kind, target]);
     let group = groups.get(key);
     if (!group) {
