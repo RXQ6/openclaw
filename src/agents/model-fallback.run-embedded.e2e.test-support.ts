@@ -69,8 +69,8 @@ export async function withModelFallbackWorkspace<T>(
 ): Promise<T> {
   // Each e2e case gets isolated agent/workspace dirs because usage stats and
   // transcripts are part of the fallback behavior under test.
-  // openclaw-temp-dir: allow callback-owned roots must match canonical agent database paths
   const root = await fs.realpath(
+    // openclaw-temp-dir: allow callback-owned roots must match canonical agent database paths
     await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-model-fallback-")),
   );
   const agentDir = path.join(root, "agent");

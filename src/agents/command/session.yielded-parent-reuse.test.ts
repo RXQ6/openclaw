@@ -1,7 +1,7 @@
 // Covers command-session resolution for a yielded parent whose children complete
 // after its transcript was admitted: the parent generation must survive.
 import path from "node:path";
-import { afterAll, afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { OpenClawConfig } from "../../config/config.js";
 import {
   appendTranscriptEvent,
@@ -10,7 +10,6 @@ import {
 } from "../../config/sessions/session-accessor.js";
 import { deriveGatewaySessionLifecycleSnapshot } from "../../gateway/session-lifecycle-state.js";
 import { resolveOpenClawAgentSqlitePath } from "../../state/openclaw-agent-db.js";
-import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
 import { useSessionStoreTempDirs } from "../../test-utils/session-state-cleanup.js";
 import { resolveSession } from "./session.js";
 
@@ -22,10 +21,6 @@ describe("resolveSession with a yielded running parent", () => {
   beforeEach(() => {
     stateDir = sessionDirs.make();
     storePath = path.join(stateDir, "agents", "main", "sessions", "sessions.json");
-  });
-
-  afterEach(() => {
-    closeOpenClawStateDatabaseForTest();
   });
 
   it("keeps the parent session generation across sibling completions", async () => {

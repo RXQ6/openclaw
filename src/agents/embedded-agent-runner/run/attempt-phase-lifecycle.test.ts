@@ -9,7 +9,6 @@ import {
 import { createNestedToolActivity } from "../../../sessions/nested-tool-activity.js";
 import { createUserTurnTranscriptRecorder } from "../../../sessions/user-turn-transcript.js";
 import { createDeferredCore } from "../../../shared/deferred.js";
-import { closeOpenClawAgentDatabasesForTest } from "../../../state/openclaw-agent-db.js";
 import { runOpenClawAgentWorkerWrite } from "../../../state/openclaw-agent-write-admission.js";
 import { useSessionStoreTempDirs } from "../../../test-utils/session-state-cleanup.js";
 import { FULL_BOOTSTRAP_COMPLETED_CUSTOM_TYPE } from "../../bootstrap-files.js";
@@ -41,14 +40,7 @@ import { makeTextToolResult } from "../../../../test/helpers/text-tool-result.js
 import { completeEmbeddedAttemptAfterTurn } from "./attempt-finalize.js";
 import { settleEmbeddedAttemptStream } from "./attempt-stream-settle.js";
 
-const tempDirs = useSessionStoreTempDirs(
-  (cleanup) =>
-    afterAll(async () => {
-      await cleanup();
-      closeOpenClawAgentDatabasesForTest();
-    }),
-  "openclaw-attempt-terminal-anchor-",
-);
+const tempDirs = useSessionStoreTempDirs(afterAll, "openclaw-attempt-terminal-anchor-");
 
 describe("embedded attempt phase lifecycle state", () => {
   beforeEach(() => {

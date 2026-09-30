@@ -2,22 +2,10 @@ import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { upsertSessionEntryCore } from "../config/sessions/session-accessor.js";
 import { buildWatchedSessionsHarnessContext } from "../plugin-sdk/agent-harness-runtime.js";
 import { registerMainSessionGroupWatch } from "../sessions/session-state-events.js";
-import {
-  closeOpenClawAgentDatabasesAsync,
-  closeOpenClawAgentDatabasesForTest,
-} from "../state/openclaw-agent-db.js";
-import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { useSessionStoreTempDirs } from "../test-utils/session-state-cleanup.js";
 import { prepareWatchedSessionsPrompt } from "./watched-sessions-prompt.js";
 
-const sessionDirs = useSessionStoreTempDirs((cleanup) => {
-  afterAll(async () => {
-    await closeOpenClawAgentDatabasesAsync();
-    closeOpenClawAgentDatabasesForTest();
-    closeOpenClawStateDatabaseForTest();
-    await cleanup();
-  });
-}, "openclaw-watched-sessions-");
+const sessionDirs = useSessionStoreTempDirs(afterAll, "openclaw-watched-sessions-");
 const mainSessionKey = "agent:main:main";
 const sessionReadTools = ["sessions_history", "sessions_search", "sessions_list"];
 

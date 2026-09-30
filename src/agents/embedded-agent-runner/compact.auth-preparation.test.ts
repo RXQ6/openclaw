@@ -20,25 +20,16 @@ const { compactEmbeddedAgentSession, compactEmbeddedAgentSessionDirect } =
   await loadCompactHooksHarness();
 const [
   { upsertSessionEntryCore },
-  { closeOpenClawAgentDatabasesForTest },
   { ensureAuthProfileStoreWithoutExternalProfiles },
   { AsyncWorkScope },
   { prepareProviderRuntimeAuth },
 ] = await Promise.all([
   import("../../config/sessions/session-accessor.js"),
-  import("../../state/openclaw-agent-db.js"),
   import("../model-auth.js"),
   import("../../shared/async-work-scope.js"),
   import("../../plugins/provider-runtime.js"),
 ]);
-const tempDirs = useSessionStoreTempDirs(
-  (cleanup) =>
-    afterAll(async () => {
-      await cleanup();
-      closeOpenClawAgentDatabasesForTest();
-    }),
-  "openclaw-compaction-auth-",
-);
+const tempDirs = useSessionStoreTempDirs(afterAll, "openclaw-compaction-auth-");
 
 async function prepareCompactionParams() {
   const workspaceDir = tempDirs.make();

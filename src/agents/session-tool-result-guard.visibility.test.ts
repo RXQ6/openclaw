@@ -1,7 +1,6 @@
 import path from "node:path";
 import { SessionManager } from "openclaw/plugin-sdk/agent-sessions";
 import { upsertSessionEntry } from "openclaw/plugin-sdk/session-store-runtime";
-import { closeOpenClawAgentDatabasesForTest } from "openclaw/plugin-sdk/sqlite-runtime-testing";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
 import { makeUserMessage } from "../../test/helpers/user-message.js";
 import { applyInputProvenanceToUserMessage } from "../sessions/input-provenance.js";
@@ -16,14 +15,7 @@ import { guardSessionManager } from "./session-tool-result-guard-wrapper.js";
 import { makeAgentAssistantMessage } from "./test-helpers/agent-message-fixtures.js";
 
 const listeners: Array<() => void> = [];
-const sessionDirs = useSessionStoreTempDirs(
-  (cleanup) =>
-    afterAll(async () => {
-      await cleanup();
-      closeOpenClawAgentDatabasesForTest();
-    }),
-  "openclaw-transcript-visibility-",
-);
+const sessionDirs = useSessionStoreTempDirs(afterAll, "openclaw-transcript-visibility-");
 
 afterEach(() => {
   for (const unsubscribe of listeners.splice(0)) {

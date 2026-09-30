@@ -28,7 +28,6 @@ describe("subagent fork context through SQLite and tool boundaries", () => {
   let decisionWork: typeof import("../../../audit/execution-decision-work.js");
   let identityAdmission: typeof import("../../../audit/execution-identity-admission.js");
   let callerContext: typeof import("../../tools/gateway-caller-context.js");
-  let closeStateDatabase: () => void;
   let resetScheduler: () => void;
   let restoreUpsert: () => void;
   let forkedEntry: SessionEntry | undefined;
@@ -106,8 +105,6 @@ describe("subagent fork context through SQLite and tool boundaries", () => {
     sessions = await import("../../../config/sessions/session-accessor.js");
     ({ forkSessionEntryFromParent: forkSession } =
       await import("../../../auto-reply/reply/session-fork.js"));
-    ({ closeOpenClawStateDatabaseForTest: closeStateDatabase } =
-      await import("../../../state/openclaw-state-db.js"));
     const { testing } = await import("../swarm/swarm-scheduler.test-support.js");
     resetScheduler = () => testing.reset();
     const runtime = await import("./subagent-spawn.runtime.js");
@@ -203,7 +200,6 @@ describe("subagent fork context through SQLite and tool boundaries", () => {
 
   afterEach(() => {
     resetScheduler();
-    closeStateDatabase();
   });
 
   afterAll(() => {

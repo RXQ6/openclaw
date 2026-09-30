@@ -3,7 +3,6 @@ import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vites
 import { resolveDefaultSessionStorePath } from "../../../config/sessions/paths.js";
 import { upsertSessionEntryCore } from "../../../config/sessions/session-accessor.js";
 import { createDeferredCore } from "../../../shared/deferred.js";
-import { closeOpenClawAgentDatabasesForTest } from "../../../state/openclaw-agent-db.js";
 import { runOpenClawAgentWorkerWrite } from "../../../state/openclaw-agent-write-admission.js";
 import { useSessionStoreTempDirs } from "../../../test-utils/session-state-cleanup.js";
 import { SessionManager } from "../../sessions/session-manager.js";
@@ -15,14 +14,7 @@ import type { PromptSubmissionCall } from "./attempt-prompt-phase.test-support.j
 const { createFixture, mocks } = await vi.hoisted(
   async () => await import("./attempt-prompt-phase.test-support.js"),
 );
-const tempStateDirs = useSessionStoreTempDirs(
-  (cleanup) =>
-    afterAll(async () => {
-      await cleanup();
-      closeOpenClawAgentDatabasesForTest();
-    }),
-  "openclaw-prompt-projection-admission-",
-);
+const tempStateDirs = useSessionStoreTempDirs(afterAll, "openclaw-prompt-projection-admission-");
 
 beforeEach(() => {
   vi.clearAllMocks();

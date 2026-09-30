@@ -19,7 +19,6 @@ import {
   registerInternalHook,
   type AgentBootstrapHookContext,
 } from "../hooks/internal-hooks.js";
-import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.js";
 import { closeOpenClawStateDatabaseForTest } from "../state/openclaw-state-db.js";
 import { makeTempWorkspace } from "../test-helpers/workspace.js";
 import { withEnvAsync } from "../test-utils/env.js";
@@ -826,14 +825,7 @@ describe("resolveBootstrapContextForDiagnostics", () => {
 });
 
 describe("hasCompletedBootstrapTurn", () => {
-  const sessionDirs = useSessionStoreTempDirs(
-    (cleanup) =>
-      afterAll(async () => {
-        await cleanup();
-        closeOpenClawAgentDatabasesForTest();
-      }),
-    "openclaw-bootstrap-turn-",
-  );
+  const sessionDirs = useSessionStoreTempDirs(afterAll, "openclaw-bootstrap-turn-");
   let tmpDir: string;
   let sessionTarget: SessionTranscriptRuntimeTarget;
   let sessionManager: SessionManager;

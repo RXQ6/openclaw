@@ -1,4 +1,3 @@
-import { realpathSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -164,10 +163,7 @@ export function useSubagentPersistenceFixture() {
       if (tempStateDir !== null) {
         throw new Error("Persistence fixture already owns a state directory");
       }
-      // openclaw-temp-dir: allow guarded fixture cleanup must retain failed case ownership
-      tempStateDir = await fs.mkdtemp(
-        path.join(realpathSync.native(os.tmpdir()), "openclaw-subagent-"),
-      );
+      tempStateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-subagent-"));
       setTestEnvValue("OPENCLAW_STATE_DIR", tempStateDir);
     },
     get stateDir(): string {

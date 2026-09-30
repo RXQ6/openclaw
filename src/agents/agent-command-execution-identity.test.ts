@@ -7,7 +7,6 @@ import {
 } from "../audit/execution-identity-admission.js";
 import { loadSessionEntry, replaceSessionEntry } from "../config/sessions/session-accessor.js";
 import { getAgentEventLifecycleGeneration } from "../infra/agent-events.js";
-import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.js";
 import { withEnvAsync } from "../test-utils/env.js";
 import { useSessionStoreTempDirs } from "../test-utils/session-state-cleanup.js";
 import { attachAgentCommandAdmissionFacts } from "./agent-command-admission-facts.js";
@@ -23,14 +22,7 @@ import { createAgentAttemptLifecycleCallbacks } from "./command/attempt-callback
 import type { AgentCommandIngressOpts } from "./command/types.js";
 
 let cleanupSink: (() => void) | undefined;
-const sessionDirs = useSessionStoreTempDirs(
-  (cleanup) =>
-    afterAll(async () => {
-      await cleanup();
-      closeOpenClawAgentDatabasesForTest();
-    }),
-  "openclaw-recovery-admission-",
-);
+const sessionDirs = useSessionStoreTempDirs(afterAll, "openclaw-recovery-admission-");
 
 afterEach(() => {
   cleanupSink?.();

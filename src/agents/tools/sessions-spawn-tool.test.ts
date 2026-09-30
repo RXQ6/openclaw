@@ -3,13 +3,14 @@ import path from "node:path";
 // sessions_spawn tool tests cover model-visible schema gating, ACP/subagent
 // dispatch, and result details for spawned child sessions.
 import { createRequireRecord } from "openclaw/plugin-sdk/test-fixtures";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { configureExecutionDecisionWorkSink } from "../../audit/execution-decision-work.js";
 import type { ExecutionDecisionWork } from "../../audit/execution-decision-work.types.js";
 import { createExecutionIdentityAdmissionToken } from "../../audit/execution-identity-admission.js";
 import { upsertSessionEntryCore } from "../../config/sessions/session-accessor.js";
 import { GatewayClientRequestError } from "../../gateway/client.js";
 import { withTestDir } from "../../test-helpers/temp-dir.js";
+import { useSessionStoreTempDirs } from "../../test-utils/session-state-cleanup.js";
 import { createOperationalRunInstanceRef } from "../admitted-run-context.js";
 import { finalizeAgentToolAvailability } from "../agent-tool-availability.js";
 import { readParentExecutionIdentity } from "../subagents/spawn/execution-identity-spawn-context.js";
@@ -24,6 +25,8 @@ import {
 import { createAgentsWaitTool } from "./agents-wait-tool.js";
 import { withGatewayToolCallerIdentity } from "./gateway-caller-context.js";
 import { registerSessionsSpawnCompletionTests } from "./sessions-spawn-tool.completion.test-support.js";
+
+const sessionDirs = useSessionStoreTempDirs(afterAll, "openclaw-visible-spawn-");
 
 const { hoisted } = await import("./sessions-spawn-tool.mocks.test-support.js");
 
@@ -800,30 +803,29 @@ describe("sessions_spawn tool", () => {
   });
 
   it("rejects a visible spawn before creation when the exact parent incarnation changed", async () => {
-    await withTestDir({ prefix: "openclaw-visible-spawn-parent-race-" }, async (dir) => {
-      const storePath = path.join(dir, "sessions.json");
-      const parentSessionKey = "agent:main:main";
-      await upsertSessionEntryCore(
-        { agentId: "main", sessionKey: parentSessionKey, storePath },
-        { sessionId: "replacement-parent", updatedAt: 2 },
-      );
-      const callGateway = vi.fn();
-      const tool = createSessionsSpawnTool({
-        agentSessionKey: parentSessionKey,
-        expectedParentSessionId: "original-parent",
-        config: {
-          session: { store: storePath },
-          agents: { list: [{ id: "main" }] },
-        },
-        callGateway,
-        countActiveRuns: () => 0,
-      });
-
-      await expect(
-        tool.execute("visible-stale-parent", { task: "inspect", visible: true }),
-      ).rejects.toThrow(`Session "${parentSessionKey}" changed after access was granted.`);
-      expect(callGateway).not.toHaveBeenCalled();
+    const dir = sessionDirs.make();
+    const storePath = path.join(dir, "sessions.json");
+    const parentSessionKey = "agent:main:main";
+    await upsertSessionEntryCore(
+      { agentId: "main", sessionKey: parentSessionKey, storePath },
+      { sessionId: "replacement-parent", updatedAt: 2 },
+    );
+    const callGateway = vi.fn();
+    const tool = createSessionsSpawnTool({
+      agentSessionKey: parentSessionKey,
+      expectedParentSessionId: "original-parent",
+      config: {
+        session: { store: storePath },
+        agents: { list: [{ id: "main" }] },
+      },
+      callGateway,
+      countActiveRuns: () => 0,
     });
+
+    await expect(
+      tool.execute("visible-stale-parent", { task: "inspect", visible: true }),
+    ).rejects.toThrow(`Session "${parentSessionKey}" changed after access was granted.`);
+    expect(callGateway).not.toHaveBeenCalled();
   });
 
   describe.each([
@@ -1208,53 +1210,52 @@ describe("sessions_spawn tool", () => {
   it.each(["inherit", "require"] as const)(
     "admits a required parent's visible child with sandbox=%s while agent sandboxing is off",
     async (sandbox) => {
-      await withTestDir({ prefix: "openclaw-visible-required-parent-" }, async (dir) => {
-        const storePath = path.join(dir, "sessions.json");
-        const parentSessionKey = "agent:main:main";
-        await upsertSessionEntryCore(
-          { agentId: "main", sessionKey: parentSessionKey, storePath },
-          {
-            sessionId: "required-parent",
-            updatedAt: 1,
-            createdVia: "operator",
-            createdActor: { type: "human", source: "profile", id: "guest-profile" },
-            sandbox: "required",
-          },
-        );
-        hoisted.inProcessCreationMock.mockResolvedValue({
-          key: "agent:main:dashboard:required-child",
-          runStarted: true,
-          runId: "required-visible-run",
-        });
-        const tool = createSessionsSpawnTool({
-          agentSessionKey: parentSessionKey,
-          config: {
-            session: { store: storePath },
-            agents: {
-              defaults: { sandbox: { mode: "off" } },
-              entries: { main: { workspace: dir } },
-            },
-          },
-          countActiveRuns: () => 0,
-        });
-
-        const result = await tool.execute("required-visible-spawn", {
-          task: "inspect the project in an isolated child",
-          visible: true,
-          sandbox,
-        });
-
-        expect(result.details).toMatchObject({
-          status: "accepted",
-          childSessionKey: "agent:main:dashboard:required-child",
-        });
-        expect(hoisted.inProcessCreationMock).toHaveBeenCalledWith(
-          "sessions.create",
-          expect.objectContaining({ parentSessionKey }),
-          expect.objectContaining({ requesterSessionKey: parentSessionKey }),
-          undefined,
-        );
+      const dir = sessionDirs.make();
+      const storePath = path.join(dir, "sessions.json");
+      const parentSessionKey = "agent:main:main";
+      await upsertSessionEntryCore(
+        { agentId: "main", sessionKey: parentSessionKey, storePath },
+        {
+          sessionId: "required-parent",
+          updatedAt: 1,
+          createdVia: "operator",
+          createdActor: { type: "human", source: "profile", id: "guest-profile" },
+          sandbox: "required",
+        },
+      );
+      hoisted.inProcessCreationMock.mockResolvedValue({
+        key: "agent:main:dashboard:required-child",
+        runStarted: true,
+        runId: "required-visible-run",
       });
+      const tool = createSessionsSpawnTool({
+        agentSessionKey: parentSessionKey,
+        config: {
+          session: { store: storePath },
+          agents: {
+            defaults: { sandbox: { mode: "off" } },
+            entries: { main: { workspace: dir } },
+          },
+        },
+        countActiveRuns: () => 0,
+      });
+
+      const result = await tool.execute("required-visible-spawn", {
+        task: "inspect the project in an isolated child",
+        visible: true,
+        sandbox,
+      });
+
+      expect(result.details).toMatchObject({
+        status: "accepted",
+        childSessionKey: "agent:main:dashboard:required-child",
+      });
+      expect(hoisted.inProcessCreationMock).toHaveBeenCalledWith(
+        "sessions.create",
+        expect.objectContaining({ parentSessionKey }),
+        expect.objectContaining({ requesterSessionKey: parentSessionKey }),
+        undefined,
+      );
     },
   );
 
@@ -1457,76 +1458,75 @@ describe("sessions_spawn tool", () => {
   );
 
   it("applies spawn depth limits to visible dashboard descendants", async () => {
-    await withTestDir({ prefix: "openclaw-visible-depth-" }, async (dir) => {
-      const storePath = path.join(dir, "sessions.json");
-      const childKey = "agent:main:dashboard:child";
-      await upsertSessionEntryCore(
-        { agentId: "main", sessionKey: "agent:main:main", storePath },
-        { sessionId: "root", updatedAt: 1 },
-      );
-      await upsertSessionEntryCore(
-        { agentId: "main", sessionKey: childKey, storePath },
-        // Canonical spawn-child shape: sessions.create persists explicit
-        // spawnDepth; parentSessionKey alone is UI threading and adds no depth.
-        { sessionId: "child", updatedAt: 1, spawnDepth: 1, parentSessionKey: "agent:main:main" },
-      );
-      const callGateway = vi.fn();
-      const tool = createSessionsSpawnTool({
-        agentSessionKey: childKey,
-        config: {
-          session: { store: storePath },
-          agents: {
-            list: [{ id: "main" }],
-            defaults: { subagents: { maxSpawnDepth: 1 } },
-          },
+    const dir = sessionDirs.make();
+    const storePath = path.join(dir, "sessions.json");
+    const childKey = "agent:main:dashboard:child";
+    await upsertSessionEntryCore(
+      { agentId: "main", sessionKey: "agent:main:main", storePath },
+      { sessionId: "root", updatedAt: 1 },
+    );
+    await upsertSessionEntryCore(
+      { agentId: "main", sessionKey: childKey, storePath },
+      // Canonical spawn-child shape: sessions.create persists explicit
+      // spawnDepth; parentSessionKey alone is UI threading and adds no depth.
+      { sessionId: "child", updatedAt: 1, spawnDepth: 1, parentSessionKey: "agent:main:main" },
+    );
+    const callGateway = vi.fn();
+    const tool = createSessionsSpawnTool({
+      agentSessionKey: childKey,
+      config: {
+        session: { store: storePath },
+        agents: {
+          list: [{ id: "main" }],
+          defaults: { subagents: { maxSpawnDepth: 1 } },
         },
-        callGateway,
-        countActiveRuns: () => 0,
-      });
-
-      const result = await tool.execute("visible-depth", { task: "inspect", visible: true });
-
-      expect(result.details).toMatchObject({ status: "forbidden" });
-      expect(callGateway).not.toHaveBeenCalled();
-
-      callGateway.mockResolvedValue({
-        key: "agent:main:dashboard:grandchild",
-        runStarted: true,
-        runId: "run-grandchild",
-      });
-      const nestedTool = createSessionsSpawnTool({
-        agentSessionKey: childKey,
-        config: {
-          session: { store: storePath },
-          agents: {
-            list: [{ id: "main" }],
-            defaults: { subagents: { maxSpawnDepth: 2 } },
-          },
-        },
-        callGateway,
-        countActiveRuns: () => 0,
-        registerRun: vi.fn(),
-      });
-
-      const nestedResult = await nestedTool.execute("visible-nested", {
-        task: "inspect from the grandchild",
-        visible: true,
-      });
-
-      expect(nestedResult.details).toMatchObject({
-        status: "accepted",
-        childSessionKey: "agent:main:dashboard:grandchild",
-        runId: "run-grandchild",
-      });
-      expect(callGateway).toHaveBeenCalledWith(
-        "sessions.create",
-        expect.objectContaining({
-          parentSessionKey: childKey,
-          spawnDepth: 2,
-          task: expect.stringContaining("[Subagent Task]\n\ninspect from the grandchild"),
-        }),
-      );
+      },
+      callGateway,
+      countActiveRuns: () => 0,
     });
+
+    const result = await tool.execute("visible-depth", { task: "inspect", visible: true });
+
+    expect(result.details).toMatchObject({ status: "forbidden" });
+    expect(callGateway).not.toHaveBeenCalled();
+
+    callGateway.mockResolvedValue({
+      key: "agent:main:dashboard:grandchild",
+      runStarted: true,
+      runId: "run-grandchild",
+    });
+    const nestedTool = createSessionsSpawnTool({
+      agentSessionKey: childKey,
+      config: {
+        session: { store: storePath },
+        agents: {
+          list: [{ id: "main" }],
+          defaults: { subagents: { maxSpawnDepth: 2 } },
+        },
+      },
+      callGateway,
+      countActiveRuns: () => 0,
+      registerRun: vi.fn(),
+    });
+
+    const nestedResult = await nestedTool.execute("visible-nested", {
+      task: "inspect from the grandchild",
+      visible: true,
+    });
+
+    expect(nestedResult.details).toMatchObject({
+      status: "accepted",
+      childSessionKey: "agent:main:dashboard:grandchild",
+      runId: "run-grandchild",
+    });
+    expect(callGateway).toHaveBeenCalledWith(
+      "sessions.create",
+      expect.objectContaining({
+        parentSessionKey: childKey,
+        spawnDepth: 2,
+        task: expect.stringContaining("[Subagent Task]\n\ninspect from the grandchild"),
+      }),
+    );
   });
 
   it.each([false, true])("describes context policy with spawnSessions=%s", (threadAvailable) => {

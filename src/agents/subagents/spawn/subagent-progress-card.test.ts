@@ -1,4 +1,3 @@
-import { realpathSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -52,7 +51,7 @@ describe("subagent progress-card availability", () => {
   });
 
   afterAll(async () => {
-    await closeOpenClawAgentDatabasesAsync(realpathSync.native(tempDir));
+    await closeOpenClawAgentDatabasesAsync(tempDir);
     await fs.rm(tempDir, { recursive: true, force: true });
   });
 

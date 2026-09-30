@@ -6,7 +6,6 @@ import { promisify } from "node:util";
 import { afterAll, afterEach, beforeEach, expect, it, vi } from "vitest";
 import { upsertSessionEntryCore } from "../../config/sessions/session-accessor.js";
 import * as commands from "../../process/exec.js";
-import { closeOpenClawStateDatabaseAsync } from "../../state/openclaw-state-db.js";
 import { useSessionStoreTempDirs } from "../../test-utils/session-state-cleanup.js";
 import { detectWorktreeFilesystemBackend } from "./filesystem-backend.js";
 import { createCopyWorktreeBackend } from "./filesystem-backend.test-support.js";
@@ -16,9 +15,8 @@ import { useManagedWorktreeTestRepository } from "./service.test-support.js";
 vi.mock("./filesystem-backend.js", () => ({ detectWorktreeFilesystemBackend: vi.fn() }));
 const exec = promisify(execFile);
 const sessionDirs = useSessionStoreTempDirs(afterAll, "source-only-filters-");
-afterEach(async () => {
+afterEach(() => {
   vi.restoreAllMocks();
-  await closeOpenClawStateDatabaseAsync();
   vi.unstubAllEnvs();
 });
 const initialize = useManagedWorktreeTestRepository();

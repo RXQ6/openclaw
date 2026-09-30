@@ -1,5 +1,4 @@
 // Shared real-registry and SQLite fixture for restart ownership integration tests.
-import { realpathSync } from "node:fs";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -93,10 +92,7 @@ export function useSubagentRestartRecoveryFixture() {
     if (tempStateDir !== null) {
       throw new Error("Previous restart recovery fixture cleanup is incomplete");
     }
-    // openclaw-temp-dir: allow guarded fixture cleanup must retain failed case ownership
-    tempStateDir = await fs.mkdtemp(
-      path.join(realpathSync.native(os.tmpdir()), "openclaw-orphan-integ-"),
-    );
+    tempStateDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-orphan-integ-"));
     process.env.OPENCLAW_STATE_DIR = tempStateDir;
     setRuntimeConfigSnapshot({ session: { store: undefined } } as never);
     vi.mocked(runSubagentAnnounceFlow).mockReset();
