@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { SessionEntry } from "../config/sessions/types.js";
 import { prepareMcpAppExtensionRuntime } from "./mcp-app-extension-runtime.js";
 import type { GatewayRequestHandlerOptions } from "./server-methods/types.js";
 const mocks = vi.hoisted(() => ({
@@ -12,6 +13,9 @@ const mocks = vi.hoisted(() => ({
   registered: vi.fn(),
   assert: vi.fn(),
   selection: vi.fn(),
+  model: vi.fn(),
+  retain: vi.fn(),
+  releaseAccess: vi.fn(),
 }));
 vi.mock("../agents/agent-bundle-mcp-manager-api.js", () => ({
   acquireSessionMcpRuntime: mocks.direct,
@@ -57,15 +61,17 @@ vi.mock("./session-row-projection-access.js", () => ({
   getSessionRowProjection: () => ({ sharingTarget: () => ({ entry, storePath: "/store" }) }),
 }));
 vi.mock("./session-utils-model-selection.js", () => ({
-  resolveSessionSelectedModelRef: () => ({ provider: "openai", model: "model" }),
+  resolveSessionSelectedModelRef: mocks.model,
 }));
 const config = { mcp: { apps: { enabled: true } } };
-let entry: { sessionId: string; agentRuntimeOverride?: string };
+let entry: { sessionId: string } & Partial<SessionEntry>;
+let accessController: AbortController;
 function options() {
   return {
     context: { getRuntimeConfig: () => config },
     sessionAccessAuthority: {
       assertCurrent: mocks.assert,
+      retain: mocks.retain,
       target: { agentId: "main", sessionKey: "agent:main:app", sessionId: "session" },
     },
   } as unknown as GatewayRequestHandlerOptions;
@@ -73,6 +79,14 @@ function options() {
 beforeEach(() => {
   vi.resetAllMocks();
   entry = { sessionId: "session", agentRuntimeOverride: "codex" };
+  accessController = new AbortController();
+  mocks.retain.mockImplementation(() => ({
+    signal: accessController.signal,
+    assertCurrent: () => accessController.signal.throwIfAborted(),
+    release: mocks.releaseAccess,
+  }));
+  mocks.releaseAccess.mockImplementation(() => accessController.abort(new Error("released")));
+  mocks.model.mockReturnValue({ provider: "openai", model: "model" });
   mocks.selection.mockReturnValue("codex");
   mocks.registered.mockReturnValue({
     ownerPluginId: "codex",
@@ -116,6 +130,86 @@ describe("cold App request admission", () => {
     expect(mocks.dispose).toHaveBeenCalledOnce();
     expect(mocks.releaseSource).toHaveBeenCalledOnce();
     entry = { ...entry, agentRuntimeOverride: "openclaw" };
+    expect(active.assertCurrent).toThrow("runtime selection changed");
+    await active.dispose();
+  });
+  it("binds native startup to retained access when the RPC has no signal", async () => {
+    mocks.prepare.mockImplementation(async ({ input }) => {
+      expect(input.abortSignal).toBe(accessController.signal);
+      expect(input.abortSignal.aborted).toBe(false);
+      return { preparation: {}, dispose: mocks.dispose };
+    });
+    const active = await prepareMcpAppExtensionRuntime(options());
+    expect(mocks.retain).toHaveBeenCalledOnce();
+    expect(mocks.releaseAccess).toHaveBeenCalledOnce();
+    expect(accessController.signal.aborted).toBe(true);
+    await active.dispose();
+  });
+  it.each(["caller", "access"])("cancels native setup when %s authority aborts", async (source) => {
+    const caller = new AbortController();
+    const request = options();
+    request.signal = caller.signal;
+    mocks.prepare.mockImplementation(async ({ input }) => {
+      (source === "caller" ? caller : accessController).abort(new Error("revoked"));
+      input.abortSignal.throwIfAborted();
+    });
+    await expect(prepareMcpAppExtensionRuntime(request)).rejects.toThrow("revoked");
+    expect(mocks.releaseAccess).toHaveBeenCalledOnce();
+    expect(mocks.releaseSource).toHaveBeenCalledOnce();
+  });
+  it.each([
+    { model: "previous-model" },
+    { modelProvider: "previous-provider" },
+    { agentHarnessId: "previous-harness" },
+    { model: "model", modelProvider: "openai", agentHarnessId: "codex" },
+  ])("keeps a retained App valid after ordinary turn observations %j", async (observations) => {
+    const active = await prepareMcpAppExtensionRuntime(options());
+    // Use a fresh view borrow, independent of the completed setup lifetime.
+    accessController = new AbortController();
+    const view = active.retainViewAuthority([]);
+    entry = { ...entry, ...observations };
+    expect(active.assertCurrent).not.toThrow();
+    expect(view.assertCurrent).not.toThrow();
+    expect(mocks.native).toHaveBeenCalledOnce();
+    view.release();
+    await active.dispose();
+  });
+  it.each([
+    { provider: "other-provider", model: "model" },
+    { provider: "openai", model: "inherited-new-model" },
+  ])(
+    "revokes a retained App when canonical selection changes without local overrides %j",
+    async (model) => {
+      const active = await prepareMcpAppExtensionRuntime(options());
+      accessController = new AbortController();
+      const view = active.retainViewAuthority([]);
+      mocks.model.mockReturnValue(model);
+      expect(view.assertCurrent).toThrow("runtime selection changed");
+      view.release();
+      await active.dispose();
+    },
+  );
+  it.each([
+    { authProfileOverride: "other-profile" },
+    { authProfileOverrideSource: "auto" as const },
+    { sandboxMode: "off" as const },
+    { modelSelectionLocked: true },
+  ])("continues to revoke changed authority %j", async (change) => {
+    const active = await prepareMcpAppExtensionRuntime(options());
+    entry = { ...entry, ...change };
+    expect(active.assertCurrent).toThrow("runtime selection changed");
+    await active.dispose();
+  });
+  it("revokes an effective runtime change even without a local override", async () => {
+    const active = await prepareMcpAppExtensionRuntime(options());
+    mocks.selection.mockReturnValue("other-harness");
+    expect(active.assertCurrent).toThrow("runtime selection changed");
+    await active.dispose();
+  });
+  it("preserves locked harness ownership", async () => {
+    entry = { ...entry, modelSelectionLocked: true, agentHarnessId: "codex" };
+    const active = await prepareMcpAppExtensionRuntime(options());
+    entry = { ...entry, agentHarnessId: "other-harness" };
     expect(active.assertCurrent).toThrow("runtime selection changed");
     await active.dispose();
   });

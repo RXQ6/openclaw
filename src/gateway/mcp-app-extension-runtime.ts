@@ -19,6 +19,7 @@ import { resolveEffectiveAgentRuntime } from "../agents/thinking-runtime.js";
 import type { SessionEntry } from "../config/sessions/types.js";
 import { getGatewayPluginMetadataSnapshot } from "../plugins/current-plugin-metadata-state.js";
 import { getPluginToolMeta } from "../plugins/tool-metadata.js";
+import { resolveSessionPinnedHarnessId } from "../sessions/agent-harness-session-key.js";
 import { resolveMcpAppRequesterId } from "./mcp-app-host-files.js";
 import { requestMcpAppToolApproval } from "./mcp-app-tool-approval.js";
 import { captureGatewayOperatorRunAuthority } from "./operator-run-authority.js";
@@ -27,15 +28,20 @@ import { resolveSessionResourceToolPolicy } from "./session-resource-tool-policy
 import { getSessionRowProjection } from "./session-row-projection-access.js";
 import { resolveSessionSelectedModelRef } from "./session-utils-model-selection.js";
 
-function runtimeSelection(entry: SessionEntry) {
+function runtimeSelection(
+  entry: SessionEntry,
+  model: { provider: string; model: string },
+  harnessId: string,
+) {
   return JSON.stringify([
-    entry.agentHarnessId,
+    resolveSessionPinnedHarnessId(entry),
+    model.provider,
+    model.model,
+    harnessId,
     entry.agentRuntimeOverride,
     entry.modelSelectionLocked,
     entry.providerOverride,
     entry.modelOverride,
-    entry.modelProvider,
-    entry.model,
     entry.authProfileOverride,
     entry.authProfileOverrideSource,
     entry.sandboxMode,
@@ -56,7 +62,35 @@ export async function prepareMcpAppExtensionRuntime(options: GatewayRequestHandl
   if (!initial || initial.entry.sessionId !== sessionId) {
     throw new Error("MCP App session changed");
   }
-  const expectedRuntimeSelection = runtimeSelection(initial.entry);
+  const cfg = options.context.getRuntimeConfig();
+  if (cfg.mcp?.apps?.enabled !== true) {
+    throw new Error("MCP Apps are disabled");
+  }
+  const selectRuntime = (entry: SessionEntry) => {
+    const model = resolveSessionSelectedModelRef({
+      cfg,
+      agentId,
+      sessionKey,
+      source: {
+        entry,
+        readSourceEntry: (key) => projection.sharingTarget({ agentId, key })?.entry,
+      },
+      manifestPlugins: getGatewayPluginMetadataSnapshot() ?? [],
+    });
+    const harnessId = resolveEffectiveAgentRuntime({
+      cfg,
+      provider: model.provider,
+      modelId: model.model,
+      agentScope: { kind: "prepared", agentId },
+      sessionKey,
+      sessionEntry: entry,
+    });
+    return { model, harnessId, fingerprint: runtimeSelection(entry, model, harnessId) };
+  };
+  // Last-turn model/harness observations do not change the selected owner.
+  // Resolve inherited choices from the same prepared facts used at launch.
+  const selected = selectRuntime(initial.entry);
+  const expectedRuntimeSelection = selected.fingerprint;
   const current = (assertAccess = access.assertCurrent) => {
     assertAccess();
     if (options.context.getRuntimeConfig() !== cfg) {
@@ -66,39 +100,15 @@ export async function prepareMcpAppExtensionRuntime(options: GatewayRequestHandl
     if (!target || target.entry.sessionId !== sessionId) {
       throw new Error("MCP App session changed");
     }
-    if (
-      expectedRuntimeSelection !== undefined &&
-      runtimeSelection(target.entry) !== expectedRuntimeSelection
-    ) {
+    if (selectRuntime(target.entry).fingerprint !== expectedRuntimeSelection) {
       throw new Error("MCP App session runtime selection changed; reopen the App");
     }
     return target;
   };
-  const cfg = options.context.getRuntimeConfig();
-  if (cfg.mcp?.apps?.enabled !== true) {
-    throw new Error("MCP Apps are disabled");
-  }
   const target = current();
   const workspaceDir = target.entry.spawnedWorkspaceDir ?? resolveAgentWorkspaceDir(cfg, agentId);
   const requesterId = resolveMcpAppRequesterId(options.client);
-  const selectedModel = resolveSessionSelectedModelRef({
-    cfg,
-    agentId,
-    sessionKey,
-    source: {
-      entry: target.entry,
-      readSourceEntry: (key) => projection.sharingTarget({ agentId, key })?.entry,
-    },
-    manifestPlugins: getGatewayPluginMetadataSnapshot() ?? [],
-  });
-  const harnessId = resolveEffectiveAgentRuntime({
-    cfg,
-    provider: selectedModel.provider,
-    modelId: selectedModel.model,
-    agentScope: { kind: "prepared", agentId },
-    sessionKey,
-    sessionEntry: target.entry,
-  });
+  const { model: selectedModel, harnessId } = selected;
   const registered = harnessId ? getRegisteredAgentHarness(harnessId) : undefined;
   if (harnessId !== "openclaw" && !registered) {
     throw new Error("The selected session harness is unavailable");
@@ -115,6 +125,7 @@ export async function prepareMcpAppExtensionRuntime(options: GatewayRequestHandl
       throw new Error("The session harness cannot open MCP Apps");
     }
     const preparationOwner: {
+      access?: ReturnType<typeof access.retain>;
       setup?: Awaited<ReturnType<typeof prepareAgentHarnessSessionRuntime>>;
       source?: Awaited<ReturnType<typeof captureGatewayOperatorRunAuthority>>;
     } = {};
@@ -138,14 +149,25 @@ export async function prepareMcpAppExtensionRuntime(options: GatewayRequestHandl
         if (!registered?.ownerPluginId) {
           throw new Error("Native harness owner is unavailable");
         }
+        const retained = access.retain();
+        preparationOwner.access = retained;
+        const signal = options.signal
+          ? AbortSignal.any([retained.signal, options.signal])
+          : retained.signal;
+        const assertPreparationCurrent = () => {
+          current();
+          retained.assertCurrent();
+          signal.throwIfAborted();
+        };
+        assertPreparationCurrent();
         const source = await captureGatewayOperatorRunAuthority({
           client: options.client,
           context: options.context,
           hasCurrentClientAuthority: options.hasCurrentClientAuthority,
-          invocationAuthority: { assertCurrent: access.assertCurrent, signal: options.signal },
+          invocationAuthority: { assertCurrent: assertPreparationCurrent, signal },
         });
         preparationOwner.source = source;
-        current();
+        assertPreparationCurrent();
         const live = current();
         const model = selectedModel;
         const { prepareAgentHarnessSessionRuntime } =
@@ -154,9 +176,7 @@ export async function prepareMcpAppExtensionRuntime(options: GatewayRequestHandl
           ownerPluginId: registered.ownerPluginId,
           nativeModelPolicySupport: harness.nativeModelPolicySupport,
           sourceAuthority: source?.authority,
-          assertCurrent: () => {
-            current();
-          },
+          assertCurrent: assertPreparationCurrent,
           input: {
             config: cfg,
             agentId,
@@ -176,7 +196,7 @@ export async function prepareMcpAppExtensionRuntime(options: GatewayRequestHandl
             senderId: requesterId,
             messageChannel: "webchat",
             messageProvider: "webchat",
-            abortSignal: options.signal,
+            abortSignal: signal,
             permissionMode: live.entry.permissionMode,
             sessionRoot: live.entry.sessionRoot,
             toolOverrides: live.entry.toolOverrides,
@@ -194,7 +214,7 @@ export async function prepareMcpAppExtensionRuntime(options: GatewayRequestHandl
           },
         });
         preparationOwner.setup = setup;
-        current();
+        assertPreparationCurrent();
         return setup.preparation;
       })();
       return preparing;
@@ -216,7 +236,11 @@ export async function prepareMcpAppExtensionRuntime(options: GatewayRequestHandl
       try {
         preparationOwner.setup?.dispose();
       } finally {
-        preparationOwner.source?.release();
+        try {
+          preparationOwner.source?.release();
+        } finally {
+          preparationOwner.access?.release();
+        }
       }
     }
   } else {

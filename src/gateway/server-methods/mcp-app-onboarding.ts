@@ -4,6 +4,7 @@ import { root } from "../../infra/fs-safe.js";
 import { getGatewayPluginMetadataSnapshot } from "../../plugins/current-plugin-metadata-state.js";
 import { iteratePluginRootContributions } from "../../plugins/plugin-root-contributions.js";
 import { dispatchGatewayMethodInProcessRaw } from "../server-plugin-in-process-dispatch.js";
+import { readGatewayRequestMutationAuthority } from "./session-mutation-guards.js";
 import type { GatewayRequestHandlers } from "./types.js";
 
 const schema = z.object({
@@ -23,6 +24,7 @@ export const mcpAppOnboardingHandlers: GatewayRequestHandlers = {
         throw new Error("Plugin onboarding session authority is unavailable");
       }
       access.assertCurrent();
+      const requestAuthority = readGatewayRequestMutationAuthority(options);
       const metadata = getGatewayPluginMetadataSnapshot();
       if (!metadata) {
         throw new Error("Plugin metadata is not ready");
@@ -70,7 +72,10 @@ export const mcpAppOnboardingHandlers: GatewayRequestHandlers = {
           requireScopedClient: true,
           signal: options.signal,
           hasCurrentClientAuthority: options.hasCurrentClientAuthority,
-          sessionMutationCommitGuard: access.assertCurrent,
+          // The nested router binds chat's own session authority before this final
+          // admission check. Detached chat work must not retain our invocation hold.
+          prepareDispatchCurrent: async () => access.assertCurrent(),
+          sessionMutationCommitGuard: requestAuthority.assertCurrent,
         },
       );
       options.respond(result.ok, result.payload, result.error);
