@@ -1,9 +1,13 @@
 // Top-level legacy config migration runner used before full config validation.
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { inheritLegacyDefaultAgentId } from "../../../config/legacy.default-agent-owner.js";
+import {
+  inheritLegacyDefaultAgentId,
+  tryGetLegacyDefaultAgentId,
+} from "../../../config/legacy.default-agent-owner.js";
 import type { LegacyConfigMigrationContext } from "../../../config/legacy.shared.js";
 import { cloneConfigWithResolutionFacts } from "../../../config/resolution-facts.js";
+import { materializeLegacyAgentOwnershipForActiveChannelsResult } from "../../../config/validation.js";
 import {
   isPluginSourceModulePath,
   tryNativeRequireModule,
@@ -68,7 +72,7 @@ export function applyLegacyDoctorMigrations(
     return { next: null, changes: [] };
   }
   const original = raw as Record<string, unknown>;
-  const next = cloneConfigWithResolutionFacts(original);
+  const next = inheritLegacyDefaultAgentId(original, cloneConfigWithResolutionFacts(original));
   const changes: string[] = [];
   for (const migration of LEGACY_CONFIG_MIGRATIONS) {
     migration.apply(next, changes, options.context);
@@ -77,6 +81,17 @@ export function applyLegacyDoctorMigrations(
     pluginContracts: options.pluginContracts !== false,
   });
   changes.push(...compat.changes);
+  const legacyOwner = tryGetLegacyDefaultAgentId(next);
+  if (legacyOwner && options.pluginContracts !== false) {
+    const materialized = materializeLegacyAgentOwnershipForActiveChannelsResult(
+      compat.next,
+      legacyOwner,
+    );
+    if (materialized.insertedPaths.length > 0) {
+      Object.assign(compat.next, materialized.config);
+      changes.push("Preserved legacy ownership for enabled channels.");
+    }
+  }
   const ownership: ReturnType<
     typeof import("./legacy-config-binding-repair.runtime.js").repairUnownedChannelAccountBindings
   > =
@@ -92,10 +107,9 @@ export function applyLegacyDoctorMigrations(
     ...(ownership.warnings ?? []),
     ...collectToolPolicyConflictWarnings(ownership.config),
   ];
-  // The config reader keeps the retired default-agent marker outside the object.
-  // Cloning must retain that owner so validation does not roll back a repairable roster.
+  // Only Doctor retains the preimage owner for state migration before the config commit.
   return {
-    next: changes.length > 0 ? inheritLegacyDefaultAgentId(original, ownership.config) : null,
+    next: changes.length > 0 ? inheritLegacyDefaultAgentId(next, ownership.config) : null,
     changes,
     ...(warnings.length ? { warnings } : {}),
   };

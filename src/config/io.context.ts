@@ -16,6 +16,7 @@ import type { PluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot
 import { withSynchronousArtifactPreservingStateSnapshot } from "../state/openclaw-state-db-readonly.js";
 import { DuplicateAgentDirError, findDuplicateAgentDirs } from "./agent-dirs.js";
 import { applyConfigEnvVars, cloneEnvWithPlatformSemantics } from "./config-env-vars.js";
+import { applyImplicitAgentRosterDefaults } from "./implicit-agent-roster.js";
 import { ConfigIncludeError, ConfigIncludeReadError } from "./includes.js";
 import {
   resolveConfigIoEffect,
@@ -43,8 +44,6 @@ import type {
 } from "./io.types.js";
 import { formatConfigIssueSummary } from "./issue-format.js";
 import { migrateLegacyContextBudgetConfig } from "./legacy.context-budget.js";
-import { inheritLegacyDefaultAgentId } from "./legacy.default-agent-owner.js";
-import { migratePersistedImplicitMainRoster } from "./legacy.roster.js";
 import { copyConfigResolutionFacts } from "./resolution-facts.js";
 import { applyConfigOverrides } from "./runtime-overrides.js";
 import { resolveShellEnvExpectedKeys } from "./shell-env-expected-keys.js";
@@ -171,9 +170,8 @@ export function createConfigIoContext(
       });
     }
     const finalized = applyConfigOverrides(cfg);
-    const inherited = inheritLegacyDefaultAgentId(cfg, finalized);
-    copyConfigResolutionFacts(cfg, inherited);
-    return inherited;
+    copyConfigResolutionFacts(cfg, finalized);
+    return finalized;
   }
 
   function createValidationPluginMetadataSnapshotLoader(params: {
@@ -228,10 +226,7 @@ export function createConfigIoContext(
     const contextBudgetConfig = migrateLegacyContextBudgetConfig(
       resolution.resolvedConfigRaw,
     ).config;
-    return coerceConfig(
-      migratePersistedImplicitMainRoster(contextBudgetConfig, { env, homedir: deps.homedir })
-        .config,
-    );
+    return coerceConfig(applyImplicitAgentRosterDefaults(contextBudgetConfig));
   }
 
   function* prepareRecoveryBackupCandidateSteps(
