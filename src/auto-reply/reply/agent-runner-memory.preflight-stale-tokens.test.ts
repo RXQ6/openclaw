@@ -1,7 +1,6 @@
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { testing as cliBackendsTesting } from "../../agents/cli-backends.test-support.js";
 import type { SessionEntry } from "../../config/sessions.js";
 import {
@@ -9,6 +8,7 @@ import {
   registerMemoryCapability,
   type MemoryFlushPlanResolver,
 } from "../../plugins/memory-state.test-fixtures.js";
+import { useSessionStoreTempDirs } from "../../test-utils/session-state-cleanup.js";
 import { runSessionCompactionIfNeeded as runSessionCompactionIfNeededRaw } from "./agent-runner-memory.js";
 import {
   createTestFollowupRun,
@@ -57,11 +57,13 @@ function registerMemoryFlushPlanResolverForTest(resolver: MemoryFlushPlanResolve
   registerMemoryCapability("memory-core", { flushPlanResolver: resolver });
 }
 
+const sessionDirs = useSessionStoreTempDirs(afterAll, "openclaw-preflight-stale-");
+
 describe("runSessionCompactionIfNeeded stale totalTokens gating", () => {
   let rootDir = "";
 
-  beforeEach(async () => {
-    rootDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-preflight-stale-"));
+  beforeEach(() => {
+    rootDir = sessionDirs.make();
     registerMemoryFlushPlanResolverForTest(() => ({
       softThresholdTokens: 4_000,
       forceFlushTranscriptBytes: 1_000_000_000,
@@ -78,10 +80,9 @@ describe("runSessionCompactionIfNeeded stale totalTokens gating", () => {
     incrementCompactionCountMock.mockReset().mockResolvedValue(1);
   });
 
-  afterEach(async () => {
+  afterEach(() => {
     cliBackendsTesting.resetDepsForTest();
     clearMemoryPluginState();
-    await fs.rm(rootDir, { recursive: true, force: true });
   });
 
   async function runWithEntry(sessionEntry: SessionEntry, sessionFile: string) {

@@ -1,4 +1,8 @@
 // Cleans session-related shared state after tests.
+import { mkdtempSync, realpathSync } from "node:fs";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { closeAuthProfileReadPool } from "../agents/auth-profiles/sqlite-read-pool.js";
 import { waitForSessionTranscriptIndexReconcilesInStateDir } from "../config/sessions/session-transcript-reconcile.js";
 import { clearSessionStoreCacheForTest } from "../config/sessions/store-writer-state.js";
@@ -38,4 +42,33 @@ export async function cleanupSessionStateForTest(
   await closeOpenClawStateDatabaseByPathAsync(
     resolveOpenClawStateSqlitePath({ ...process.env, OPENCLAW_STATE_DIR: options.stateDir }),
   );
+}
+
+/**
+ * Case directories for session stores under one suite root. Session writes leave
+ * maintenance and history Workers on each store's agent database; the root is removed
+ * only after one drain, so no owner reopens a database mid-removal.
+ */
+export function useSessionStoreTempDirs(
+  registerCleanup: (cleanup: () => Promise<void>) => unknown,
+  prefix: string,
+): { make(): string } {
+  let root: string | undefined;
+  registerCleanup(async () => {
+    if (!root) {
+      return;
+    }
+    const currentRoot = root;
+    root = undefined;
+    await closeOpenClawAgentDatabasesAsync(currentRoot);
+    await fs.rm(currentRoot, { recursive: true, force: true });
+  });
+  return {
+    make() {
+      // openclaw-temp-dir: allow suite-owned session stores require one drain before removal
+      root ??= mkdtempSync(path.join(realpathSync.native(os.tmpdir()), prefix));
+      // openclaw-temp-dir: allow isolated cases share the suite's database teardown
+      return mkdtempSync(path.join(root, "case-"));
+    },
+  };
 }
