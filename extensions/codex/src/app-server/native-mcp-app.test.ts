@@ -112,16 +112,24 @@ describe("Codex native MCP Apps", () => {
         },
       },
     });
-    expect(request).toHaveBeenCalledWith("mcpServerStatus/list", {
-      threadId: "thread-1",
-      detail: "full",
-    });
-    expect(request).toHaveBeenCalledWith("mcpServer/resource/read", {
-      threadId: "thread-1",
-      server: "sample",
-      uri: "ui://sample/options.html",
-      connectorId: "sample",
-    });
+    expect(request).toHaveBeenCalledWith(
+      "mcpServerStatus/list",
+      {
+        threadId: "thread-1",
+        detail: "full",
+      },
+      { assertCurrent: undefined },
+    );
+    expect(request).toHaveBeenCalledWith(
+      "mcpServer/resource/read",
+      {
+        threadId: "thread-1",
+        server: "sample",
+        uri: "ui://sample/options.html",
+        connectorId: "sample",
+      },
+      { assertCurrent: undefined },
+    );
     expect(
       vi.mocked(prepareHarnessNativeMcpAppPreview).mock.lastCall?.[0].allowedAppToolNames,
     ).toEqual(new Set(["show_options", "show_menu"]));
@@ -186,13 +194,17 @@ describe("Codex native MCP Apps", () => {
           result: { content: [{ type: "text", text: "Found options." }] },
         } as never),
       ).resolves.toBeUndefined();
-      expect(request).toHaveBeenCalledWith("mcpServer/resource/read", {
-        threadId: "thread-1",
-        originCallId: "call-options",
-        server: "codex_apps",
-        uri: "ui://sample/options.html",
-        connectorId: "sample",
-      });
+      expect(request).toHaveBeenCalledWith(
+        "mcpServer/resource/read",
+        {
+          threadId: "thread-1",
+          originCallId: "call-options",
+          server: "codex_apps",
+          uri: "ui://sample/options.html",
+          connectorId: "sample",
+        },
+        { assertCurrent: undefined },
+      );
     },
   );
 

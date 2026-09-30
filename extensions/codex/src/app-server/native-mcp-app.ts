@@ -104,11 +104,15 @@ export function createNativeMcpRuntime(params: {
     let cursor: string | undefined;
     for (let page = 0; page < 100; page += 1) {
       params.assertCurrent?.();
-      const response = await params.client.request("mcpServerStatus/list", {
-        threadId: params.threadId,
-        detail: "full",
-        ...(cursor ? { cursor } : {}),
-      });
+      const response = await params.client.request(
+        "mcpServerStatus/list",
+        {
+          threadId: params.threadId,
+          detail: "full",
+          ...(cursor ? { cursor } : {}),
+        },
+        { assertCurrent: params.assertCurrent },
+      );
       params.assertCurrent?.();
       loaded.push(...response.data);
       if (!response.nextCursor) {
@@ -233,8 +237,11 @@ export function createNativeMcpRuntime(params: {
       runtime.lastUsedAt = Date.now();
     },
     callTool: async (serverName, toolName, input, options) => {
-      params.assertCurrent?.();
-      options?.assertCurrent?.();
+      const assertCurrent = () => {
+        params.assertCurrent?.();
+        options?.assertCurrent?.();
+      };
+      assertCurrent();
       const elicitation = captureMcpClientElicitation();
       const call = async () =>
         (await params.client.request(
@@ -246,7 +253,9 @@ export function createNativeMcpRuntime(params: {
             arguments: (asOptionalRecord(input) ?? {}) as JsonObject,
             ...(options?._meta ? { _meta: toolCallMetadataSchema.parse(options._meta) } : {}),
           },
-          { signal: elicitation?.signal },
+          // The client also checks authority after overload backoff, before
+          // each retry write; cancellation alone cannot detect policy changes.
+          { signal: elicitation?.signal, assertCurrent },
         )) as never;
       if (!elicitation) {
         return await call();
@@ -257,8 +266,7 @@ export function createNativeMcpRuntime(params: {
           serverName,
           signal: elicitation.signal,
           onRequest: async (request, _scope, signal) => {
-            params.assertCurrent?.();
-            options?.assertCurrent?.();
+            assertCurrent();
             const elicitationInput = asOptionalRecord(request.params);
             if (!elicitationInput) {
               throw new Error("Invalid native MCP elicitation");
@@ -271,8 +279,7 @@ export function createNativeMcpRuntime(params: {
               params: elicitationInput,
               signal,
             });
-            params.assertCurrent?.();
-            options?.assertCurrent?.();
+            assertCurrent();
             return z.json().parse(result);
           },
         },
@@ -293,13 +300,17 @@ export function createNativeMcpRuntime(params: {
       // Codex scopes and echoes originCallId only for its shared codex_apps server.
       // Ordinary MCP servers intentionally return no origin correlation.
       const isCodexAppsServer = serverName === CODEX_APPS_MCP_SERVER;
-      const response = await params.client.request("mcpServer/resource/read", {
-        threadId: params.threadId,
-        ...(isCodexAppsServer ? { originCallId: params.originCallId } : {}),
-        server: serverName,
-        uri,
-        ...(params.connectorId ? { connectorId: params.connectorId } : {}),
-      });
+      const response = await params.client.request(
+        "mcpServer/resource/read",
+        {
+          threadId: params.threadId,
+          ...(isCodexAppsServer ? { originCallId: params.originCallId } : {}),
+          server: serverName,
+          uri,
+          ...(params.connectorId ? { connectorId: params.connectorId } : {}),
+        },
+        { assertCurrent: params.assertCurrent },
+      );
       if (isCodexAppsServer && response.originCallId !== params.originCallId) {
         throw new Error(
           `Codex MCP resource response originCallId mismatch: expected ${params.originCallId}, received ${response.originCallId}`,
