@@ -32,23 +32,23 @@ function resolveGitHubApiBaseUrl(value: string | undefined): string {
 }
 
 export let GITHUB_API_BASE_URL = resolveGitHubApiBaseUrl(undefined);
-export let GITHUB_GRAPHQL_URL = GITHUB_API_BASE_URL.endsWith("/api/v3")
-  ? `${GITHUB_API_BASE_URL.slice(0, -3)}/graphql`
-  : `${GITHUB_API_BASE_URL}/graphql`;
+function githubGraphqlUrl(baseUrl: string): string {
+  return baseUrl.endsWith("/api/v3") ? `${baseUrl.slice(0, -3)}/graphql` : `${baseUrl}/graphql`;
+}
+
+export let GITHUB_GRAPHQL_URL = githubGraphqlUrl(GITHUB_API_BASE_URL);
 
 export function configureGitHubApi(apiBaseUrl: string | undefined): void {
   GITHUB_API_BASE_URL = resolveGitHubApiBaseUrl(apiBaseUrl);
-  GITHUB_GRAPHQL_URL = GITHUB_API_BASE_URL.endsWith("/api/v3")
-    ? `${GITHUB_API_BASE_URL.slice(0, -3)}/graphql`
-    : `${GITHUB_API_BASE_URL}/graphql`;
+  GITHUB_GRAPHQL_URL = githubGraphqlUrl(GITHUB_API_BASE_URL);
 }
 
 export function getConfiguredGitHubApiUrls() {
   return { baseUrl: GITHUB_API_BASE_URL, graphqlUrl: GITHUB_GRAPHQL_URL };
 }
 
-export function githubRestApiPath(url: URL): string {
-  const basePath = new URL(GITHUB_API_BASE_URL).pathname;
+export function githubRestApiPath(url: URL, apiBaseUrl = GITHUB_API_BASE_URL): string {
+  const basePath = new URL(apiBaseUrl).pathname;
   return url.pathname.slice(basePath === "/" ? 0 : basePath.length);
 }
 const GITHUB_JSON_MAX_BYTES = 256 * 1024;
@@ -182,10 +182,10 @@ export function optionalNumber(record: Record<string, unknown>, key: string): nu
   return asFiniteNumber(record[key]);
 }
 
-function githubApiResource(url: URL): string {
+function githubApiResource(url: URL, apiBaseUrl: string, graphqlUrl: string): string {
   // GitHub separates GraphQL, code search, other searches, and non-search REST.
-  const path = githubRestApiPath(url);
-  return url.href === GITHUB_GRAPHQL_URL
+  const path = githubRestApiPath(url, apiBaseUrl);
+  return url.href === graphqlUrl
     ? "graphql"
     : path === "/search/code"
       ? "code_search"
@@ -245,15 +245,14 @@ function isGitHubApiRedirect(status: number): boolean {
   return status === 301 || status === 302 || status === 303 || status === 307 || status === 308;
 }
 
-function safeGitHubApiUrl(raw: string, base?: URL): URL | null {
+function safeGitHubApiUrl(raw: string, apiBase: URL, graphqlUrl: string, base?: URL): URL | null {
   try {
     const url = new URL(raw, base);
-    const apiBase = new URL(GITHUB_API_BASE_URL);
     if (
       url.origin !== apiBase.origin ||
       url.username ||
       url.password ||
-      (url.href !== GITHUB_GRAPHQL_URL &&
+      (url.href !== graphqlUrl &&
         !url.pathname.startsWith(`${apiBase.pathname === "/" ? "" : apiBase.pathname}/`))
     ) {
       return null;
@@ -273,17 +272,21 @@ export async function fetchGitHubApi(
   etag?: string,
   callerSignal?: AbortSignal,
   graphql?: { query: string; variables: Record<string, string> },
+  apiBaseUrl = GITHUB_API_BASE_URL,
 ): Promise<Response> {
   callerSignal?.throwIfAborted();
-  const initialUrl = safeGitHubApiUrl(rawUrl);
+  const baseUrl = resolveGitHubApiBaseUrl(apiBaseUrl);
+  const apiBase = new URL(baseUrl);
+  const graphqlUrl = githubGraphqlUrl(baseUrl);
+  const initialUrl = safeGitHubApiUrl(rawUrl, apiBase, graphqlUrl);
   if (!initialUrl) {
     throw new ControlUiGitHubError(502, "Invalid GitHub API URL");
   }
-  if (graphql && (initialUrl.href !== GITHUB_GRAPHQL_URL || !token || etag)) {
+  if (graphql && (initialUrl.href !== graphqlUrl || !token || etag)) {
     throw new ControlUiGitHubError(502, "Invalid authenticated GitHub GraphQL request");
   }
   let url: URL = initialUrl;
-  const credentialScope = githubApiCredentialCacheScope(token);
+  const credentialScope = `${baseUrl}:${githubApiCredentialCacheScope(token)}`;
   const cooldowns = transportCooldowns.get(fetchImpl) ?? new Map<string, ControlUiGitHubError>();
   transportCooldowns.set(fetchImpl, cooldowns);
 
@@ -297,7 +300,7 @@ export async function fetchGitHubApi(
       identity.assertSelected();
     }
     callerSignal?.throwIfAborted();
-    const resource = githubApiResource(url);
+    const resource = githubApiResource(url, baseUrl, graphqlUrl);
     const sharedCooldown = activeGitHubCooldown(cooldowns, `${credentialScope}:*`);
     const resourceCooldown = activeGitHubCooldown(cooldowns, `${credentialScope}:${resource}`);
     const cooldown =
@@ -341,7 +344,9 @@ export async function fetchGitHubApi(
     }
 
     const location: string | null = response.headers.get("location");
-    const nextUrl: URL | null = location ? safeGitHubApiUrl(location, url) : null;
+    const nextUrl: URL | null = location
+      ? safeGitHubApiUrl(location, apiBase, graphqlUrl, url)
+      : null;
     if (!nextUrl || redirects >= GITHUB_API_MAX_REDIRECTS) {
       await discardResponse(response);
       throw new ControlUiGitHubError(502, "GitHub API returned an unsafe redirect");

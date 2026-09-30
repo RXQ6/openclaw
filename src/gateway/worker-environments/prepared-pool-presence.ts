@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { isDeepStrictEqual } from "node:util";
 import type { OpenClawConfig } from "../../config/types.js";
 import { normalizeCapabilityProviderId } from "../../plugins/provider-registry-shared.js";
 import {
@@ -90,9 +91,14 @@ export function createPreparedPoolPresence(options: PreparedPoolPresenceOptions)
     }
     return demand;
   };
-  const write = async (value: PreparedPoolPresenceDemand | null, expectedVersion: number) => {
+  const write = async (
+    value: PreparedPoolPresenceDemand | null,
+    expectedVersion: number,
+    assertPolicyCurrent?: () => void,
+  ) => {
     const assertCurrent = () => {
       current();
+      assertPolicyCurrent?.();
       if (version !== expectedVersion) {
         throw new Error("Authenticated human presence changed during prepared-pool maintenance");
       }
@@ -125,6 +131,12 @@ export function createPreparedPoolPresence(options: PreparedPoolPresenceOptions)
       }
       return undefined;
     }
+    const assertPolicyCurrent = () => {
+      current();
+      if (!isDeepStrictEqual(policy(), source)) {
+        throw new Error("Human-presence repository policy changed during preparation");
+      }
+    };
     if (state && !matches(state, source)) {
       await write(null, expectedVersion);
       state = undefined;
@@ -138,7 +150,7 @@ export function createPreparedPoolPresence(options: PreparedPoolPresenceOptions)
           revision: state.revision + 1,
           retireAtMs: absentAtMs + source.retireAfterMs,
         };
-        await write(state, expectedVersion);
+        await write(state, expectedVersion, assertPolicyCurrent);
       }
       return state;
     }
@@ -162,6 +174,7 @@ export function createPreparedPoolPresence(options: PreparedPoolPresenceOptions)
     if (expectedVersion !== version) {
       throw new Error("Authenticated human presence changed during repository preparation");
     }
+    assertPolicyCurrent();
     const project = readWorkerProjectSnapshot(intent.profileSnapshot.project);
     const preparation = readWorkerProjectPreparation(intent.profileSnapshot.project);
     if (!project || !("source" in project) || !preparation) {
@@ -176,7 +189,7 @@ export function createPreparedPoolPresence(options: PreparedPoolPresenceOptions)
       lastPresentAtMs: now(),
       retireAtMs: null,
     };
-    await write(state, expectedVersion);
+    await write(state, expectedVersion, assertPolicyCurrent);
     if (!retained) {
       refResolvedAtMs = resolutionStartedAtMs;
     }
@@ -213,6 +226,7 @@ export function createPreparedPoolPresence(options: PreparedPoolPresenceOptions)
         ...limits,
         assertCurrent: () => {
           current();
+          assertPolicyCurrent();
           if (expectedVersion !== version || !humanPresent) {
             throw new Error("Authenticated human presence changed before reserve admission");
           }
@@ -229,6 +243,10 @@ export function createPreparedPoolPresence(options: PreparedPoolPresenceOptions)
   return {
     maintain,
     current: () => demand,
+    matchesCurrentPolicy: (state: PreparedPoolPresenceDemand) => {
+      const source = policy();
+      return Boolean(source && matches(state, source));
+    },
     set: (present: boolean) => {
       humanPresenceObserved = true;
       if (humanPresent !== present) {

@@ -76,6 +76,7 @@ type GitHubPublicApi = {
     etag?: string,
     signal?: AbortSignal,
     graphql?: { query: string; variables: Record<string, string> },
+    apiBaseUrl?: string,
   ) => Promise<Response>;
   discardResponse: (response: Response) => Promise<void>;
   readBoundedResponse: (response: Response, maxBytes: number) => Promise<Buffer>;
@@ -182,15 +183,21 @@ export const gitHubPublicApi = createLazyFacadeObjectValue<GitHubPublicApi>(() =
       cacheScope: `${resolveConfiguredGitHubHost(getRuntimeConfigSnapshot())}:${library.githubApiCredentialCacheScope(token)}`,
     };
   };
+  const resolvePublicScope = () =>
+    resolveConfiguredGitHubHost(getRuntimeConfigSnapshot()) === "github.com"
+      ? resolveScope()
+      : { token: undefined, cacheScope: "public:anonymous" };
   const resolveReadIdentity = (
     identity: ControlUiGitHubPreviewIdentity | undefined,
   ): ControlUiGitHubPreviewIdentity => {
     if (identity) {
-      return identity;
+      return resolveConfiguredGitHubHost(getRuntimeConfigSnapshot()) === "github.com"
+        ? identity
+        : { ...identity, token: undefined, cacheScope: "public:anonymous" };
     }
-    const selected = resolveScope();
+    const selected = resolvePublicScope();
     const assertSelected = () => {
-      if (resolveScope().cacheScope !== selected.cacheScope) {
+      if (resolvePublicScope().cacheScope !== selected.cacheScope) {
         throw new library.ControlUiGitHubError(409, "GitHub credential changed; retry the request");
       }
     };

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { createDeferredCore } from "../../shared/deferred.js";
 import type { PreparedPoolPresenceDemand } from "./prepared-pool-presence.types.js";
 import {
   PREPARATION_KEY,
@@ -27,6 +28,7 @@ describe("authenticated human prepared-pool demand", () => {
   function presencePool(
     initial?: PreparedPoolPresenceDemand,
     executionMode: "worker-turn" | "remote-exec" = "remote-exec",
+    overrides: Partial<PoolOptions> = {},
   ) {
     let persisted = initial;
     let currentRepository = repository;
@@ -71,6 +73,7 @@ describe("authenticated human prepared-pool demand", () => {
             }
           : undefined,
       presenceDemandStore: { read: async () => persisted, write },
+      ...overrides,
     });
     return {
       owner,
@@ -322,6 +325,87 @@ describe("authenticated human prepared-pool demand", () => {
     expect(fixture.reserves().filter((record) => record.state !== "destroyed")).toHaveLength(3);
     expect(presence.read()?.retireAtMs).toBe(1_500);
   });
+
+  it.each(["removed", "replaced"] as const)(
+    "does not admit a reserve after the default repository is %s during preparation",
+    async (change) => {
+      const presence = presencePool();
+      const entered = createDeferredCore();
+      const release = createDeferredCore();
+      const prepare = presence.prepareIntent.getMockImplementation()!;
+      presence.prepareIntent.mockImplementationOnce(async (...args) => {
+        entered.resolve();
+        await release.promise;
+        return prepare(...args);
+      });
+      const maintaining = presence.owner.setHumanPresence(true);
+      const rejected = expect(maintaining).rejects.toThrow("repository policy changed");
+      await entered.promise;
+      if (change === "removed") {
+        presence.disableSource();
+      } else {
+        presence.setRepository({
+          ...repository,
+          source: { ...repository.source, url: "https://github.com/acme/replacement.git" },
+        });
+      }
+      release.resolve();
+      await rejected;
+      expect(presence.write).not.toHaveBeenCalled();
+      expect(presence.read()).toBeUndefined();
+      expect(fixture.reserves()).toEqual([]);
+    },
+  );
+
+  it("rechecks the default policy at the reserve database admission", async () => {
+    const presence = presencePool();
+    const entered = createDeferredCore();
+    const release = createDeferredCore();
+    const ensure = fixture.store.ensurePreparedIntent.bind(fixture.store);
+    vi.spyOn(fixture.store, "ensurePreparedIntent").mockImplementationOnce(async (request) => {
+      entered.resolve();
+      await release.promise;
+      return ensure(request);
+    });
+    const maintaining = presence.owner.setHumanPresence(true);
+    const rejected = expect(maintaining).rejects.toThrow("repository policy changed");
+    await entered.promise;
+    presence.disableSource();
+    release.resolve();
+    await rejected;
+    expect(fixture.reserves()).toEqual([]);
+  });
+
+  it.each([false, true])(
+    "carries current default policy to queued lifecycle effects (removed=%s)",
+    async (removed) => {
+      const entered = createDeferredCore();
+      const release = createDeferredCore();
+      const transport = vi.fn();
+      const presence = presencePool(undefined, "worker-turn", {
+        reconcile: async (record, _signal, beforeReconcile) => {
+          if (record.destroyRequestedAtMs !== null) {
+            return;
+          }
+          entered.resolve();
+          await release.promise;
+          beforeReconcile();
+          transport(record.environmentId);
+        },
+      });
+      const maintaining = presence.owner.setHumanPresence(true);
+      await entered.promise;
+      if (removed) {
+        presence.disableSource();
+      }
+      release.resolve();
+      await maintaining;
+      expect(transport).toHaveBeenCalledTimes(removed ? 0 : 3);
+      expect(fixture.reserves().every((record) => record.destroyRequestedAtMs !== null)).toBe(
+        removed,
+      );
+    },
+  );
 
   it("does not publish a refreshed ref after human presence changes during resolution", async () => {
     const presence = presencePool();

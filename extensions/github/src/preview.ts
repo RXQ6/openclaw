@@ -8,7 +8,7 @@ import {
   ControlUiGitHubError,
   discardResponse,
   fetchGitHubApi,
-  GITHUB_API_BASE_URL,
+  GITHUB_API_ORIGIN,
   githubRestApiPath,
   readBoundedResponse,
   readGitHubJsonResponse,
@@ -70,7 +70,17 @@ export async function assertPublicGitHubRepository(
 ): Promise<void> {
   // Stop before item reads so shared credentials cannot probe private item numbers.
   const repository = await readGitHubJsonResponse(
-    await fetchGitHubApi(repositoryUrl, fetchImpl, token, undefined, identity, undefined, signal),
+    await fetchGitHubApi(
+      repositoryUrl,
+      fetchImpl,
+      token,
+      undefined,
+      identity,
+      undefined,
+      signal,
+      undefined,
+      GITHUB_API_ORIGIN,
+    ),
   );
   if (!isPublicGitHubRepository(repository)) {
     throw new ControlUiGitHubError(404, "GitHub repository is not public");
@@ -78,7 +88,7 @@ export async function assertPublicGitHubRepository(
 }
 
 function redirectedRepositoryApiUrl(target: ControlUiGitHubPreviewTarget, url: URL): string | null {
-  const segments = githubRestApiPath(url).split("/").filter(Boolean);
+  const segments = githubRestApiPath(url, GITHUB_API_ORIGIN).split("/").filter(Boolean);
   const collection = target.kind === "pull" ? "pulls" : "issues";
   // The commits request redirects to the same item path plus one known suffix.
   const itemSegments = segments.at(-1) === "commits" ? segments.slice(0, -1) : segments;
@@ -90,7 +100,7 @@ function redirectedRepositoryApiUrl(target: ControlUiGitHubPreviewTarget, url: U
     itemSegments[3] === collection &&
     /^\d+$/u.test(itemSegments[4] ?? "")
   ) {
-    return `${GITHUB_API_BASE_URL}/repos/${itemSegments[1]}/${itemSegments[2]}`;
+    return `${GITHUB_API_ORIGIN}/repos/${itemSegments[1]}/${itemSegments[2]}`;
   }
   if (
     itemSegments.length === 4 &&
@@ -99,7 +109,7 @@ function redirectedRepositoryApiUrl(target: ControlUiGitHubPreviewTarget, url: U
     itemSegments[2] === collection &&
     /^\d+$/u.test(itemSegments[3] ?? "")
   ) {
-    return `${GITHUB_API_BASE_URL}/repositories/${itemSegments[1]}`;
+    return `${GITHUB_API_ORIGIN}/repositories/${itemSegments[1]}`;
   }
   return null;
 }
@@ -262,10 +272,20 @@ async function fetchPreview(
   identity?: ControlUiGitHubPreviewIdentity,
 ): Promise<ControlUiGitHubPreview> {
   const request = (url: string, beforeRedirect?: (url: URL) => Promise<void>) =>
-    fetchGitHubApi(url, fetchImpl, token, beforeRedirect, identity, undefined, signal);
+    fetchGitHubApi(
+      url,
+      fetchImpl,
+      token,
+      beforeRedirect,
+      identity,
+      undefined,
+      signal,
+      undefined,
+      GITHUB_API_ORIGIN,
+    );
   const assertPublicRepository = (url: string) =>
     assertPublicGitHubRepository(url, fetchImpl, token, identity, signal);
-  const repositoryUrl = `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repo)}`;
+  const repositoryUrl = `${GITHUB_API_ORIGIN}/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repo)}`;
   const itemUrl = `${repositoryUrl}/${target.kind === "pull" ? "pulls" : "issues"}/${target.number}`;
   if (token) {
     await assertPublicRepository(repositoryUrl);

@@ -5,7 +5,7 @@ import { fetchPullChecks } from "./detail-checks.js";
 import {
   ControlUiGitHubError,
   fetchGitHubApi,
-  GITHUB_API_BASE_URL,
+  GITHUB_API_ORIGIN,
   githubRestApiPath,
   githubApiCredentialCacheScope,
   isRecord,
@@ -62,12 +62,12 @@ class GitHubDetailAccessError extends ControlUiGitHubError {
 
 function redirectedRepositoryUrl(url: URL, suffix: string): string {
   const match = /^(\/repos\/[^/]+\/[^/]+|\/repositories\/\d+)(\/.*)?$/u.exec(
-    githubRestApiPath(url),
+    githubRestApiPath(url, GITHUB_API_ORIGIN),
   );
   if (!match || (match[2] ?? "") !== suffix) {
     throw new GitHubDetailAccessError();
   }
-  return GITHUB_API_BASE_URL + match[1];
+  return GITHUB_API_ORIGIN + match[1];
 }
 
 async function readPublicRepository(
@@ -85,6 +85,10 @@ async function readPublicRepository(
         redirectedRepositoryUrl(redirect, "");
       },
       identity,
+      undefined,
+      undefined,
+      undefined,
+      GITHUB_API_ORIGIN,
     ),
   );
   const id = isRecord(repository) ? optionalNumber(repository, "id") : undefined;
@@ -259,7 +263,7 @@ async function fetchDetail(
   readPage: ReadDetailPage,
 ): Promise<GitHubDocument> {
   const repoPath = `/repos/${encodeURIComponent(target.owner)}/${encodeURIComponent(target.repo)}`;
-  const repositoryUrl = GITHUB_API_BASE_URL + repoPath;
+  const repositoryUrl = GITHUB_API_ORIGIN + repoPath;
   const collection =
     target.kind === "commit" ? "commits" : target.kind === "pull" ? "pulls" : "issues";
   const id = target.kind === "commit" ? target.sha : target.number;
@@ -432,7 +436,7 @@ async function loadGitHubDetailWithIdentity(
   }
   detailCache.delete(key);
   const load = async (): Promise<CachedDocument> => {
-    const repositoryUrl = `${GITHUB_API_BASE_URL}/repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repo)}`;
+    const repositoryUrl = `${GITHUB_API_ORIGIN}/repos/${encodeURIComponent(parsed.owner)}/${encodeURIComponent(parsed.repo)}`;
     const repositoryUrls = new Set([repositoryUrl]);
     const repositoryId = identity?.token
       ? await readPublicRepository(repositoryUrl, fetchImpl, identity)
@@ -454,6 +458,10 @@ async function loadGitHubDetailWithIdentity(
             }
           : undefined,
         identity,
+        undefined,
+        undefined,
+        undefined,
+        GITHUB_API_ORIGIN,
       );
       return {
         hasNextPage: /;\s*rel="next"/u.test(response.headers.get("link") ?? ""),

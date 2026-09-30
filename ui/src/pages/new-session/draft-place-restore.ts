@@ -181,8 +181,9 @@ export function restoreDraftPlacePreferences(params: {
     state.configuredDefaultRepositoryPending = false;
     if (restoringConfiguredRemoteProject && !configuredDefaultAllowed) {
       state.preferredRemoteProjectRestore = null;
+      changed = true;
     }
-    changed = true;
+    requestUpdate();
   }
 
   if (preferredRemoteProject) {

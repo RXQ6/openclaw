@@ -164,6 +164,7 @@ export function createPreparedWorkerPool(options: PoolOptions) {
         retention?: { isCurrent: () => boolean };
         deferred?: boolean;
         activationEligible?: boolean;
+        presenceOwned?: boolean;
         intent?: WorkerProviderPreparedIntent;
         slots?: number;
       }
@@ -197,8 +198,12 @@ export function createPreparedWorkerPool(options: PoolOptions) {
           activePresenceDemand.project.key ===
             readWorkerProjectSnapshot(record.profileSnapshot.project)?.key;
         const presenceExpiresAtMs = activePresenceDemand?.retireAtMs ?? Number.MAX_SAFE_INTEGER;
+        // Presence renewal is not evidence that a foreground session activated this worker.
         const activationExpiresAtMs =
-          Number.isSafeInteger(timeout) && timeout && timeout > 0
+          (!presenceOwned || typeof record.lastActivatedAtMs === "number") &&
+          Number.isSafeInteger(timeout) &&
+          timeout &&
+          timeout > 0
             ? demandAtMs + timeout
             : undefined;
         if (
@@ -215,6 +220,7 @@ export function createPreparedWorkerPool(options: PoolOptions) {
               presenceOwned ? presenceExpiresAtMs : 0,
               activationExpiresAtMs ?? 0,
             ),
+            presenceOwned: Boolean(presenceOwned),
             activationEligible:
               activationExpiresAtMs !== undefined && activationExpiresAtMs > now(),
           });
@@ -241,6 +247,13 @@ export function createPreparedWorkerPool(options: PoolOptions) {
     }
     const isGenerationCurrent = (generation: NonNullable<ReturnType<typeof eligible.get>>) => {
       current();
+      if (
+        generation.presenceOwned &&
+        !generation.activationEligible &&
+        (!activePresenceDemand || !presence.matchesCurrentPolicy(activePresenceDemand))
+      ) {
+        return false;
+      }
       if (
         !isDeepStrictEqual(
           store.get(generation.source.environmentId)?.profileSnapshot,
