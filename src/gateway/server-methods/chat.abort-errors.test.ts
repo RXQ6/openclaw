@@ -16,7 +16,7 @@ import {
 import { createEmbeddedRunHandle } from "../../agents/embedded-agent-runner/runs.test-support.js";
 import { killSubagentRunAdmin } from "../../agents/subagents/registry/subagent-control.js";
 import { SUBAGENT_KILL_TASK_ERROR } from "../../agents/subagents/registry/subagent-control.types.js";
-import { onSubagentRegistryPersisted } from "../../agents/subagents/registry/subagent-registry-state.js";
+import { subscribeSubagentRunChanges } from "../../agents/subagents/registry/subagent-registry-publication.js";
 import { registerSubagentRun } from "../../agents/subagents/registry/subagent-registry.js";
 import { writeSubagentSessionEntry } from "../../agents/subagents/registry/subagent-registry.persistence.test-support.js";
 import { getSubagentRunByChildSessionKey } from "../../agents/subagents/registry/subagent-registry.test-helpers.js";
@@ -449,7 +449,7 @@ it.each(["cascade native new", "RPC reset", "RPC delete"])(
     const release = createDeferred();
     const child = getSubagentRunByChildSessionKey(childKey)!;
     const childTerminated = createDeferred();
-    const stopObservingChild = onSubagentRegistryPersisted(() => {
+    const stopObservingChild = subscribeSubagentRunChanges("persistence", () => {
       if (
         getSubagentRunByChildSessionKey(childKey) === child &&
         child.endedReason === "subagent-killed"

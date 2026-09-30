@@ -75,7 +75,7 @@ import {
 } from "./subagent-announce.runtime.js";
 
 const loadSubagentRegistryRuntime = createLazyPromise(
-  () => import("../registry/subagent-registry-runtime.js"),
+  () => import("../registry/subagent-registry.js"),
 );
 
 export { captureSubagentCompletionReply } from "./subagent-announce-output.js";
@@ -345,7 +345,7 @@ async function runSubagentAnnounceFlowBound(
           callGateway: callSubagentLifecycleGateway,
           dispatchGatewayMethodInProcess,
           getRuntimeConfig,
-          replaceSubagentRunAfterSteer: subagentRegistryRuntime.replaceSubagentRunAfterSteer,
+          replaceSubagentRunAfterSteer: subagentRegistryRuntime.replaceSubagentRunAfterSteerCore,
         },
         signal: params.signal,
       });

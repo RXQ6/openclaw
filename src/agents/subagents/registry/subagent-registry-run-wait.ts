@@ -225,7 +225,7 @@ export class SubagentWaitManager {
     const lifecycleGeneration = getAgentEventLifecycleGeneration();
     const stateContext = captureOpenClawStateWorkerContext();
     let waitedEntry: SubagentRunRecord | undefined;
-    let completionForRetry: Parameters<typeof this.options.completeSubagentRun>[0] | undefined;
+    let completionAttempted = false;
     let releaseCompletionWork: (() => void) | null = null;
     const assertCurrent = () => {
       assertSubagentRegistryWriteSourceCurrent(stateContext);
@@ -297,15 +297,15 @@ export class SubagentWaitManager {
           "runId" | "expectedEntry" | "sendFarewell" | "accountId" | "triggerCleanup"
         >,
       ) => {
-        completionForRetry = {
+        completionAttempted = true;
+        return this.options.completeSubagentRun({
           runId,
           expectedEntry: entry,
           sendFarewell: true,
           accountId: entry.requesterOrigin?.accountId,
           triggerCleanup: true,
           ...completion,
-        };
-        return this.options.completeSubagentRun(completionForRetry);
+        });
       };
       if (wait.yielded === true && waitStatus !== "timeout" && !waitBlocked) {
         this.options.clearPendingLifecycleError(runId);
@@ -481,23 +481,11 @@ export class SubagentWaitManager {
         return;
       }
       assertCurrent();
-      log.warn("failed to complete subagent run; retrying completion", {
+      log.warn("subagent completion wait failed; recovering ended cleanup", {
         runId,
         childSessionKey: current.childSessionKey,
         error,
       });
-      if (completionForRetry) {
-        try {
-          await this.options.completeSubagentRun(completionForRetry);
-          return;
-        } catch (retryError) {
-          log.warn("failed to complete subagent run after retry; retrying ended cleanup", {
-            runId,
-            childSessionKey: current.childSessionKey,
-            error: retryError,
-          });
-        }
-      }
       if (
         !isAgentEventLifecycleGenerationCurrent(lifecycleGeneration) ||
         this.options.runs.get(runId) !== current
@@ -512,7 +500,7 @@ export class SubagentWaitManager {
         current.cleanupHandled = false;
         this.options.resumedRuns.delete(runId);
         this.options.resumeSubagentRun(runId);
-      } else if (completionForRetry && typeof current.execution.endedAt !== "number") {
+      } else if (completionAttempted && typeof current.execution.endedAt !== "number") {
         this.options.scheduleSweep({ delayMs: 1_000 });
       }
     } finally {

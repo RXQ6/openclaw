@@ -327,8 +327,8 @@ vi.mock("../../agents/subagents/registry/subagent-registry-read.js", async (impo
   getLatestSubagentRunByChildSessionKey: mocks.getLatestSubagentRunByChildSessionKey,
 }));
 
-vi.mock("../../agents/subagents/registry/subagent-registry-runtime.js", () => ({
-  replaceSubagentRunAfterSteer: mocks.replaceSubagentRunAfterSteer,
+vi.mock("../../agents/subagents/registry/subagent-registry.js", () => ({
+  replaceSubagentRunAfterSteerCore: mocks.replaceSubagentRunAfterSteer,
 }));
 
 vi.mock("../session-reset-service.js", () => ({

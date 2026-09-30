@@ -24,8 +24,9 @@ vi.mock("../agents/subagents/registry/subagent-registry-read.js", async () => {
   };
 });
 
-vi.mock("../agents/subagents/registry/subagent-registry-runtime.js", () => ({
-  replaceSubagentRunAfterSteer: (...args: unknown[]) => replaceSubagentRunAfterSteerMock(...args),
+vi.mock("../agents/subagents/registry/subagent-registry.js", () => ({
+  replaceSubagentRunAfterSteerCore: (...args: unknown[]) =>
+    replaceSubagentRunAfterSteerMock(...args),
 }));
 
 import { reactivateCompletedSubagentSession } from "./session-subagent-reactivation.js";

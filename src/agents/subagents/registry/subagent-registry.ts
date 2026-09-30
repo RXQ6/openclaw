@@ -78,10 +78,8 @@ let activeGatewayContextResolver: GatewayContextResolver | undefined;
 const SUBAGENT_ANNOUNCE_TIMEOUT_MS = 120_000;
 const GATEWAY_ADMISSION_RETRY_DELAY_MS = 1_000;
 
-// Hot lifecycle callers name every changed or removed row. Zero ids is reserved
-// for explicit full-registry replacement at restore/reset boundaries.
 function persistSubagentRuns(...runIds: string[]) {
-  persistSubagentRunsToDisk(subagentRuns, runIds.length > 0 ? runIds : undefined);
+  persistSubagentRunsToDisk(subagentRuns, runIds);
 }
 
 function persistSubagentRunsAsyncOrThrow(
@@ -96,7 +94,7 @@ function persistSubagentRunsAsyncOrThrow(
 }
 
 function persistSubagentRunsOrThrow(...runIds: string[]) {
-  persistSubagentRunsToDiskOrThrow(subagentRuns, runIds.length > 0 ? runIds : undefined);
+  persistSubagentRunsToDiskOrThrow(subagentRuns, runIds);
 }
 
 /** Prepare registry hydration before the session owner's synchronous reset commit. */
@@ -667,7 +665,7 @@ export function adoptPausedSubagentRunForFollowUp(params: {
   });
 }
 
-function resetSubagentRegistryForTests(opts?: { persist?: boolean }) {
+function resetSubagentRegistryForTests() {
   clearScheduledResumeTimers();
   for (const timer of resumeRetryTimers) {
     clearTimeout(timer);
@@ -683,9 +681,6 @@ function resetSubagentRegistryForTests(opts?: { persist?: boolean }) {
   subagentRestorer.reset();
   activeGatewayContextResolver = undefined;
   subagentListener.reset();
-  if (opts?.persist !== false) {
-    persistSubagentRuns();
-  }
   return sweeperRetirement;
 }
 

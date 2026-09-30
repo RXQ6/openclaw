@@ -1,4 +1,3 @@
-/** Reads or waits for descendant subagent summaries after isolated cron orchestration. */
 import { readLatestAssistantReply, waitForAgentRunsToDrain } from "../../agents/run-wait.js";
 import { resolveSubagentCompletionResultText } from "../../agents/subagents/completion/subagent-completion-result.js";
 import type { SubagentRunRecord } from "../../agents/subagents/registry/subagent-registry.types.js";
@@ -17,16 +16,6 @@ import { hasUnsettledCronDescendants } from "./delivery-subagent-registry.runtim
 import { listDescendantRunsForRequester } from "./run-subagent-registry.runtime.js";
 import { isLikelyInterimCronMessage } from "./subagent-followup-hints.js";
 
-function resolveCronSubagentTimings() {
-  const fastTestMode = isFastTestRuntimeEnv();
-  return {
-    waitMinMs: fastTestMode ? 10 : 30_000,
-    finalReplyGraceMs: fastTestMode ? 50 : 5_000,
-    gracePollMs: fastTestMode ? 8 : 200,
-  };
-}
-
-/** Reads completed descendant subagent replies when the orchestrator only emitted interim text. */
 export async function readDescendantSubagentFallbackReply(params: {
   sessionKey: string;
   runStartedAt: number;
@@ -82,7 +71,12 @@ export async function waitForDescendantSubagentSummary(params: {
   observedActiveDescendants?: boolean;
   abortSignal?: AbortSignal;
 }): Promise<string | undefined> {
-  const timings = resolveCronSubagentTimings();
+  const fastTestMode = isFastTestRuntimeEnv();
+  const timings = {
+    waitMinMs: fastTestMode ? 10 : 30_000,
+    finalReplyGraceMs: fastTestMode ? 50 : 5_000,
+    gracePollMs: fastTestMode ? 8 : 200,
+  };
   const requestGateway = bindAgentToolGatewayRequest({ hostedOnly: true });
   const initialReply = params.initialReply?.trim();
   const deadline = Date.now() + Math.max(timings.waitMinMs, Math.floor(params.timeoutMs));
@@ -157,10 +151,7 @@ export async function waitForDescendantSubagentSummary(params: {
       return undefined;
     }
 
-    // --- Grace period: wait for the cron agent's synthesis ---
-    // After the subagent announces fire and the cron agent processes them, it
-    // produces a new assistant message.  Poll briefly (bounded by
-    // finalReplyGraceMs) to capture that synthesis.
+    // Give the parent a bounded window to synthesize the settled descendants.
     const gracePeriodDeadline = Math.min(Date.now() + timings.finalReplyGraceMs, deadline);
 
     const resolveUsableLatestReply = async () => {
@@ -176,8 +167,6 @@ export async function waitForDescendantSubagentSummary(params: {
         !isSilentReplyPayloadText(latest, HEARTBEAT_TOKEN) &&
         (latest !== initialParentReply || !isLikelyInterimCronMessage(latest))
       ) {
-        // Ignore the original interim acknowledgement; only a new synthesis or a
-        // non-interim reply should replace descendant fallback text.
         return latest;
       }
       return undefined;
@@ -194,7 +183,6 @@ export async function waitForDescendantSubagentSummary(params: {
       );
     }
 
-    // Final read after grace period expires.
     return await resolveUsableLatestReply();
   } catch (error) {
     if (params.abortSignal?.aborted || Date.now() >= deadline) {

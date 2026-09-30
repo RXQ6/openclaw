@@ -851,20 +851,16 @@ export function createSessionsSendTool(opts?: SessionsSendToolOptions): AnyAgent
           }
           runId = start.runId;
           const watchField = registerWatchIfRequested(acceptedTargetSessionKey);
-          const accepted = (acceptedDelivery: typeof delayedDelivery) =>
+          const accepted = () =>
             jsonResult({
               runId,
               status: "accepted",
               sessionKey: displayKey,
               targetDisposition: start.targetDisposition,
-              delivery: acceptedDelivery,
+              delivery: delayedDelivery,
               ...watchField,
             });
-          const startReplyFlow = ({
-            notifyRequesterOnWaitFailure = false,
-          }: {
-            notifyRequesterOnWaitFailure?: boolean;
-          }) =>
+          const startReplyFlow = (notifyRequesterOnWaitFailure: boolean) =>
             startSessionsSendReplyFlow({
               ...replyContext,
               runId,
@@ -876,22 +872,22 @@ export function createSessionsSendTool(opts?: SessionsSendToolOptions): AnyAgent
                 notifyRequesterOnWaitFailure && !isIsolatedCronRequester,
             });
           if (timeoutSeconds === 0) {
-            startReplyFlow({ notifyRequesterOnWaitFailure: true });
-            return accepted(delayedDelivery);
+            startReplyFlow(true);
+            return accepted();
           }
 
           const result = completion
             ? await completion.take(timeoutMs)
             : await waitForAgentRunReply({ runId, timeoutMs, callGateway: gatewayCall });
           if (!result) {
-            startReplyFlow({ notifyRequesterOnWaitFailure: true });
-            return accepted(delayedDelivery);
+            startReplyFlow(true);
+            return accepted();
           }
           completion?.close();
 
           if (result.status === "timeout") {
             if (result.pendingError === true && result.error?.trim()) {
-              startReplyFlow({ notifyRequesterOnWaitFailure: targetIsSubagent });
+              startReplyFlow(targetIsSubagent);
               return jsonResult({
                 runId,
                 status: "timeout",
@@ -903,8 +899,8 @@ export function createSessionsSendTool(opts?: SessionsSendToolOptions): AnyAgent
               });
             }
             if (!isTerminalAgentWaitTimeout(result)) {
-              startReplyFlow({ notifyRequesterOnWaitFailure: true });
-              return accepted(delayedDelivery);
+              startReplyFlow(true);
+              return accepted();
             }
           }
           if (result.status === "timeout" || result.status === "error") {

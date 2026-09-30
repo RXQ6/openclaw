@@ -32,7 +32,7 @@ import {
 } from "../../internal-event-contract.js";
 import type { AgentInternalEvent } from "../../internal-events.js";
 import {
-  isSourceOwnerChangedWake,
+  SOURCE_OWNER_CHANGED,
   resolveActiveWakeWithRetries,
   resolveRequesterSessionActivity,
 } from "./subagent-announce-active-wake.js";
@@ -326,7 +326,7 @@ export async function sendSubagentAnnounceDirectly(
         isCompletionDeliveryAllowed,
         params.isSourceSessionAdmissionAllowed,
       );
-      if (isSourceOwnerChangedWake(wakeOutcome)) {
+      if (wakeOutcome === SOURCE_OWNER_CHANGED) {
         return sourceOwnerChangedResult();
       }
       if (wakeOutcome.queued) {

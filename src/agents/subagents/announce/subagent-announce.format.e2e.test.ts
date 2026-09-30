@@ -154,7 +154,7 @@ const { subagentRegistryMock } = vi.hoisted(() => ({
     listSubagentRunsForRequester: vi.fn(
       (_sessionKey: string, _scope?: { requesterRunId?: string }): MockSubagentRun[] => [],
     ),
-    replaceSubagentRunAfterSteer: vi.fn(
+    replaceSubagentRunAfterSteerCore: vi.fn(
       (_params: { previousRunId: string; nextRunId: string; lifecycleGeneration?: string }) => true,
     ),
     resolveRequesterForChildSession: vi.fn((_sessionKey: string): RequesterResolution => null),
@@ -367,7 +367,6 @@ function loadSessionStoreFixture(): Record<string, SessionEntry> {
 
 vi.mock("../registry/subagent-registry.js", () => subagentRegistryMock);
 vi.mock("../registry/subagent-registry-read.js", () => subagentRegistryMock);
-vi.mock("../registry/subagent-registry-runtime.js", () => subagentRegistryMock);
 
 describe("subagent announce formatting", () => {
   let previousFastTestEnv: string | undefined;
@@ -515,7 +514,7 @@ describe("subagent announce formatting", () => {
       .mockClear()
       .mockReturnValue(undefined);
     subagentRegistryMock.listSubagentRunsForRequester.mockClear().mockReturnValue([]);
-    subagentRegistryMock.replaceSubagentRunAfterSteer.mockClear().mockReturnValue(true);
+    subagentRegistryMock.replaceSubagentRunAfterSteerCore.mockClear().mockReturnValue(true);
     subagentRegistryMock.resolveRequesterForChildSession.mockClear().mockReturnValue(null);
     hasSubagentDeliveryTargetHook = false;
     hookHasHooksMock.mockClear();
@@ -2790,7 +2789,7 @@ describe("subagent announce formatting", () => {
       expect(message).toContain("All pending descendants for that run have now settled");
       expect(message).toContain("result from child a");
       expect(message).toContain("result from child b");
-      expect(subagentRegistryMock.replaceSubagentRunAfterSteer).toHaveBeenCalledWith({
+      expect(subagentRegistryMock.replaceSubagentRunAfterSteerCore).toHaveBeenCalledWith({
         previousRunId: "run-parent-phase-1",
         nextRunId: "run-parent-phase-2",
         lifecycleGeneration,
@@ -2855,7 +2854,7 @@ describe("subagent announce formatting", () => {
     }
 
     await expect(announce).resolves.toBe("intentional_non_delivery");
-    expect(subagentRegistryMock.replaceSubagentRunAfterSteer).not.toHaveBeenCalled();
+    expect(subagentRegistryMock.replaceSubagentRunAfterSteerCore).not.toHaveBeenCalled();
     expect(callGatewaySpy).toHaveBeenCalledWith(
       expect.objectContaining({
         method: "chat.abort",
@@ -2908,7 +2907,7 @@ describe("subagent announce formatting", () => {
     });
 
     expect(didAnnounce).toBe("delivered");
-    expect(subagentRegistryMock.replaceSubagentRunAfterSteer).not.toHaveBeenCalled();
+    expect(subagentRegistryMock.replaceSubagentRunAfterSteerCore).not.toHaveBeenCalled();
     expect(agentSpy).toHaveBeenCalledTimes(1);
     const call = getAgentCall() as {
       params?: { sessionKey?: string; message?: string };

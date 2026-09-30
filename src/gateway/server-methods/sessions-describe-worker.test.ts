@@ -6,7 +6,7 @@ import {
   clearSubagentRunsReadCacheForTest,
   persistSubagentRunsToDisk,
 } from "../../agents/subagents/registry/subagent-registry-state.js";
-import { saveSubagentRegistryToSqlite } from "../../agents/subagents/registry/subagent-registry.store.sqlite.js";
+import { saveSubagentRegistryToSqlite } from "../../agents/subagents/registry/subagent-registry.store.test-support.js";
 import type { SubagentRunRecord } from "../../agents/subagents/registry/subagent-registry.types.js";
 import {
   bindSwarmRunReservation,
@@ -229,7 +229,7 @@ it.each(["describe", "list"] as const)(
               swarmRequesterSessionKey: targetKey,
               collectorCompletion: { status: "done" },
             });
-            persistSubagentRunsToDisk(new Map([[published.runId, published]]));
+            persistSubagentRunsToDisk(new Map([[published.runId, published]]), [published.runId]);
             subagentRuns.set(current.runId, current);
           },
         );

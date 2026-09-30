@@ -34,8 +34,8 @@ import {
   loadSubagentSessionListRunsFromSqlite,
   loadSubagentRunsForSessionsInDatabase,
   saveSubagentRegistryChangesToSqlite,
-  saveSubagentRegistryToSqlite,
 } from "./subagent-registry.store.sqlite.js";
+import { saveSubagentRegistryToSqlite } from "./subagent-registry.store.test-support.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
 import { resolveSubagentDisplayStatus } from "./subagent-session-metrics.js";
 
@@ -678,9 +678,9 @@ describe("subagent registry sqlite store", () => {
     });
 
     for (const run of [missingState, retiredState, invalidStatus]) {
-      expect(() => saveSubagentRegistryToSqlite(new Map([[run.runId, run]]))).toThrow(
-        "subagent run is missing canonical nested state",
-      );
+      expect(() =>
+        saveSubagentRegistryChangesToSqlite(new Map([[run.runId, run]]), [run.runId]),
+      ).toThrow("subagent run is missing canonical nested state");
     }
   });
 

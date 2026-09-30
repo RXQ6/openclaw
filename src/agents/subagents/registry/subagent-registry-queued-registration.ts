@@ -18,10 +18,10 @@ import {
   assertSubagentRegistryWriteOutcomeKnown,
   waitForPendingSubagentKillClaim,
 } from "./subagent-registry-persistence.js";
+import { subscribeSubagentRunChanges } from "./subagent-registry-publication.js";
 import { waitForQueuedSubagentClaim } from "./subagent-registry-queued-registration-wait.js";
 import { createQueuedRegistrationSettlement } from "./subagent-registry-queued-settlement.js";
 import type { SubagentManagerOptions } from "./subagent-registry-run-wait.js";
-import { onSubagentRegistryPersisted } from "./subagent-registry-state.js";
 import type { SubagentRegistrationScope, SubagentRunRecord } from "./subagent-registry.types.js";
 import { compareSubagentRunGeneration } from "./subagent-run-generation.js";
 
@@ -385,7 +385,7 @@ export function registerRequiredQueuedSubagent(params: {
         return;
       }
       let observedClaim = false;
-      const stopObservingClaim = onSubagentRegistryPersisted(() => {
+      const stopObservingClaim = subscribeSubagentRunChanges("persistence", () => {
         if (exactEntry() && entry.killIntent) {
           observedClaim = true;
         }

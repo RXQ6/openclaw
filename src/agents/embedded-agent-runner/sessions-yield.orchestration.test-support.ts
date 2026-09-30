@@ -47,7 +47,9 @@ describe("sessions_yield orchestration", () => {
       const requesterSettlement =
         await import("../subagents/announce/subagent-announce.requester-settle-wake.js");
       const { subagentRuns } = await import("../subagents/registry/subagent-registry-memory.js");
-      const { onSubagentRegistryPersisted, persistSubagentRunsToDiskOrThrow } =
+      const { subscribeSubagentRunChanges } =
+        await import("../subagents/registry/subagent-registry-publication.js");
+      const { persistSubagentRunsToDiskOrThrow } =
         await import("../subagents/registry/subagent-registry-state.js");
       const { loadSubagentRegistryFromSqlite } =
         await import("../subagents/registry/subagent-registry.store.sqlite.js");
@@ -115,7 +117,7 @@ describe("sessions_yield orchestration", () => {
       registry.addSubagentRunForTests(child);
       persistSubagentRunsToDiskOrThrow(subagentRuns, [child.runId]);
       const persisted = vi.fn(() => loadSubagentRegistryFromSqlite().get(child.runId));
-      const unsubscribe = onSubagentRegistryPersisted(persisted);
+      const unsubscribe = subscribeSubagentRunChanges("persistence", persisted);
       const createTranscript = transcriptOwner.createAssistantErrorTranscript;
       const factorySpy = vi
         .spyOn(transcriptOwner, "createAssistantErrorTranscript")

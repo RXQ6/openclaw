@@ -188,8 +188,8 @@ vi.mock("../registry/subagent-registry-read.js", () => ({
   shouldIgnorePostCompletionAnnounceForSession: () => shouldIgnorePostCompletion,
   resolveRequesterForChildSession: () => fallbackRequesterResolution,
 }));
-vi.mock("../registry/subagent-registry-runtime.js", () => ({
-  replaceSubagentRunAfterSteer: () => true,
+vi.mock("../registry/subagent-registry.js", () => ({
+  replaceSubagentRunAfterSteerCore: () => true,
 }));
 import { textAssistant } from "../../test-helpers/sparse-transcript.test-support.js";
 import { runSubagentAnnounceFlow } from "./subagent-announce.js";

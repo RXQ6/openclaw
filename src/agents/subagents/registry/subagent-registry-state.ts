@@ -53,7 +53,6 @@ import {
   loadSubagentRegistryFromSqlite,
   loadSubagentMaintenanceRunsFromSqlite,
   saveSubagentRegistryChangesToSqlite,
-  saveSubagentRegistryToSqlite,
 } from "./subagent-registry.store.sqlite.js";
 import type { SubagentRunMaintenanceRecord, SubagentRunRecord } from "./subagent-registry.types.js";
 import { collectSubagentSessionReadKeys } from "./subagent-session-read-scope.js";
@@ -120,11 +119,10 @@ function swarmNotification(
 
 function updateCommittedSwarmNotifications(
   runs: Map<string, SubagentRunRecord>,
-  changedRunIds?: readonly string[],
+  changedRunIds: readonly string[],
 ): SessionLifecycleEvent[] {
   const events = new Map<string, SessionLifecycleEvent>();
-  const ids = changedRunIds ?? new Set([...committedSwarmNotifications.keys(), ...runs.keys()]);
-  for (const runId of ids) {
+  for (const runId of changedRunIds) {
     const previous = committedSwarmNotifications.get(runId);
     const next = swarmNotification(runs.get(runId));
     if (previous?.signature === next?.signature) {
@@ -143,32 +141,6 @@ function updateCommittedSwarmNotifications(
     }
   }
   return [...events.values()];
-}
-
-type SubagentRegistryPersistListener = (sessionKeys?: readonly (string | undefined)[]) => void;
-
-const SUBAGENT_REGISTRY_PERSIST_LISTENERS = new Set<SubagentRegistryPersistListener>();
-
-function emitSubagentRegistryPersisted(
-  keys?: Array<string | undefined>,
-  runIds?: readonly string[],
-): void {
-  publishSubagentRunChanges(keys, runIds);
-  for (const listener of SUBAGENT_REGISTRY_PERSIST_LISTENERS) {
-    try {
-      listener(keys);
-    } catch {
-      // Persistence already succeeded; observers are best-effort.
-    }
-  }
-}
-
-/** Wake process-local readers after a registry mutation, even if persistence failed. */
-export function onSubagentRegistryPersisted(listener: SubagentRegistryPersistListener): () => void {
-  SUBAGENT_REGISTRY_PERSIST_LISTENERS.add(listener);
-  return () => {
-    SUBAGENT_REGISTRY_PERSIST_LISTENERS.delete(listener);
-  };
 }
 
 function rememberPersistedSubagentRunsSnapshot(
@@ -211,7 +183,7 @@ export function publishSubagentRunsAfterAtomicStore(
   const keys = rememberPersistedSubagentRunsSnapshot(runs, changedRunIds, { databasePath });
   const events = updateCommittedSwarmNotifications(runs, changedRunIds);
   deferredObserverEvents.push(() => {
-    emitSubagentRegistryPersisted(keys, changedRunIds);
+    publishSubagentRunChanges(keys, changedRunIds, "persistence");
     events.forEach(emitSessionLifecycleEvent);
   });
 }
@@ -323,17 +295,13 @@ export function clearSubagentRunsReadCacheForTest(): void {
 
 function persistSubagentRuns(
   runs: Map<string, SubagentRunRecord>,
-  changedRunIds: readonly string[] | undefined,
+  changedRunIds: readonly string[],
   strict: boolean,
 ): void {
   supersedePendingSubagentRegistryWrites(changedRunIds);
   let committed = false;
   try {
-    if (changedRunIds) {
-      saveSubagentRegistryChangesToSqlite(runs, changedRunIds);
-    } else {
-      saveSubagentRegistryToSqlite(runs);
-    }
+    saveSubagentRegistryChangesToSqlite(runs, changedRunIds);
     committed = true;
   } catch (error) {
     if (strict) {
@@ -346,22 +314,20 @@ function persistSubagentRuns(
   // In-process readers must observe the authoritative memory snapshot before the wake.
   const keys = rememberPersistedSubagentRunsSnapshot(runs, changedRunIds, { committed });
   const events = committed ? updateCommittedSwarmNotifications(runs, changedRunIds) : [];
-  emitSubagentRegistryPersisted(keys, changedRunIds);
+  publishSubagentRunChanges(keys, changedRunIds, "persistence");
   events.forEach(emitSessionLifecycleEvent);
 }
 
 export function persistSubagentRunsToDisk(
   runs: Map<string, SubagentRunRecord>,
-  // Undefined replaces the complete snapshot; an array applies exact row mutations.
-  changedRunIds?: readonly string[],
+  changedRunIds: readonly string[],
 ) {
   persistSubagentRuns(runs, changedRunIds, false);
 }
 
 export function persistSubagentRunsToDiskOrThrow(
   runs: Map<string, SubagentRunRecord>,
-  // Undefined replaces the complete snapshot; an array applies exact row mutations.
-  changedRunIds?: readonly string[],
+  changedRunIds: readonly string[],
 ) {
   persistSubagentRuns(runs, changedRunIds, true);
 }
@@ -378,7 +344,7 @@ export function persistSubagentRunsToDiskAsyncOrThrow(
       databasePath: options.context.admission.databasePath,
     });
     const events = updateCommittedSwarmNotifications(snapshot, runIds);
-    emitSubagentRegistryPersisted(keys, runIds);
+    publishSubagentRunChanges(keys, runIds, "persistence");
     events.forEach(emitSessionLifecycleEvent);
   });
 }
@@ -412,7 +378,7 @@ export async function restoreSubagentRunsFromDisk(params: {
       subagentRuns.commitOwnership(entry);
       added += 1;
     }
-    emitSubagentRegistryPersisted(keys);
+    publishSubagentRunChanges(keys, undefined, "persistence");
     return added;
   });
 }

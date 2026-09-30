@@ -8,11 +8,11 @@ import type { CommandLaneSnapshot } from "../../../process/command-queue.types.j
 import { runCommandWithTimeout } from "../../../process/exec.js";
 import { isLiveTestEnabled } from "../../live-test-helpers.js";
 import { createSubagentsTool } from "../../tools/subagents-tool.js";
+import { subscribeSubagentRunChanges } from "../registry/subagent-registry-publication.js";
 import {
   countPendingDescendantRuns,
   listSubagentRunsForRequester,
 } from "../registry/subagent-registry-read.js";
-import { onSubagentRegistryPersisted } from "../registry/subagent-registry-state.js";
 import {
   boundedCount,
   commandOutcomes,
@@ -630,7 +630,7 @@ describeLive("OpenAI subagent yield and operator resume stress", () => {
             | { runId: string; requestedAt: number; pendingRequests: number }
             | undefined;
           // The production persistence event observes the claim before admission draining.
-          const unsubscribe = onSubagentRegistryPersisted(() => {
+          const unsubscribe = subscribeSubagentRunChanges("persistence", () => {
             if (claimObserved) {
               return;
             }

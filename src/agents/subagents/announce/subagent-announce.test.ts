@@ -54,7 +54,7 @@ const { subagentRegistryRuntimeMock } = vi.hoisted(() => ({
     countPendingDescendantRuns: vi.fn(() => 0),
     getLatestSubagentRunByChildSessionKey: vi.fn(() => undefined),
     listSubagentRunsForRequester: vi.fn<() => SubagentRunRecord[]>(() => []),
-    replaceSubagentRunAfterSteer: vi.fn(() => true),
+    replaceSubagentRunAfterSteerCore: vi.fn(() => true),
     resolveRequesterForChildSession: vi.fn(() => null),
   },
 }));
@@ -193,7 +193,7 @@ vi.mock("./subagent-announce-delivery.js", () => ({
 }));
 
 vi.mock("../registry/subagent-registry-read.js", () => subagentRegistryRuntimeMock);
-vi.mock("../registry/subagent-registry-runtime.js", () => subagentRegistryRuntimeMock);
+vi.mock("../registry/subagent-registry.js", () => subagentRegistryRuntimeMock);
 import { defaultRuntime } from "../../../runtime.js";
 import { testing as outputTesting } from "./subagent-announce-output.test-support.js";
 import { runSubagentAnnounceFlow } from "./subagent-announce.js";
@@ -268,8 +268,8 @@ describe("subagent announce seam flow", () => {
     subagentRegistryRuntimeMock.countPendingDescendantRuns.mockReturnValue(0);
     subagentRegistryRuntimeMock.listSubagentRunsForRequester.mockReset();
     subagentRegistryRuntimeMock.listSubagentRunsForRequester.mockReturnValue([]);
-    subagentRegistryRuntimeMock.replaceSubagentRunAfterSteer.mockReset();
-    subagentRegistryRuntimeMock.replaceSubagentRunAfterSteer.mockReturnValue(true);
+    subagentRegistryRuntimeMock.replaceSubagentRunAfterSteerCore.mockReset();
+    subagentRegistryRuntimeMock.replaceSubagentRunAfterSteerCore.mockReturnValue(true);
     subagentRegistryRuntimeMock.resolveRequesterForChildSession.mockReset();
     subagentRegistryRuntimeMock.resolveRequesterForChildSession.mockReturnValue(null);
     outputTesting.setDepsForTest({

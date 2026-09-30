@@ -67,14 +67,13 @@ export function readSubagentRun(
 
 function writeSubagentRunValues(
   values: readonly BoundSubagentRunRecord[],
-  deleteRunIds?: readonly string[],
-  retainedRunIds?: readonly string[],
+  deleteRunIds: readonly string[],
 ): void {
-  if (values.length === 0 && deleteRunIds?.length === 0 && retainedRunIds === undefined) {
+  if (values.length === 0 && deleteRunIds.length === 0) {
     return;
   }
   runOpenClawStateWriteTransaction((database) =>
-    writeSubagentRunValuesInDatabase(database, values, deleteRunIds, retainedRunIds),
+    writeSubagentRunValuesInDatabase(database, values, deleteRunIds),
   );
 }
 
@@ -555,16 +554,6 @@ export function subagentRunsDurableBasisMatches(
   return (
     loadSubagentRunsForSessionsInDatabase(database, basis.sessionKeys, basis.liveTopology)
       .digest === basis.digest
-  );
-}
-
-/** Saves the complete subagent run snapshot to sqlite and prunes rows not in the snapshot. */
-export function saveSubagentRegistryToSqlite(runs: Map<string, SubagentRunRecord>): void {
-  const values = [...runs.values()].map(bindSubagentRunRecord);
-  writeSubagentRunValues(
-    values,
-    undefined,
-    values.map((row) => row.run_id),
   );
 }
 

@@ -3,6 +3,8 @@ import type { UserTurnTranscriptRecorder } from "../../../sessions/user-turn-tra
 import { sessionDeliveryChannel } from "../../../utils/delivery-context.read.js";
 import type { EmbeddedAgentQueueMessageOptions } from "../../embedded-agent-runner/run-state.js";
 import {
+  queueEmbeddedAgentMessageWithOutcomeAsync,
+  queueGuardedEmbeddedAgentMessageWithOutcomeAsync,
   resolveEmbeddedRunAbandonment,
   type EmbeddedAgentQueueMessageOutcome,
 } from "../../embedded-agent-runner/runs.js";
@@ -10,11 +12,10 @@ import { waitForAnnounceRetryDelay } from "./subagent-announce-delivery-retry.js
 import {
   getSubagentRequesterSessionActivity as resolveRequesterSessionActivity,
   loadRequesterSessionEntry,
-  queueSubagentAnnounceMessage,
   resolveQueueSettings,
 } from "./subagent-announce-delivery.runtime.js";
 
-const SOURCE_OWNER_CHANGED = Symbol("source_owner_changed");
+export const SOURCE_OWNER_CHANGED = Symbol("source_owner_changed");
 
 export { resolveRequesterSessionActivity };
 
@@ -68,7 +69,14 @@ export async function resolveActiveWakeWithRetries(
     if (isAttemptAllowed?.() === false || isSourceSessionAdmissionAllowed?.() === false) {
       return SOURCE_OWNER_CHANGED;
     }
-    const result = await queueSubagentAnnounceMessage(sessionId, message, options, canInject);
+    const result = canInject
+      ? await queueGuardedEmbeddedAgentMessageWithOutcomeAsync(
+          sessionId,
+          message,
+          options,
+          canInject,
+        )
+      : await queueEmbeddedAgentMessageWithOutcomeAsync(sessionId, message, options);
     return isAttemptAllowed?.() === false ? SOURCE_OWNER_CHANGED : result;
   };
   let outcome = await attemptWake(currentOptions);
@@ -226,10 +234,4 @@ export async function maybeSteerSubagentAnnounce(params: {
     loadRequesterSessionEntry(params.requesterSessionKey, params.requesterAgentId),
   );
   return { status: currentActivity.isActive ? "dropped" : "none" };
-}
-
-export function isSourceOwnerChangedWake(
-  outcome: EmbeddedAgentQueueMessageOutcome | typeof SOURCE_OWNER_CHANGED,
-): outcome is typeof SOURCE_OWNER_CHANGED {
-  return outcome === SOURCE_OWNER_CHANGED;
 }
