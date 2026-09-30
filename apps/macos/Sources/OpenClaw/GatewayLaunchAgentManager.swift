@@ -476,17 +476,11 @@ extension GatewayLaunchAgentManager {
         }
     }
 
-    static func serviceIsConfirmedAbsent(installedCLI: InstalledServiceCLI?) async throws -> Bool {
-        guard let service = try await self.readDaemonService(installedCLI: installedCLI) else { return false }
-        return service["loaded"] as? Bool == false && (service["command"] == nil || service["command"] is NSNull)
-    }
-
-    private static func readDaemonService(installedCLI: InstalledServiceCLI? = nil) async throws -> [String: Any]? {
+    private static func readDaemonService() async throws -> [String: Any]? {
         let result = await self.runDaemonCommandResult(
             ["status", "--json", "--no-probe"],
             timeout: 15,
-            quiet: true,
-            installedCLI: installedCLI)
+            quiet: true)
         guard result.success else {
             throw ServiceInspectionError(message: result.message ?? "Gateway service inspection failed")
         }
