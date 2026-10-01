@@ -227,7 +227,11 @@ describe("update-cli", () => {
         version: "2026.9.1",
       },
     });
-    vi.spyOn(postUpdate, "finishUpdate").mockRejectedValueOnce(new UpdateCommandFailure(result));
+    const failure = new UpdateCommandFailure(result);
+    vi.spyOn(postUpdate, "finishUpdate").mockImplementationOnce(async (_params, options) => {
+      await options?.beforeFinalization?.();
+      throw failure;
+    });
     mockOwnedGitService();
     mockGitUpdateAfterMutation(makeOkUpdateResult({ root: process.cwd() }));
 
@@ -272,8 +276,10 @@ describe("update-cli", () => {
     "records ordered update phases only after buffered receipt settlement (%s)",
     async (outcome) => {
       const json = false;
-      const postUpdate = await import("./update-cli/update-command-post-update.js");
-      const finish = vi.spyOn(postUpdate, "finishUpdate");
+      const prepareService = vi.spyOn(
+        await import("./update-cli/update-command-post-update-maintenance.js"),
+        "preparePostUpdateService",
+      );
       const ledgerReads = vi.spyOn(await import("../infra/update-run-ledger.js"), "getUpdateRun");
       const inspectSchemas = expectDefined(
         stateSchemaVersions.getMockImplementation(),
@@ -388,7 +394,7 @@ describe("update-cli", () => {
         ]);
         expect(observedActivation).toBe(true);
         expect(receiptCalls).toBe(1);
-        expect(finish).not.toHaveBeenCalled();
+        expect(prepareService).not.toHaveBeenCalled();
         expect(freshRestartCalls()).toHaveLength(0);
         expect(runDaemonRestart).not.toHaveBeenCalled();
         const runId = expectDefined(receiptRunId, "buffered receipt run");
@@ -409,7 +415,7 @@ describe("update-cli", () => {
           expect(collectNestedErrorCandidates(cliError)).toContain(receiptError);
           expect(hasCommandProcessCleanupError(receiptError)).toBe(true);
           expect(collectNestedErrorCandidates(receiptError)).toContain(unknown);
-          expect(finish).not.toHaveBeenCalled();
+          expect(prepareService).not.toHaveBeenCalled();
           expect(freshRestartCalls()).toHaveLength(0);
           expect(runDaemonRestart).not.toHaveBeenCalled();
           expect(serviceRestart).not.toHaveBeenCalled();
@@ -430,6 +436,7 @@ describe("update-cli", () => {
           });
         }
         expect(observedActivation).toBe(true);
+        expect(prepareService).toHaveBeenCalledOnce();
         expect(freshRestartCalls()).toHaveLength(1);
         expect(runDaemonRestart).not.toHaveBeenCalled();
         const run = expectDefined(listUpdateRuns({ limit: 1 })[0], "admitted update run");
@@ -463,7 +470,7 @@ describe("update-cli", () => {
         await settled;
         writer.mockRestore();
         worker.mockRestore();
-        finish.mockRestore();
+        prepareService.mockRestore();
       }
     },
   );

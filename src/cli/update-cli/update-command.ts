@@ -621,10 +621,16 @@ async function runResolvedUpdate(
           continued.result.steps.at(-1)?.stderrTail ?? undefined,
         );
       }
-      await progress.flushLedgerWrites();
-      recoveryState.ledgerHandoffOwned = false;
-      presentation.resume();
-      await finishUpdate({ ...finalization, result: continued.result });
+      await finishUpdate(
+        { ...finalization, result: continued.result },
+        {
+          beforeFinalization: async () => {
+            await progress.flushLedgerWrites();
+            recoveryState.ledgerHandoffOwned = false;
+            presentation.resume();
+          },
+        },
+      );
       return;
     }
     recoveryState.ledgerHandoffCompleted = true;
@@ -636,7 +642,10 @@ async function runResolvedUpdate(
     }
     return;
   }
-  await progress.flushLedgerWrites();
-  presentation.resume();
-  await finishUpdate(finalization);
+  await finishUpdate(finalization, {
+    beforeFinalization: async () => {
+      await progress.flushLedgerWrites();
+      presentation.resume();
+    },
+  });
 }

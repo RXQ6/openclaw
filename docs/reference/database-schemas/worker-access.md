@@ -110,8 +110,9 @@ restart policy, and older-driver behavior are unchanged.
 
 Step progress records start, completion, and warning receipts through that same
 worker and original execution guard. Commands and display wait for the committed
-row. A refused forward receipt does not revoke owned temporary Git cleanup;
-uncertain writes still propagate, preserving any original command failure.
+row. A settled receipt refusal does not bypass owned rollback or temporary Git
+cleanup; recovery still requires current authority. Uncertain writes retain their
+settlement boundary, preserving any original command failure.
 After schema handoff, the old process buffers plain step data until the compatible
 owner can flush it before finalization. Only confirmed receipts leave that buffer;
 an uncertain flush cannot be replayed. Stored formats and warning ordering are
