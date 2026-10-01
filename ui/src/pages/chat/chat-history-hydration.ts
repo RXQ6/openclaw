@@ -11,7 +11,7 @@ import {
 } from "../../lib/gateway-errors.ts";
 import { isSessionRunActive } from "../../lib/session-run-state.ts";
 import { requestSharedHistory } from "./chat-history-request.ts";
-import { formatChatHistoryLoadError } from "./chat-history-retry.ts";
+import { formatChatHistoryLoadError, isRetryableChatReadError } from "./chat-history-retry.ts";
 import {
   type ObservedChatHistoryResult,
   isHistoryCursor,
@@ -452,7 +452,9 @@ export async function hydrateChatHistory(
       message: missingReadScope
         ? formatMissingOperatorReadScopeMessage("existing chat history")
         : formatChatHistoryLoadError(err),
-      retryable: err instanceof GatewayRequestError && err.retryable,
+      retryable:
+        isRetryableChatReadError(err, method) ||
+        (err instanceof GatewayRequestError && err.retryable),
     });
     state.requestUpdate?.();
   } finally {

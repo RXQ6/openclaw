@@ -50,7 +50,8 @@ that work remains under its original storage owner. Live state replaces cached
 roster data on connect, and chat resumes from its saved transcript cursor. The
 first chat request waits up to 300 ms for stored history before falling back to
 a live read. Agent switches and stale asynchronous reads retain their own
-identity checks.
+identity checks. Agent pickers and the agent directory wait for a live roster;
+stored agent lists cannot establish the current role’s discovery permissions.
 
 Boot and roster records retain the existing 30-day expiry, and transcripts keep
 their bounded cache limits. Clearing site data removes local recovery data.
@@ -205,6 +206,8 @@ save clears the previous error.
 Page and sidebar refreshes that fail because the Gateway is suspending, restarting, starting,
 or unreachable show no inline error: the footer connection indicator owns that state. Each panel
 keeps its last data and refreshes automatically once the Gateway accepts work again.
+Agent pickers and the agent directory clear their roster while reconnecting and
+wait for a fresh authorized list, including when the same user's role has changed.
 Established conversation names remain visible in the browser tab and chat headings,
 including split views, while reconnecting to the same Gateway and account. Other refresh
 failures remain visible inline with their message and are retried automatically when the Gateway

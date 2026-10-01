@@ -351,7 +351,7 @@ describe("stored outbox summaries", () => {
     const changed = vi.fn();
     const unsubscribe = reader.subscribe(changed);
     const gatewayUrl = "ws://gateway.test/control";
-    const state = { settings: { gatewayUrl } };
+    const state = { settings: { gatewayUrl }, client: null, connected: false };
     const storageKey = `openclaw.control.chatComposer.v4:${encodeURIComponent(gatewayUrl)}`;
     sessionStorage.setItem(
       storageKey,
@@ -361,7 +361,7 @@ describe("stored outbox summaries", () => {
     const first = readProjectedOutboxStore(sessionStorage, target);
     expect(readProjectedOutboxStore(sessionStorage, target)).toBe(first);
     const summary = reader.read(state);
-    expect(reader.read({ settings: { gatewayUrl } })).toBe(summary);
+    expect(reader.read({ settings: { gatewayUrl }, client: null, connected: false })).toBe(summary);
 
     sessionStorage.setItem(
       storageKey,
@@ -382,7 +382,7 @@ describe("stored outbox summaries", () => {
     expect(refreshed.hasSessionDraft("agent:main:summary")).toBe(true);
     expect(
       reader
-        .read({ settings: { gatewayUrl: "ws://other.test" } })
+        .read({ settings: { gatewayUrl: "ws://other.test" }, client: null, connected: false })
         .hasSessionDraft("agent:main:summary"),
     ).toBe(false);
     expect(reader.read(state).hasSessionDraft("agent:main:summary")).toBe(true);
@@ -776,6 +776,8 @@ describe("stored outbox summaries", () => {
     );
 
     const summary = createStoredChatOutboxReader().read({
+      client: null,
+      connected: false,
       settings: { gatewayUrl },
       assistantAgentId: "previous",
       agentsList: { defaultId: "work", mainKey: "main" },
@@ -807,6 +809,8 @@ describe("stored outbox summaries", () => {
 
     expect(
       createStoredChatOutboxReader().read({
+        client: null,
+        connected: false,
         settings: { gatewayUrl },
         agentsList: { defaultId: "work", mainKey: "workspace" },
       }).total,

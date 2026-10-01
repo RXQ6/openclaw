@@ -73,7 +73,7 @@ export function subscribeWarmBootConnection(
           owner,
           snapshot.selfUser?.id ?? pendingBootProfileId,
         ) ||
-        (replacement && !owner && pendingBootProfileId === undefined)
+        (!owner && pendingBootProfileId === undefined)
       ) {
         return;
       }
@@ -125,11 +125,18 @@ export function subscribeWarmBootConnection(
   };
 }
 
-export function subscribeBootRecordPersistence({
-  gateway,
-  agents,
-  sessions,
-}: Pick<ApplicationContext, "gateway" | "agents" | "sessions">): () => void {
+export function subscribeBootRecordPersistence(
+  { gateway, agents, sessions }: Pick<ApplicationContext, "gateway" | "agents" | "sessions">,
+  initialRecord: BootRecord | null,
+) {
+  let routingDefaults = initialRecord
+    ? {
+        gatewayScope: initialRecord.scope,
+        recoveryScope: initialRecord.recoveryScope,
+        mainKey: initialRecord.agents.mainKey,
+        scope: initialRecord.agents.scope,
+      }
+    : null;
   const persistLiveBootRecord = () => {
     if (gateway.snapshot.phase !== "connected" || gateway.snapshot.client?.offlineRecoveryRetired) {
       return;
@@ -141,7 +148,17 @@ export function subscribeBootRecordPersistence({
       return;
     }
     const agentsList = agents.state.agentsList;
-    if (agentsList && !agents.state.agentsListCached && sessions.groupsStatus() === "ready") {
+    if (agentsList) {
+      // Refresh this narrow projection as soon as discovery lands, independently
+      // of group persistence. A later disconnect must not revive startup defaults.
+      routingDefaults = {
+        gatewayScope: scope,
+        recoveryScope: gateway.snapshot.hello?.auth?.recoveryScope,
+        mainKey: agentsList.mainKey,
+        scope: agentsList.scope,
+      };
+    }
+    if (agentsList && sessions.groupsStatus() === "ready") {
       persistBootRecord({
         version: 2,
         recoveryScope: gateway.snapshot.client?.recoveryScopeReady
@@ -160,5 +177,16 @@ export function subscribeBootRecordPersistence({
   const stops = [gateway, agents, sessions].map((capability) =>
     capability.subscribe(persistLiveBootRecord),
   );
-  return () => stops.forEach((stop) => stop());
+  return {
+    readSessionDefaults: () => {
+      const account = readOfflineStorageScope({ client: gateway.snapshot.client });
+      return gateway.snapshot.phase !== "connected" &&
+        account &&
+        routingDefaults?.recoveryScope === account &&
+        routingDefaults.gatewayScope === gatewayCredentialScope(gateway.connection.gatewayUrl)
+        ? { mainKey: routingDefaults.mainKey, scope: routingDefaults.scope }
+        : null;
+    },
+    dispose: () => stops.forEach((stop) => stop()),
+  };
 }

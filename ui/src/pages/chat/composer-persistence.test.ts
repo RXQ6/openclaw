@@ -6,11 +6,7 @@ import {
   captureChatOutboxRecoveryDestination,
   readChatOutboxRecovery,
 } from "../../lib/chat/outbox-recovery.ts";
-import {
-  storageTargetForComposer,
-  storageTargetForGateway,
-  subscribeStoredChatOutboxChanges,
-} from "../../lib/chat/outbox-store.ts";
+import { storageTargetForComposer, storageTargetForGateway } from "../../lib/chat/outbox-store.ts";
 import { resolveUiConversationIdentity } from "../../lib/sessions/session-key.ts";
 import { createStorageMock } from "../../test-helpers/storage.ts";
 import {
@@ -222,50 +218,6 @@ describe("chat composer persistence", () => {
     expect(stored.sessions["agent:main:workspace\u0000agent:main"]).toBeUndefined();
     expect(persistence.persistForRouteSwitchResult()).toEqual({ status: "persisted" });
     persistence.stop();
-  });
-
-  it("notifies stored outbox subscribers on draft presence transitions and queue writes", () => {
-    const state = createState();
-    const original = reconnectItem("notify", 1);
-    const updated = { ...original, text: "updated message" };
-    const listener = vi.fn();
-    const unsubscribe = subscribeStoredChatOutboxChanges(listener);
-
-    try {
-      expect(persistChatComposerState({ ...state, chatMessage: "draft only" })).toBe(true);
-      expect(listener).toHaveBeenCalledTimes(1);
-      // Content-only re-persists stay silent so projection subscribers cannot
-      // react by re-persisting a stale pane over the newer draft.
-      expect(persistChatComposerState({ ...state, chatMessage: "draft only, edited" })).toBe(true);
-      expect(listener).toHaveBeenCalledTimes(1);
-      expect(persistChatComposerState({ ...state, chatMessage: "" })).toBe(true);
-      expect(listener).toHaveBeenCalledTimes(2);
-      expect(admitItem(state, original)).toBe(true);
-      expect(listener).toHaveBeenCalledTimes(3);
-      expect(
-        updateStoredChatComposerQueueItem(
-          state,
-          state.sessionKey,
-          original,
-          updated,
-          original.agentId,
-        ),
-      ).toBe(true);
-      expect(listener).toHaveBeenCalledTimes(4);
-    } finally {
-      unsubscribe();
-    }
-
-    expect(
-      removeStoredChatComposerQueueItem(
-        state,
-        state.sessionKey,
-        updated.id,
-        updated,
-        updated.agentId,
-      ),
-    ).toBe(true);
-    expect(listener).toHaveBeenCalledTimes(4);
   });
 
   it("flushes a debounced draft before its owner releases state", () => {

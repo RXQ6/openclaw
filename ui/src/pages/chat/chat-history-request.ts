@@ -1,4 +1,7 @@
-import { DEFAULT_GATEWAY_REQUEST_TIMEOUT_MS } from "@openclaw/gateway-client/browser";
+import {
+  DEFAULT_GATEWAY_REQUEST_TIMEOUT_MS,
+  GatewayProtocolRequestTimeoutError,
+} from "@openclaw/gateway-client/browser";
 import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 import { sleepWithAbort } from "@openclaw/retry";
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
@@ -263,7 +266,12 @@ export function requestSharedHistory(
   const deadline = new AbortController();
   const timeout = setTimeout(
     () => {
-      deadline.abort(new Error(t("chat.historyRequestTimedOut")));
+      deadline.abort(
+        new GatewayProtocolRequestTimeoutError(
+          { method, timeoutMs: CHAT_HISTORY_RETRY_WINDOW_MS, requestSent: true },
+          t("chat.historyRequestTimedOut"),
+        ),
+      );
     },
     Math.max(0, consumer.retryDeadlineMs - Date.now()),
   );

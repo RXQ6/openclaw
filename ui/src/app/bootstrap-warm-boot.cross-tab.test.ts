@@ -103,25 +103,28 @@ it.each(["local", "external"])(
     }
   },
 );
-it("does not interrupt a cold concurrent connection or admit the peer's identity", () => {
-  const { gateway } = createGatewayStoreTestStore();
-  gateway.connect();
-  const rejected = vi.fn();
-  const stop = subscribeWarmBootConnection(gateway, undefined, rejected);
-  const scope = gatewayCredentialScope(gateway.connection.gatewayUrl);
-  try {
-    window.dispatchEvent(
-      new StorageEvent("storage", {
-        key: "openclaw.control.bootRecord.v1:" + scope,
-        oldValue: null,
-        newValue: JSON.stringify(record(scope)),
-      }),
-    );
-    expect(gateway.snapshot.phase).toBe("connecting");
-    expect(gateway.snapshot.hello).toBeNull();
-    expect(rejected).not.toHaveBeenCalled();
-  } finally {
-    stop();
-    gateway.stop();
-  }
-});
+it.each(["save", "remove", "clear-all"])(
+  "does not interrupt a cold concurrent connection on peer %s",
+  (operation) => {
+    const { gateway } = createGatewayStoreTestStore();
+    gateway.connect();
+    const rejected = vi.fn();
+    const stop = subscribeWarmBootConnection(gateway, undefined, rejected);
+    const scope = gatewayCredentialScope(gateway.connection.gatewayUrl);
+    try {
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: operation === "clear-all" ? null : "openclaw.control.bootRecord.v1:" + scope,
+          oldValue: operation === "save" ? null : JSON.stringify(record(scope)),
+          newValue: operation === "save" ? JSON.stringify(record(scope)) : null,
+        }),
+      );
+      expect(gateway.snapshot.phase).toBe("connecting");
+      expect(gateway.snapshot.hello).toBeNull();
+      expect(rejected).not.toHaveBeenCalled();
+    } finally {
+      stop();
+      gateway.stop();
+    }
+  },
+);

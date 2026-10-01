@@ -209,10 +209,7 @@ export function bootstrapApplication(): ApplicationRuntime {
     },
     bootRecord?.recoveryScope,
   );
-  const agents = createAgentCapability(gateway, {
-    cachedList: bootRecord?.agents ?? null,
-    cachedProfileId: bootRecord?.profileId ?? null,
-  });
+  const agents = createAgentCapability(gateway);
   const startupLifecycle = createStartupLifecycle();
   const parsedInitialSession = parseAgentSessionKey(settings.sessionKey);
   const deferInitialLocationUntilGateway = firstRunDefaultLanding && !parsedInitialSession;
@@ -302,7 +299,10 @@ export function bootstrapApplication(): ApplicationRuntime {
     bootRecord,
     connectionBootstrap,
   });
-  const stopBootRecordPersistence = subscribeBootRecordPersistence({ gateway, agents, sessions });
+  const bootRecordPersistence = subscribeBootRecordPersistence(
+    { gateway, agents, sessions },
+    bootRecord,
+  );
   const runtimeConfig = createRuntimeConfigCapability(gateway);
   const overlays = createApplicationOverlays(gateway, {
     connectionBootstrap,
@@ -499,6 +499,11 @@ export function bootstrapApplication(): ApplicationRuntime {
     gateway,
     connectionBootstrap,
     agents,
+    get offlineSessionDefaults() {
+      return warmBoot && gateway.connectionRevision === warmBootConnectionRevision
+        ? bootRecordPersistence.readSessionDefaults()
+        : null;
+    },
     agentIdentity,
     agentSelection,
     settingsAgentSelection,
@@ -658,7 +663,7 @@ export function bootstrapApplication(): ApplicationRuntime {
       stopBrowserAuthRecovery();
       startupLifecycle.stop();
       stopWarmBootConnection();
-      stopBootRecordPersistence();
+      bootRecordPersistence.dispose();
       stopPostConnect();
       stopForegroundBootstrap();
       connectionBootstrap.reset();
