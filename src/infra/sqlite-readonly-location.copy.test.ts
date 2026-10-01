@@ -5,9 +5,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { requireNodeSqlite } from "./node-sqlite.js";
 import {
+  inspectSqliteSchemaHeaderInProcess,
   prepareSqliteReadOnlyLocationInProcess,
   prepareSqliteReadOnlyLocationSyncInProcess,
 } from "./sqlite-readonly-location.js";
+import { MAX_SNAPSHOT_ATTEMPTS } from "./sqlite-snapshot-policy.js";
 
 const MIB = 1024 * 1024;
 const tempDirs = useAutoCleanupTempDirTracker((cleanup) => {
@@ -138,6 +140,36 @@ function interceptSourceReads(
 }
 
 describe("stable read-only snapshot copies", () => {
+  it("rechecks journal state when an inactive WAL family gains sidecars during schema inspection", async () => {
+    const fixture = createFixture(Buffer.alloc(0));
+    const sqlite = requireNodeSqlite();
+    const seed = new sqlite.DatabaseSync(fixture.sourcePath);
+    seed.exec("PRAGMA journal_mode=WAL; PRAGMA user_version=7;");
+    seed.close();
+    const activatedPath = path.join(fixture.sourceRoot, "activated.sqlite");
+    const activated = new sqlite.DatabaseSync(activatedPath);
+    activated.exec("PRAGMA journal_mode=WAL; PRAGMA user_version=8;");
+    const family = ["", "-wal", "-shm"].map((suffix) => ({
+      suffix,
+      bytes: fs.readFileSync(activatedPath + suffix),
+    }));
+    activated.close();
+    const injected = afterFirstCopy(() => {
+      for (const { suffix, bytes } of family) {
+        fs.writeFileSync(fixture.sourcePath + suffix, bytes);
+      }
+    });
+
+    await expect(
+      inspectSqliteSchemaHeaderInProcess(fixture.sourcePath, fixture.stagingRoot),
+    ).resolves.toMatchObject({ userVersion: 8 });
+    expect(injected()).toBe(true);
+    expect(fs.readdirSync(fixture.stagingRoot)).toEqual([]);
+    for (const { suffix, bytes } of family.filter((file) => file.suffix !== "-shm")) {
+      expect(fs.readFileSync(fixture.sourcePath + suffix)).toEqual(bytes);
+    }
+  });
+
   it.each([512])("preserves a malformed catalog beside a cold %i-byte journal", (bytes) => {
     const fixture = createFixture(Buffer.alloc(0));
     const sqlite = requireNodeSqlite();
@@ -451,7 +483,7 @@ describe("stable read-only snapshot copies", () => {
     }
   });
 
-  it("reports source replacement after one acquisition and removes its incomplete copy", async () => {
+  it("bounds retries for repeated source replacement and removes every incomplete copy", async () => {
     const fixture = createFixture(Buffer.alloc(0));
     let replacements = 0;
     afterPrivateCopy(fixture.stagingRoot, () => {
@@ -462,7 +494,32 @@ describe("stable read-only snapshot copies", () => {
     await expect(
       prepareSqliteReadOnlyLocationInProcess(fixture.sourcePath, fixture.stagingRoot),
     ).rejects.toThrow("SQLite source changed while copying");
-    expect(replacements).toBe(1);
+    expect(replacements).toBe(MAX_SNAPSHOT_ATTEMPTS);
+    expect(fs.readdirSync(fixture.stagingRoot)).toEqual([]);
+  });
+
+  it.each(["cancel", "io-error"])("does not retry a snapshot after %s", async (failure) => {
+    const fixture = createFixture(Buffer.alloc(0));
+    const controller = new AbortController();
+    const error = new Error("inspection terminated");
+    let copies = 0;
+    afterPrivateCopy(fixture.stagingRoot, () => {
+      copies += 1;
+      if (failure === "io-error") {
+        throw error;
+      }
+      controller.abort(error);
+      fs.renameSync(fixture.sourcePath, `${fixture.sourcePath}.displaced`);
+      fs.writeFileSync(fixture.sourcePath, "");
+    });
+    await expect(
+      prepareSqliteReadOnlyLocationInProcess(
+        fixture.sourcePath,
+        fixture.stagingRoot,
+        controller.signal,
+      ),
+    ).rejects.toBe(error);
+    expect(copies).toBe(1);
     expect(fs.readdirSync(fixture.stagingRoot)).toEqual([]);
   });
 
