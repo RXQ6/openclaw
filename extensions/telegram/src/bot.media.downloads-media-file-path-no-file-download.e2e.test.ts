@@ -178,8 +178,6 @@ describe("telegram media groups", () => {
   });
 
   const MEDIA_GROUP_TEST_TIMEOUT_MS = process.platform === "win32" ? 45_000 : 20_000;
-  const MEDIA_GROUP_FLUSH_MS = TELEGRAM_TEST_TIMINGS.mediaGroupFlushMs + 40;
-  const MEDIA_GROUP_WAIT_TIMEOUT_MS = Math.max(2_000, MEDIA_GROUP_FLUSH_MS * 10);
 
   it(
     "preserves captions and a later mention from every message in a forum album",
@@ -202,6 +200,8 @@ describe("telegram media groups", () => {
       })) as typeof telegramBotDepsForTest.getRuntimeConfig;
       const { handler, replySpy } = await createBotHandlerWithOptions({});
       const fetchSpy = mockTelegramPngDownload();
+      const setTimeoutSpy = holdTelegramMediaTimeouts(TELEGRAM_TEST_TIMINGS.mediaGroupFlushMs);
+      const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
       const baseMessage = {
         chat: { id: -10042, type: "supergroup" as const, is_forum: true },
         from: { id: 777, is_bot: false, first_name: "Ada" },
@@ -239,13 +239,26 @@ describe("telegram media groups", () => {
           }),
         ]);
 
-        await vi.waitFor(() => expect(replySpy).toHaveBeenCalledTimes(1), {
-          timeout: MEDIA_GROUP_WAIT_TIMEOUT_MS,
-          interval: 2,
+        expect(replySpy).not.toHaveBeenCalled();
+        await flushActiveScheduledTimersForDelay({
+          setTimeoutSpy,
+          clearTimeoutSpy,
+          delayMs: TELEGRAM_TEST_TIMINGS.mediaGroupFlushMs,
+          expectedCount: 1,
         });
+        await vi.waitFor(() => expect(replySpy).toHaveBeenCalledTimes(1));
         expect(replyPayload(replySpy).Body).toContain("First album details 💙");
         expect(replyPayload(replySpy).Body).toContain(laterCaption);
       } finally {
+        for (const timer of resolveActiveScheduledTimersForDelay(
+          setTimeoutSpy,
+          clearTimeoutSpy,
+          TELEGRAM_TEST_TIMINGS.mediaGroupFlushMs,
+        )) {
+          clearTimeout(timer.handle);
+        }
+        setTimeoutSpy.mockRestore();
+        clearTimeoutSpy.mockRestore();
         telegramBotDepsForTest.getRuntimeConfig = originalLoadConfig;
         fetchSpy.mockRestore();
       }
