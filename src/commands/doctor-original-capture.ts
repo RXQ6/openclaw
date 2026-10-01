@@ -58,7 +58,8 @@ export async function preserveDoctorOriginalState(params: {
       );
       return;
     }
-    if (!params.root) {
+    const installRoot = params.root;
+    if (!installRoot) {
       throw new Error("The installation could not be identified for the pre-repair capture.");
     }
     const driver = readUpdateRunDriver();
@@ -75,7 +76,7 @@ export async function preserveDoctorOriginalState(params: {
       () =>
         captureUpdateRecoveryBaseline({
           runId: `doctor-${randomUUID()}`,
-          installRoot: params.root,
+          installRoot,
           env: params.env,
           drivers: [driver],
           assertCurrent,
