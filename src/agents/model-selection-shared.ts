@@ -37,6 +37,7 @@ import {
   normalizeModelRef,
   normalizeProviderId,
 } from "./model-ref-shared.js";
+import { aliasRewritesProvider, parsePrimaryBeforeAlias } from "./model-selection-alias-guard.js";
 import { findNormalizedProviderValue, parseModelRef } from "./model-selection-normalize.js";
 import { createModelCatalogIdentityKeyResolver } from "./openai-model-routes.js";
 import { readUtilityModelSetting } from "./utility-model-setting.js";
@@ -103,12 +104,6 @@ type ExactConfiguredProviderRefParts = {
 
 function providerAliasKey(provider: string, alias: string): string {
   return `${normalizeProviderId(provider)}/${normalizeLowercaseStringOrEmpty(alias)}`;
-}
-
-function hasSlashFormModelRef(raw: string): boolean {
-  const trimmed = raw.trim();
-  const slash = trimmed.indexOf("/");
-  return slash > 0 && slash < trimmed.length - 1;
 }
 
 function resolveManifestPluginsForModelIdNormalization(params: {
@@ -607,7 +602,7 @@ export function resolveModelRefFromString(
   }
   const aliasKey = normalizeLowercaseStringOrEmpty(model);
   const aliasMatch = params.aliasIndex?.byAlias.get(aliasKey);
-  if (aliasMatch) {
+  if (aliasMatch && !aliasRewritesProvider(model, aliasMatch.ref, params)) {
     return { ref: aliasMatch.ref, alias: aliasMatch.alias };
   }
   const slash = model.indexOf("/");
@@ -723,11 +718,7 @@ export function resolveConfiguredModelRef(
     }
     const aliasCandidate = profileStripped ? undefined : exactAliasCandidate;
     const manifestPlugins = manifestPluginContext.peek();
-    if (
-      aliasCandidate &&
-      hasSlashFormModelRef(primaryWithoutProfile) &&
-      !hasSlashFormModelRef(aliasCandidate.keyRaw)
-    ) {
+    if (aliasCandidate && parsePrimaryBeforeAlias(primaryWithoutProfile, aliasCandidate, params)) {
       const primaryRef = parseModelRefWithCompatAlias({
         ...params,
         raw: primaryWithoutProfile,
