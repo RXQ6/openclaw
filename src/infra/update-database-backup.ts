@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { sameFileIdentity } from "@openclaw/fs-safe/advanced";
 import { z } from "zod";
+import type { DoctorRehearsalDatabaseCoverage } from "../commands/doctor-rehearsal-databases.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { resolvePathViaExistingAncestorSync } from "./boundary-path.js";
 import {
@@ -13,6 +14,7 @@ import { formatDiskSpaceBytes, tryReadDiskSpace } from "./disk-space.js";
 import { formatErrorMessageWithCode } from "./errors.js";
 import { hasNodeErrorCode } from "./path-guards.js";
 import { isSqliteSnapshotFile } from "./sqlite-file-header.js";
+import { resolveSqliteDatabaseFilePaths } from "./sqlite-files.js";
 import { createPrivateSqliteDirectory } from "./sqlite-private-directory.js";
 import { retainSnapshotWork } from "./sqlite-readonly-location-cleanup.js";
 import { measureUpdateStateFiles } from "./update-candidate-io.js";
@@ -155,13 +157,21 @@ async function canonicalDatabaseInventory(
   includeOwners: boolean,
   additionalPaths: readonly string[] = [],
   additionalFiles: readonly string[] = [],
+  excludedDatabasePaths: readonly string[] = [],
 ) {
   const present = new Set<string>();
   const missing = new Set<string>();
   const owners = new Map<string, NonNullable<UpdateDatabaseBackup["databaseOwners"]>[number]>();
-  const selectedPaths = new Set(additionalPaths.map((file) => path.resolve(file)));
+  const excluded = new Set(excludedDatabasePaths.flatMap(resolveSqliteDatabaseFilePaths));
+  const isExcluded = (file: string) => excluded.has(resolvePathViaExistingAncestorSync(file));
+  const selectedPaths = new Set(
+    additionalPaths.filter((file) => !isExcluded(file)).map((file) => path.resolve(file)),
+  );
   // Header readers close only in this backup child, outside the updater's SQLite lock lifetime.
   for (const file of additionalFiles) {
+    if (isExcluded(file)) {
+      continue;
+    }
     const resolved = path.resolve(file);
     if (!selectedPaths.has(resolved) && (await isSqliteSnapshotFile(resolved))) {
       selectedPaths.add(resolved);
@@ -173,6 +183,9 @@ async function canonicalDatabaseInventory(
   ];
   for (const database of sources) {
     for (const spelling of database.spellings) {
+      if (isExcluded(spelling)) {
+        continue;
+      }
       let canonical: string;
       try {
         canonical = await fs.realpath(spelling);
@@ -203,7 +216,11 @@ async function canonicalDatabaseInventory(
   return {
     present: [...present].toSorted(),
     missing: [...missing].toSorted(),
-    sourcePaths: [...new Set(sources.flatMap((database) => database.spellings))].toSorted(),
+    sourcePaths: [
+      ...new Set(
+        sources.flatMap((database) => database.spellings).filter((file) => !isExcluded(file)),
+      ),
+    ].toSorted(),
     databaseOwners: includeOwners
       ? [...owners]
           .toSorted(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
@@ -217,6 +234,8 @@ export async function createUpdateDatabaseBackupInProcess(
   input: BackupInput & {
     stagingRoot: string;
     inspectionPlan: InspectionPlan;
+    /** Exact families admitted by the owning Doctor before launching this backup child. */
+    excludedDatabasePaths?: readonly string[];
     onProgress?: (progress: UpdateStateInspectionProgress) => void;
   },
 ): Promise<UpdateDatabaseBackup> {
@@ -231,6 +250,7 @@ export async function createUpdateDatabaseBackupInProcess(
     includeOwners,
     input.additionalPaths,
     input.additionalFiles,
+    input.excludedDatabasePaths,
   );
   const identities = await inspectRestorableDatabaseFiles(inventory.present);
   const warnings = await checkDatabaseBackupSpace(directory, inventory.present);
@@ -292,6 +312,7 @@ export async function createUpdateDatabaseBackupInProcess(
     includeOwners,
     input.additionalPaths,
     input.additionalFiles,
+    input.excludedDatabasePaths,
   );
   if (JSON.stringify(current) !== JSON.stringify(inventory)) {
     throw new Error("Update database inventory changed during backup; retry after writers stop.");
@@ -313,11 +334,13 @@ export async function createUpdateDatabaseBackup({
   nodeRunner = process.execPath,
   timeoutMs,
   signal: callerSignal,
+  rehearsal,
   ...input
 }: BackupInput & {
   nodeRunner?: string;
   timeoutMs?: number;
   signal?: AbortSignal;
+  rehearsal?: DoctorRehearsalDatabaseCoverage;
 }): Promise<UpdateDatabaseBackup> {
   const controller = new AbortController();
   const additionalPaths = input.additionalPaths?.map((file) => path.resolve(file));
@@ -351,19 +374,26 @@ export async function createUpdateDatabaseBackup({
         }),
         UpdateStateSchemaInspectionPlanSchema,
       );
+      rehearsal?.assertCurrent();
+      const excludedDatabasePaths = rehearsal?.admit(
+        inspectionPlan.files.flatMap(([, database]) => database.spellings),
+      );
+      const capturedInput = { ...workerInput, excludedDatabasePaths };
       const files = [
         ...inspectionPlan.files.flatMap(([, database]) => database.spellings),
         ...(additionalPaths ?? []),
         ...(additionalFiles ?? []),
-      ];
+      ].filter((file) => !rehearsal?.excludes(file));
+      rehearsal?.assertCurrent();
       const backup = parseUpdateStateInspectionWorker(
         await runUpdateStateInspectionWorker({
           ...worker,
-          input: { ...workerInput, mode: "database-backup", inspectionPlan },
+          input: { ...capturedInput, mode: "database-backup", inspectionPlan },
           databases: await readUpdateStateDatabaseSizes(files, worker),
         }),
         UpdateDatabaseBackupSchema,
       );
+      rehearsal?.assertCurrent();
       if (!sameFileIdentity(identity, await fs.lstat(directory))) {
         throw new Error(`Database backup directory changed during capture: ${directory}.`);
       }
