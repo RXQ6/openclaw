@@ -9,6 +9,7 @@ import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import JSON5 from "json5";
 import type { DummyRuleMap, OxlintConfig } from "oxlint";
+import { ensureKyselyTypes } from "./generate-kysely-types.mts";
 import { limitsAreAdvisory, reportLimitViolations } from "./lib/check-limits.mts";
 import { parseStaticDiagnostics } from "./lib/ci-static-check-evidence.mjs";
 import { isDirectRunUrl } from "./lib/direct-run.mjs";
@@ -660,6 +661,10 @@ export async function runOxlint(
   }
 
   const run = async (ownedDirectory?: string) => {
+    if (!focusedConfig && !finalArgs.some((arg) => OXLINT_PREPARE_SKIP_FLAGS.has(arg))) {
+      // Core semantic lint needs schema projections even when plugin preparation is skipped.
+      await ensureKyselyTypes(process.cwd());
+    }
     if (needsArtifactPreparation) {
       // Declaration compilation owns its Go policy; lint limits belong to the oxlint child.
       await prepareExtensionPackageBoundaryArtifacts(localEnv);

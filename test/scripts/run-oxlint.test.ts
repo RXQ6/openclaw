@@ -953,6 +953,53 @@ describe("run-oxlint", () => {
     ).toThrow("--extension-stripe requires an extension-only shard selection");
   });
 
+  it("prepares Kysely declarations before core lint without install scripts", () => {
+    const cwd = createTempDir("openclaw-oxlint-kysely-");
+    mkdirSync(join(cwd, "src/state"), { recursive: true });
+    mkdirSync(join(cwd, "config/tsconfig"), { recursive: true });
+    symlinkSync(join(process.cwd(), "node_modules"), join(cwd, "node_modules"), "junction");
+    for (const name of ["openclaw-state", "openclaw-agent"]) {
+      writeFileSync(
+        join(cwd, "src/state", name + "-schema.sql"),
+        "CREATE TABLE records (id INTEGER PRIMARY KEY);",
+      );
+    }
+    writeFileSync(
+      join(cwd, ".oxlintrc.json"),
+      JSON.stringify({
+        plugins: ["typescript"],
+        rules: { "typescript/no-redundant-type-constituents": "error" },
+      }),
+    );
+    writeFileSync(
+      join(cwd, "config/tsconfig/oxlint.core.json"),
+      JSON.stringify({
+        compilerOptions: { strict: true, module: "NodeNext", moduleResolution: "NodeNext" },
+        include: ["../../src/**/*.ts"],
+      }),
+    );
+    writeFileSync(
+      join(cwd, "src/example.ts"),
+      'import type { DB } from "../.artifacts/kysely/openclaw-state-db.generated.js";\nexport type OptionalDatabase = DB | undefined;\n',
+    );
+    // The shard skip flag covers plugin artifacts, not source schema prerequisites.
+    const result = spawnSync(
+      process.execPath,
+      [
+        join(process.cwd(), "scripts/run-oxlint.mts"),
+        "--tsconfig",
+        "config/tsconfig/oxlint.core.json",
+        "src/example.ts",
+      ],
+      { cwd, encoding: "utf8", env: { ...process.env, OPENCLAW_OXLINT_SKIP_PREPARE: "1" } },
+    );
+    expect(result.error).toBeUndefined();
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    expect(
+      readFileSync(join(cwd, ".artifacts/kysely/openclaw-state-db.generated.ts"), "utf8"),
+    ).toContain("export interface DB");
+  });
+
   it.runIf(process.platform !== "win32")(
     "records every native lint shard after an ordinary failure without hiding its exit",
     () => {
