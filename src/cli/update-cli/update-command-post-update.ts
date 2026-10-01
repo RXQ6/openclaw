@@ -295,7 +295,7 @@ export async function finishUpdate(
           if (currentServiceStop()?.windowsTaskAutoStartRecovery) {
             onGatewayStartAttempted();
           }
-          await resumePostUpdateWindowsAutoStart(params, finalResult, currentServiceStop());
+          await resumePostUpdateWindowsAutoStart(params, finalResult, currentServiceStop);
         }
       } catch (cause) {
         restoreFailure = { cause };
@@ -429,17 +429,11 @@ export async function finishUpdate(
     }
     return reportedResult;
   };
-  const restoreWindowsAutoStart = async (result: UpdateRunResult) => {
-    try {
-      if (currentServiceStop()?.windowsTaskAutoStartRecovery) {
-        onGatewayStartAttempted();
-      }
-      await resumePostUpdateWindowsAutoStart(params, result, currentServiceStop());
-    } catch (cause) {
-      // The attempted restore already failed; reporting must not attempt it again.
-      await reportResult(result, false, { cause });
-    }
-  };
+  const restoreWindowsAutoStart = (result: UpdateRunResult) =>
+    resumePostUpdateWindowsAutoStart(params, result, currentServiceStop, {
+      beforeAttempt: onGatewayStartAttempted,
+      onFailure: (cause) => reportResult(result, false, { cause }),
+    });
 
   const runPostUpdate = async (): Promise<UpdateRunResult> => {
     try {

@@ -158,7 +158,7 @@ export function createUpdateDoctorProcessCustody(runId: string, root: string, re
           : { settled: false, pids: identities.map((identity) => identity.pid) };
       const settled = rootExtinct && receipt !== undefined && pending === 0 && groups.settled;
       mayRemove = settled;
-      if (settled && !abnormal && receipt.slots.length === 0) {
+      if (settled && !abnormal && receipt?.slots.length === 0) {
         return;
       }
       const pids = [

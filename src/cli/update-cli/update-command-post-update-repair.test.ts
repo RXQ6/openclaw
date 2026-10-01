@@ -784,7 +784,19 @@ describe("post-activation failure settlement without inference", () => {
         expect(mocks.rollback).not.toHaveBeenCalled();
         expect(report?.origin.nextAction).toContain("41001, 41002");
         expect(report?.origin.nextAction).toContain("Keep the Gateway stopped");
-        expect(rendered).toContain("doctor-processes-unsettled");
+        expect(
+          report?.steps.findLast((step) => step.step === "doctor process settlement"),
+        ).toMatchObject({
+          status: "failed",
+          exitCode: 1,
+          failureFacts: [
+            {
+              check: "doctor-process-settlement",
+              code: "doctor-processes-unsettled",
+              message: unsettledReason,
+            },
+          ],
+        });
       }
     },
   );

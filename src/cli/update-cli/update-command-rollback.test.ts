@@ -23,6 +23,7 @@ import type { UpdateRunResult } from "../../infra/update-runner-types.js";
 import * as processRunner from "../../process/exec.js";
 import { closeOpenClawStateDatabaseAsync } from "../../state/openclaw-state-db.js";
 import type { UpdateConfigSnapshot } from "./update-command-config-snapshot.js";
+import * as packageIdentity from "./update-command-package-identity.js";
 import { inspectManagedGatewayServiceBeforeUpdate } from "./update-command-service-plan.js";
 import { createWindowsTaskAutoStartRecovery } from "./update-command-windows-task.js";
 
@@ -621,7 +622,7 @@ describe("verified package rollback", () => {
         };
       });
       if (change === "identity-read-failed") {
-        vi.spyOn(packageModule, "readPackageUpdateIdentity").mockRejectedValueOnce(
+        vi.spyOn(packageIdentity, "readPackageUpdateIdentity").mockRejectedValueOnce(
           new Error("Diagnostic identity read failed after verified restoration"),
         );
       }

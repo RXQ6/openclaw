@@ -52,7 +52,7 @@ import {
   runUpdateFinalizationDoctorInFreshProcess,
 } from "./update-command-fresh-doctor.js";
 import { settleUpdateDoctorMaintenance } from "./update-command-maintenance.js";
-import { readPackageUpdateIdentity } from "./update-command-package.js";
+import { readPackageUpdateIdentity } from "./update-command-package-identity.js";
 import {
   collectPostCorePluginAdvisories,
   createPostCorePluginUpdateResult,

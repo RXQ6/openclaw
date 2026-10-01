@@ -399,7 +399,7 @@ it.skipIf(process.platform === "win32").each([true, false])(
                 },
               },
             );
-            expect(result).toMatchObject({
+            expect(result, result.stderr).toMatchObject({
               termination: "timeout",
               cleanup: "forced",
               signal: "SIGKILL",
