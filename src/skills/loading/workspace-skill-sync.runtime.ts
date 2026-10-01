@@ -1,11 +1,13 @@
 // Sandbox workspace skill synchronization is deferred behind the sandbox runtime boundary.
 import fs from "node:fs";
 import path from "node:path";
+import { openRootFile } from "@openclaw/fs-safe/advanced";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { resolveSandboxPath } from "../../agents/sandbox-paths.js";
 import { canonicalizePath } from "../../agents/utils/paths.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { sha256Hex } from "../../infra/crypto-digest.js";
+import { removePathWithinRoot } from "../../infra/fs-safe-remove.js";
 import { tryReadJson, writeJson } from "../../infra/json-files.js";
 import { pruneMapToMaxSize } from "../../infra/map-size.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
@@ -29,15 +31,6 @@ import { prepareWorkspaceSkills } from "./workspace-skill-loader.js";
 const fsp = fs.promises;
 const skillsLogger = createSubsystemLogger("skills");
 const skillsSyncQueue = new KeyedAsyncQueue();
-
-function resolveUniqueSyncedSkillDirName(base: string, used: Set<string>): string {
-  let candidate = base;
-  for (let index = 2; used.has(candidate); index += 1) {
-    candidate = `${base}-${index}`;
-  }
-  used.add(candidate);
-  return candidate;
-}
 
 const SYNCED_SKILLS_MANIFEST_NAME = ".openclaw-sync.json";
 
@@ -87,41 +80,44 @@ function resolveSyncedSkillsManifestKey(manifest: SyncedSkillsManifest): string 
   ]);
 }
 
-function resolveSyncedSkillDestinationPath(params: {
-  targetSkillsDir: string;
-  entry: SkillEntry;
-  usedDirNames: Set<string>;
-}): string | null {
-  const sourceDirName = (
-    params.entry.syncDirName ?? path.basename(params.entry.skill.baseDir)
-  ).trim();
-  if (!sourceDirName || sourceDirName === "." || sourceDirName === "..") {
-    return null;
+async function removeSyncedSkill(rootDir: string, relativePath: string): Promise<void> {
+  const absolutePath = path.join(rootDir, relativePath);
+  if (process.platform !== "win32" && (await fsp.lstat(absolutePath)).isDirectory()) {
+    const opened = await openRootFile({
+      rootPath: rootDir,
+      absolutePath,
+      allowedType: "directory",
+      boundaryLabel: "sandbox skills",
+    });
+    if (!opened.ok) {
+      throw new Error("Cannot open synced skill directory", { cause: opened.error });
+    }
+    try {
+      // Copies inherit source modes. Repair only owner access through a confined
+      // descriptor; agent writes remain blocked by the read-only skill mount.
+      fs.fchmodSync(opened.fd, opened.stat.mode | 0o700);
+    } finally {
+      fs.closeSync(opened.fd);
+    }
+    for (const child of await fsp.readdir(absolutePath)) {
+      await removeSyncedSkill(rootDir, path.join(relativePath, child));
+    }
   }
-  const uniqueDirName = resolveUniqueSyncedSkillDirName(sourceDirName, params.usedDirNames);
-  return resolveSandboxPath({
-    filePath: uniqueDirName,
-    cwd: params.targetSkillsDir,
-    root: params.targetSkillsDir,
-  }).resolved;
+  await removePathWithinRoot({ rootDir, relativePath, recursive: true, symlinks: "unlink" });
 }
 
 async function ensureSyncedSkillsDirectory(targetSkillsDir: string): Promise<void> {
-  let stats: fs.Stats;
   try {
-    stats = await fsp.lstat(targetSkillsDir);
+    if ((await fsp.lstat(targetSkillsDir)).isDirectory()) {
+      return;
+    }
+    await fsp.rm(targetSkillsDir, { recursive: true, force: true });
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;
     }
-    await fsp.mkdir(targetSkillsDir, { recursive: true });
-    return;
   }
-
-  if (!stats.isDirectory() || stats.isSymbolicLink()) {
-    await fsp.rm(targetSkillsDir, { recursive: true, force: true });
-    await fsp.mkdir(targetSkillsDir, { recursive: true });
-  }
+  await fsp.mkdir(targetSkillsDir, { recursive: true });
 }
 
 export async function syncWorkspaceSkills(params: {
@@ -238,22 +234,25 @@ export async function syncWorkspaceSkills(params: {
         plans.push({ entry, identity });
         continue;
       }
-      let destinationPath: string | null;
+      let destinationPath: string;
       try {
-        destinationPath = resolveSyncedSkillDestinationPath({
-          targetSkillsDir,
-          entry,
-          usedDirNames,
-        });
+        const base = (entry.syncDirName ?? path.basename(entry.skill.baseDir)).trim();
+        if (!base || base === "." || base === "..") {
+          throw new Error("invalid source directory name");
+        }
+        let name = base;
+        for (let index = 2; usedDirNames.has(name); index += 1) {
+          name = `${base}-${index}`;
+        }
+        usedDirNames.add(name);
+        destinationPath = resolveSandboxPath({
+          filePath: name,
+          cwd: targetSkillsDir,
+          root: targetSkillsDir,
+        }).resolved;
       } catch (error) {
         const message = error instanceof Error ? error.message : JSON.stringify(error);
         skillsLogger.warn(`Failed to resolve safe destination for ${entry.skill.name}: ${message}`);
-        continue;
-      }
-      if (!destinationPath) {
-        skillsLogger.warn(
-          `Failed to resolve safe destination for ${entry.skill.name}: invalid source directory name`,
-        );
         continue;
       }
       plans.push({ destinationPath, entry, identity });
@@ -279,7 +278,7 @@ export async function syncWorkspaceSkills(params: {
     );
     for (const child of await fsp.readdir(targetSkillsDir)) {
       if (!preservedDestinations.has(child)) {
-        await fsp.rm(path.join(targetSkillsDir, child), { recursive: true, force: true });
+        await removeSyncedSkill(targetDir, path.join("skills", child));
       }
     }
 
