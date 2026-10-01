@@ -59,7 +59,7 @@ describe("update progress", () => {
     run = runRecord();
     vi.mocked(getUpdateRunForProgressAsync)
       .mockReset()
-      .mockImplementation(async () => run);
+      .mockImplementation(async () => structuredClone(run));
     vi.mocked(writeUpdateRunReportArtifact).mockReset().mockResolvedValue(reportPath);
     vi.mocked(getUpdateRun).mockImplementation(() => run);
     Object.defineProperty(process.stdout, "isTTY", { configurable: true, value: false });
@@ -91,7 +91,7 @@ describe("update progress", () => {
       { step: "staging", status: "completed" },
       { step: "validating", status: "in_progress" },
     );
-    presentation.progress.onStepStart?.(step);
+    presentation.progress.onStepStart?.(step, run);
     expect(log).toHaveBeenCalledWith("validating — build...");
     presentation.progress.onStepComplete?.({
       ...step,
@@ -126,7 +126,7 @@ describe("update progress", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it.each(["stop", "suspend", "dispose"] as const)(
+  it.each(["stop", "pause", "suspend", "dispose"] as const)(
     "clears redirected elapsed notices on %s",
     async (operation) => {
       vi.useFakeTimers();
@@ -431,6 +431,8 @@ describe("update progress", () => {
     expect(log).toHaveBeenCalledWith("Phase: verifying");
     expect(log).toHaveBeenCalledWith("Phase: restarting");
     expect(log).not.toHaveBeenCalledWith("Phase: repairing");
+    presentation.pause();
+    expect(vi.getTimerCount()).toBe(0);
     run.phase = "finished";
     run.status = "succeeded";
     run.after = { version: "2026.9.3" };

@@ -72,6 +72,7 @@ export async function initializeAndRunUpdate(
   const targetEnv = resolveUpdateTargetEnv({ baseEnv: env, nodeRunner: process.execPath });
   const runId = env.OPENCLAW_UPDATE_RUN_ID?.trim() || randomUUID();
   let handleFailure: Awaited<ReturnType<typeof prepareUpdateCommandFailureTriage>> | undefined;
+  let disposePresentation: (() => void) | undefined;
   try {
     await withUpdateCommandTerminalResult(
       (registerRun) =>
@@ -134,6 +135,9 @@ export async function initializeAndRunUpdate(
                 env,
                 runId,
                 executor,
+                retainPresentation: (dispose) => {
+                  disposePresentation = dispose;
+                },
                 callerLegacyConfigPlan,
                 registerRun: async (run) => {
                   registerRun(run);
@@ -537,5 +541,7 @@ export async function initializeAndRunUpdate(
     // The admitted run's prepared handler outlives both staged cleanup and the
     // executor, so no failure is reported while either mutation owner remains live.
     await handleFailure(error);
+  } finally {
+    disposePresentation?.();
   }
 }

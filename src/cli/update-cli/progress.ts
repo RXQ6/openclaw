@@ -52,6 +52,7 @@ export type UpdateDisplayProgress = {
 type ProgressController = {
   progress: UpdateDisplayProgress;
   stop: () => void;
+  pause: () => void;
   suspend: () => void;
   resume: () => void;
   dispose: () => void;
@@ -71,7 +72,14 @@ export function createUpdateProgress(
   run?: UpdateCommandOptions["run"],
 ): ProgressController {
   if (!enabled) {
-    return { progress: {}, stop: () => {}, suspend: () => {}, resume: () => {}, dispose: () => {} };
+    return {
+      progress: {},
+      stop: () => {},
+      pause: () => {},
+      suspend: () => {},
+      resume: () => {},
+      dispose: () => {},
+    };
   }
 
   let currentSpinner: ReturnType<typeof spinner> | null = null;
@@ -101,6 +109,10 @@ export function createUpdateProgress(
     polling = false;
     clearTimer();
     pendingRead?.abort();
+  };
+  const pause = () => {
+    pausePolling();
+    stop();
   };
   const renderRecord = (record: UpdateRunRecord | undefined) => {
     // Doctor's unbound spinner does not observe ledger phases, even after a write.
@@ -179,10 +191,7 @@ export function createUpdateProgress(
     void poll();
     activeUpdateProgress.set(run.runId, {
       finish: finalize,
-      pause: () => {
-        pausePolling();
-        stop();
-      },
+      pause,
     });
   }
   const progress: UpdateDisplayProgress = {
@@ -212,6 +221,7 @@ export function createUpdateProgress(
   return {
     progress,
     stop,
+    pause,
     suspend: () => {
       if (observation === "active") {
         observation = "suspended";
