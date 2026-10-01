@@ -52,7 +52,6 @@ import {
 } from "../secrets/runtime-degraded-state.js";
 import { createTestGatewayScheduler } from "../test-utils/gateway-scheduler-clock.js";
 import { startChannelHealthMonitor } from "./channel-health-monitor.js";
-import { evaluateChannelHealth } from "./channel-health-policy.js";
 import {
   channelBlockedPatch,
   channelReadyPatch,
@@ -117,7 +116,9 @@ const createdManagers: Array<{ manager: ChannelManager; channelIds: ChannelId[] 
 const channelTempDirs = useAutoCleanupTempDirTracker(afterEach);
 
 function waitForAbort(signal: AbortSignal): Promise<void> {
-  return new Promise((done) => signal.addEventListener("abort", () => done(), { once: true }));
+  return new Promise<void>((resolve) => {
+    signal.addEventListener("abort", () => resolve(), { once: true });
+  });
 }
 
 async function flushMicrotasks(times = 8): Promise<void> {
@@ -744,14 +745,7 @@ describe("server-channels auto restart", () => {
     const account = readAccount(manager);
     expect(account?.running).toBe(true);
     expect(account).not.toHaveProperty("connected");
-    expect(
-      evaluateChannelHealth(account ?? {}, {
-        channelId: "discord",
-        now: Date.now() + 60 * 60_000,
-        channelConnectGraceMs: 120_000,
-        staleEventThresholdMs: 30 * 60_000,
-      }),
-    ).toEqual({ healthy: true, reason: "healthy" });
+    expect(healthOf(account)).toEqual({ healthy: true, reason: "healthy" });
   });
 
   it("settles every account before surfacing a stop hook failure", async () => {
@@ -3258,7 +3252,9 @@ describe("server-channels auto restart", () => {
   it("injects a narrow Gateway approval resolver into the channel task runtime", async () => {
     const request = vi.fn(async () => ({ applied: true, approval: {} }));
     const { promise: accountStartReady, resolve: releaseAccountStart } = createDeferred();
-    let nativeApprovalRuntime: GatewayNativeApprovalRuntime | undefined;
+    const nativeApprovalRuntime = {
+      current: undefined as GatewayNativeApprovalRuntime | undefined,
+    };
     let observerCount: number | undefined;
     const startAccount = vi.fn(async (ctx: ChannelGatewayContext<TestAccount>) => {
       observerCount = getEventListeners(ctx.abortSignal, "abort").length;
@@ -3282,12 +3278,12 @@ describe("server-channels auto restart", () => {
     const manager = createManager({
       channelRuntime: createRuntimeChannel(),
       deferStartupAccountStartsUntil: accountStartReady,
-      getNativeApprovalRuntime: () => nativeApprovalRuntime,
+      getNativeApprovalRuntime: () => nativeApprovalRuntime.current,
     });
 
     await manager.startChannels();
     expect(startAccount).not.toHaveBeenCalled();
-    nativeApprovalRuntime = { request } as unknown as GatewayNativeApprovalRuntime;
+    nativeApprovalRuntime.current = { request } as unknown as GatewayNativeApprovalRuntime;
     releaseAccountStart();
     await flushMicrotasks();
 
