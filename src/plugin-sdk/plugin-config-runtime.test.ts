@@ -2,11 +2,11 @@
  * Tests config runtime exports and snapshot/cache behavior exposed through the SDK.
  */
 import { describe, expect, it } from "vitest";
+import type { OpenClawConfig } from "./config-contracts.js";
 import {
   resolveLivePluginConfigObject,
   resolvePluginConfigObject,
-  type OpenClawConfig,
-} from "./config-runtime.js";
+} from "./plugin-config-runtime.js";
 
 describe("resolvePluginConfigObject", () => {
   it("returns the plugin config object for a configured plugin entry", () => {
