@@ -90,7 +90,11 @@ export const sessionChanges = {
   emit(change: SessionRowChange, database?: DatabaseSync): void {
     sessionChanges.emitBatch([change], database);
   },
-  emitBatch(changes: readonly SessionRowChange[], database?: DatabaseSync): void {
+  emitBatch(
+    changes: readonly SessionRowChange[],
+    database?: DatabaseSync,
+    beforePublicNotifications?: () => void,
+  ): void {
     const publishFacts = () => {
       for (const change of changes) {
         notifyListeners(factListeners, change);
@@ -116,6 +120,7 @@ export const sessionChanges = {
       prepareObservers();
     }
     const publish = () => {
+      beforePublicNotifications?.();
       for (const change of changes) {
         if ("sessionKey" in change) {
           const { facts: _facts, factsInvalidated: _invalidated, ...notification } = change;

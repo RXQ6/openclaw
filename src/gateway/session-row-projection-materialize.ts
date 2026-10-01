@@ -16,6 +16,7 @@ import {
   isIncognitoOpenClawAgentSqlitePath,
   resolveIncognitoOpenClawAgentSqlitePath,
 } from "../state/openclaw-agent-db.paths.js";
+import type { SessionRepositoryWorkspaceRecord } from "../state/session-repository-workspaces.types.js";
 import { readSessionRowFacts } from "./server-methods/session-placement-read-projection.js";
 import { readSessionListSelectionFacts } from "./session-list-target.js";
 import { isColdArchivedSessionRow } from "./session-row-projection-archive.js";
@@ -29,6 +30,66 @@ import {
   createGatewaySessionEntryReader,
   resolveGatewaySessionStoreTargetWithStore,
 } from "./session-utils-store-lookup.js";
+
+/** Capture retains published identity while category facts wait for worker reconciliation. */
+export function createSessionRowCapture(
+  lookup: (query: records.Lookup) => records.Row | undefined,
+  needsAcquisition: (row: records.Row) => boolean,
+  acquire: (row: records.Row) => records.Row | undefined,
+) {
+  return (query: records.Lookup) => {
+    const row = lookup(query);
+    return row && row.unresolvedDatabaseFacts !== "category" && needsAcquisition(row)
+      ? (acquire(row) ?? row)
+      : row;
+  };
+}
+
+/** Exact descriptions use the projection's custody and materialization owners in one frame. */
+export function createSessionRowDescriptionReader(owner: {
+  runInOwner: <T>(consume: () => T) => T;
+  prepare: () => boolean;
+  lookup: (query: records.Lookup) => records.Row | undefined;
+  dirty: ReadonlySet<string>;
+  refresh: (ids: string[]) => void;
+  describeArchived: (row: records.Row | undefined) => records.Row | undefined;
+  isCurrent: (row: records.Row) => boolean;
+  materializePrivate: (
+    row: records.Row,
+    repositoryWorkspace?: Readonly<SessionRepositoryWorkspaceRecord> | null,
+  ) => void;
+  preparePresentation: (row: records.MaterializedRow) => void;
+}) {
+  return (
+    query: records.Lookup,
+    captured?: records.Row,
+    repositoryWorkspace?: Readonly<SessionRepositoryWorkspaceRecord> | null,
+  ) =>
+    owner.runInOwner(() => {
+      if (!owner.prepare()) {
+        return undefined;
+      }
+      let row = owner.lookup(query);
+      if (row && isIncognitoSessionKey(row.key)) {
+        owner.materializePrivate(row, repositoryWorkspace);
+      } else {
+        if (row && owner.dirty.has(records.identity(row))) {
+          // Keyed reads refresh only their owner; unrelated bulk work never gates a response.
+          owner.refresh([records.identity(row)]);
+          row = owner.lookup(query);
+        }
+        row = owner.describeArchived(row);
+      }
+      if (captured && !owner.isCurrent(captured)) {
+        return undefined;
+      }
+      if (!records.ready(row)) {
+        return undefined;
+      }
+      owner.preparePresentation(row);
+      return row;
+    });
+}
 
 /** One synchronous refresh slice shares agent policy; each later slice starts fresh. */
 function createSessionRowMaterializationBatch(): typeof readResidentSessionRow {
@@ -158,62 +219,6 @@ export function createSessionRowMaterializer(owner: {
   };
 }
 
-/** Resident capture and description never reacquire unresolved category facts on the host. */
-export function createSessionRowResidentReads(owner: {
-  isActive: () => boolean;
-  topologyPending: () => boolean;
-  prepare: () => boolean;
-  runAsOwner: <T>(read: () => T) => T;
-  config: () => records.Inputs["cfg"];
-  lookup: (query: records.Lookup) => records.Row | undefined;
-  dirty: ReadonlySet<string>;
-  acquire: (row: records.Row) => records.Row | undefined;
-  materializePrivate: (row: records.Row) => void;
-  refresh: (ids: readonly string[]) => void;
-  archive: (row: records.Row | undefined) => records.Row | undefined;
-  isCurrent: (row: records.Row) => boolean;
-  present: (row: records.MaterializedRow) => void;
-}) {
-  return {
-    capture: (query: records.Lookup) => {
-      if (!owner.isActive()) {
-        return undefined;
-      }
-      const row = owner.lookup(query);
-      // Queued events retain the last published identity while topology prepares.
-      return row &&
-        row.unresolvedDatabaseFacts !== "category" &&
-        !owner.topologyPending() &&
-        owner.dirty.has(records.identity(row))
-        ? (owner.acquire(row) ?? row)
-        : row;
-    },
-    describe: (query: records.Lookup, captured?: records.Row) =>
-      owner.runAsOwner(() => {
-        if (!owner.isActive() || !owner.prepare()) {
-          return undefined;
-        }
-        let row = owner.lookup(query);
-        if (row && isIncognitoSessionKey(row.key)) {
-          owner.materializePrivate(row);
-        } else {
-          if (row && owner.dirty.has(records.identity(row))) {
-            // Keyed reads refresh only their owner, never unrelated bulk work.
-            owner.refresh([records.identity(row)]);
-            row = owner.lookup(query);
-          }
-          row = owner.archive(row);
-        }
-        if ((captured && !owner.isCurrent(captured)) || !records.ready(row)) {
-          return undefined;
-        }
-        row.materialized.source.cfg = owner.config();
-        owner.present(row);
-        return row;
-      }),
-  };
-}
-
 /** Resident rows consume committed metadata; optional transcript work has a separate budget. */
 export function readResidentSessionRow(
   params: {
@@ -228,6 +233,7 @@ export function readResidentSessionRow(
     links: SessionChildLink[];
     readSourceEntry: (key: string) => records.Row["storedEntry"];
     databaseFacts?: records.PreparedSessionRowDatabaseFacts;
+    repositoryWorkspace?: Readonly<SessionRepositoryWorkspaceRecord> | null;
   },
   activitySummaryEnabledByAgent?: Map<string, boolean>,
 ) {
@@ -246,6 +252,9 @@ export function readResidentSessionRow(
     ...row,
     cfg,
     preparedAcpMeta: params.databaseFacts ? params.databaseFacts.acpMeta : row.preparedAcpMeta,
+    preparedRepositoryWorkspace: params.databaseFacts
+      ? params.databaseFacts.repositoryWorkspace
+      : params.repositoryWorkspace,
     configuredAgentIds: params.configuredAgentIds,
     store: source?.store ?? {},
     storePath: row.storeTarget.storePath,
