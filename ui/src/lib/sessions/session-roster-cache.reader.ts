@@ -1,6 +1,7 @@
 import { gatewayCredentialScope } from "@openclaw/gateway-client/browser";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import type { GatewaySessionRow } from "../../api/types.ts";
+import { readOfflineStorageScope } from "../../app/boot-record.ts";
 import type { SessionGateway, SessionListOptions, SessionState } from "./session-capability.ts";
 import { isPrimarySessionListQuery } from "./session-list-query.ts";
 import { normalizeManagedSessionListQuery } from "./session-requests.ts";
@@ -223,9 +224,12 @@ export async function hydrateSessionRoster(
     return;
   }
   const record = await cache.read(initial.scope, initial);
-  const scope = gateway.connection
+  const account = readOfflineStorageScope({ client: gateway.snapshot.client });
+  const gatewayScope = gateway.connection
     ? gatewayCredentialScope(gateway.connection.gatewayUrl)
-    : initial.scope;
+    : undefined;
+  const scope =
+    gatewayScope && account ? `account:${JSON.stringify([gatewayScope, account])}` : initial.scope;
   if (
     !record ||
     signal.aborted ||

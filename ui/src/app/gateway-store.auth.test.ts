@@ -513,7 +513,7 @@ describe("createApplicationGateway authentication diagnostics", () => {
   it("clears persisted transcripts on credential change but not an unchanged reconnect", async () => {
     vi.stubGlobal("indexedDB", new IDBFactory());
     vi.stubGlobal("location", new URL("http://control.test/"));
-    const sessionKey = "agent:main:credential-scope";
+    const sessionKey = 'scope:["ws://control.test","account-a"]\u0000agent:main:credential-scope';
     const snapshots = new SessionSnapshotStore();
     snapshots.write(sessionKey, {
       messages: ["private transcript"],

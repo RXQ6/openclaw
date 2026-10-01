@@ -2,7 +2,10 @@ import { getSafeSessionStorage } from "../../local-storage.ts";
 import { resolveUiConversationIdentity } from "../sessions/session-key.ts";
 import { compareChatQueueOrder } from "./chat-queue-order.ts";
 import type { ChatQueueItem } from "./chat-types.ts";
-import { outboxPayloadMatchesOwner } from "./outbox-payload-store.runtime.ts";
+import {
+  observeOutboxRecoveryOwner,
+  outboxPayloadMatchesOwner,
+} from "./outbox-payload-store.runtime.ts";
 import type { StoredComposerSession } from "./outbox-store-codec.ts";
 import type { StoredChatOutboxScope } from "./outbox-store-scope.ts";
 import {
@@ -10,7 +13,7 @@ import {
   parseStoredChatOutboxScope,
   resolvePendingComposerSessions,
   storedChatOutboxScopeKey,
-  storageTargetForGateway,
+  storageTargetForComposer,
   subscribeStoredChatOutboxChanges,
   writeStoredOutboxStore,
   type ChatComposerScope,
@@ -44,6 +47,7 @@ export function createStoredChatOutboxReader() {
         state.client,
         state.client?.recoveryScope,
         state.client?.recoveryScopeReady,
+        observeOutboxRecoveryOwner(state),
         state.connected,
       ];
       const previous = cached;
@@ -65,7 +69,7 @@ function listStoredComposerRows(
     return [];
   }
   try {
-    const target = storageTargetForGateway(state.settings?.gatewayUrl);
+    const target = storageTargetForComposer(state);
     const store = readProjectedOutboxStore(storage, target);
     if (resolvePendingComposerSessions(store, state)) {
       try {

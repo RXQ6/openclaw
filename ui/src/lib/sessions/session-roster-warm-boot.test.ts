@@ -15,6 +15,7 @@ const url = "ws://gateway.example.test";
 const scope = gatewayCredentialScope(url);
 const bootRecord: BootRecord = {
   version: 2,
+  recoveryScope: "test-recovery-scope",
   authMethod: "token",
   credential: "9d17676d",
   savedAt: 1,
@@ -27,7 +28,7 @@ const bootRecord: BootRecord = {
 function roster(): SessionRosterRecord {
   return {
     version: 1,
-    scope,
+    scope: `account:${JSON.stringify([scope, "test-recovery-scope"])}`,
     savedAt: Date.now(),
     profileId: "profile-one",
     agentId: "main",
@@ -281,7 +282,7 @@ describe("session capability warm roster", () => {
       expect(h.sessions.canonicalListRevision).toBe(1);
       expect(h.write).toHaveBeenCalledWith(
         expect.objectContaining({
-          scope,
+          scope: `account:${JSON.stringify([scope, "test-recovery-scope"])}`,
           profileId: "profile-one",
           agentId: "main",
           result: expected,
@@ -527,7 +528,9 @@ describe("session capability warm roster", () => {
       h.publish({ sessionKey: "agent:main:other" });
       expect(h.sessions.state.result).toEqual(live);
       expect(h.write).toHaveBeenCalledWith(
-        expect.objectContaining({ scope: gatewayCredentialScope(nextUrl) }),
+        expect.objectContaining({
+          scope: `account:${JSON.stringify([gatewayCredentialScope(nextUrl), "test-recovery-scope"])}`,
+        }),
       );
     },
   );

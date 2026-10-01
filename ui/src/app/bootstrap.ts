@@ -186,6 +186,9 @@ export function bootstrapApplication(): ApplicationRuntime {
     if (startup.pendingBootstrapToken || startup.password) {
       return null;
     }
+    if (["trusted-proxy", "tailscale", "password"].includes(method)) {
+      return settings.token.trim() ? null : "";
+    }
     // An explicit token takes precedence over paired-device auth on the next connect.
     return method === "token"
       ? settings.token
@@ -193,13 +196,18 @@ export function bootstrapApplication(): ApplicationRuntime {
         ? null
         : loadCurrentDeviceAuthToken(settings.gatewayUrl);
   });
-  const warmBoot = bootRecord !== null && startsApplicationRouter && !hasPendingGateway;
-  if (warmBoot) {
+  let warmBoot = bootRecord !== null && startsApplicationRouter && !hasPendingGateway;
+  const warmBootConnectionRevision = gateway.connectionRevision;
+  if (warmBoot && bootRecord) {
     prewarmBootChat(bootRecord, settings.sessionKey);
   }
   const stopWarmBootConnection = subscribeWarmBootConnection(
     gateway,
     startsApplicationRouter && !hasPendingGateway ? bootRecord?.profileId : undefined,
+    () => {
+      warmBoot = false;
+    },
+    bootRecord?.recoveryScope,
   );
   const agents = createAgentCapability(gateway, {
     cachedList: bootRecord?.agents ?? null,
@@ -533,7 +541,9 @@ export function bootstrapApplication(): ApplicationRuntime {
     context,
     router,
     documentMode,
-    warmBoot,
+    get warmBoot() {
+      return warmBoot && gateway.connectionRevision === warmBootConnectionRevision;
+    },
     focusLocation,
     get pendingGatewayConnection() {
       return pendingGatewayConnection;

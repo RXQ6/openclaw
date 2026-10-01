@@ -2,6 +2,7 @@
 import { expectDefined } from "@openclaw/normalization-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createDeferred } from "../../../../test/helpers/promise.js";
+import { GatewayBrowserClient } from "../../api/gateway.ts";
 import type {
   ChatAttachment,
   ChatQueueItem,
@@ -17,6 +18,7 @@ import { listStoredChatOutboxes } from "../../lib/chat/outbox-store-projection.t
 import {
   readStoredOutboxStore,
   storageTargetForGateway,
+  storageTargetForComposer,
   storedChatOutboxScopeKey,
   writeStoredOutboxStore,
 } from "../../lib/chat/outbox-store.ts";
@@ -195,6 +197,23 @@ describe("Blob-preserving metadata migration", () => {
     await expectBytes(host, original);
   });
 
+  it("hydrates queued attachment bytes after offline reload before a new hello", async () => {
+    const host = hostFor();
+    const original = await prepare(host, "offline-blob");
+    const reloaded = {
+      ...host,
+      connected: false,
+      client: new GatewayBrowserClient({ url: gatewayUrl, offlineRecoveryScope: "principal-a" }),
+    };
+    const result = await prepareOutboxPayload(reloaded, original, "handoff");
+    expect(result).toMatchObject({ status: "ready", update: { attachments: [{ dataUrl }] } });
+    reloaded.client.retireOfflineRecoveryScope();
+    expect(await prepareOutboxPayload(reloaded, original, "handoff")).toEqual({
+      status: "failed",
+      reason: "unavailable",
+    });
+  });
+
   it.each(["agent:main:topic", "global"])(
     "migrates landed v3 %s without retiring its exact Blob or attempt",
     async (sessionKey) => {
@@ -211,7 +230,7 @@ describe("Blob-preserving metadata migration", () => {
       ];
       expect(rows).toHaveLength(1);
       expect(rows[0]).toMatchObject({ draftRevision: 42, queue: [item] });
-      if (sessionKey === "global") {
+      {
         expect(listStoredChatOutboxes(host)).toEqual([]);
         const entry = expectDefined(readChatOutboxRecovery(host).entries[0], "owned recovery");
         const destination = expectDefined(
@@ -234,9 +253,10 @@ describe("Blob-preserving metadata migration", () => {
       });
       await expectBytes(host, restored);
       expect(cleanup).not.toHaveBeenCalled();
-      const reopened = readStoredOutboxStore(sessionStorage, target);
+      const ownedTarget = storageTargetForComposer(host);
+      const reopened = readStoredOutboxStore(sessionStorage, ownedTarget);
       reopened.sessions = {};
-      writeStoredOutboxStore(sessionStorage, target, reopened);
+      writeStoredOutboxStore(sessionStorage, ownedTarget, reopened);
       expect(cleanup).toHaveBeenCalledWith([item.attachmentPayload]);
       await Promise.all(
         cleanup.mock.results.flatMap((result) => (result.type === "return" ? [result.value] : [])),
@@ -314,20 +334,17 @@ describe("Blob-preserving metadata migration", () => {
     );
     expect(restoreChatOutboxRecovery(b, ownedA, destination)).toBe("conflict");
     expect(restoreChatOutboxRecovery(a, ownedA, destination)).toBe("restored");
-    const raw = readStoredOutboxStore(sessionStorage, target);
+    const ownedTarget = storageTargetForComposer(a);
+    const raw = readStoredOutboxStore(sessionStorage, ownedTarget);
     raw.sessions = {};
-    writeStoredOutboxStore(sessionStorage, target, raw);
+    writeStoredOutboxStore(sessionStorage, ownedTarget, raw);
     expect(cleanup).toHaveBeenCalledWith([first.attachmentPayload]);
     expect(cleanup).toHaveBeenCalledTimes(1);
     await expectBytes(b, second);
     expect(readChatOutboxRecovery(b).entries).toEqual(entriesB);
     const client = expectDefined(b.client, "B client");
     const ready = vi.spyOn(client, "recoveryScopeReady", "get").mockReturnValue(false);
-    expect(
-      readChatOutboxRecovery(b).entries.flatMap(
-        (entry) => entry.session.queue?.map((item) => item.id) ?? [],
-      ),
-    ).toEqual([plain.id]);
+    expect(() => readChatOutboxRecovery(b)).toThrow("Offline account recovery is unavailable");
     expect(
       captureChatOutboxRecoveryDestination(b, { sessionKey: b.sessionKey, agentId: "main" }),
     ).toBeNull();

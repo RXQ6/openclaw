@@ -5,6 +5,7 @@ import * as snapshots from "../pages/chat/session-snapshot-invalidation.runtime.
 import { createStorageMock } from "../test-helpers/storage.ts";
 import { clearBootRecords, type BootRecord } from "./boot-record.ts";
 import { bootstrapApplication } from "./bootstrap.ts";
+import { createGatewayStoreTestStore } from "./gateway-store.test-support.ts";
 import * as gatewayStore from "./gateway-store.ts";
 import type { ApplicationGatewaySnapshot } from "./gateway.ts";
 import { loadSettings, persistSessionToken } from "./settings.ts";
@@ -27,6 +28,88 @@ describe("warm boot profile validation", () => {
     vi.restoreAllMocks();
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it.each(["trusted-proxy", "tailscale", "password"])(
+    "admits a previously signed-in %s account before server connection",
+    (authMethod) => {
+      const previousUrl = window.location.href;
+      window.history.replaceState({}, "", "/chat/main");
+      persistSessionToken(loadSettings().gatewayUrl, "");
+      const scope = gatewayCredentialScope(loadSettings().gatewayUrl);
+      localStorage.setItem(
+        BOOT_RECORD_PREFIX + scope,
+        JSON.stringify({
+          version: 2,
+          authMethod,
+          credential: "",
+          recoveryScope: "account-a",
+          scope,
+          savedAt: Date.now(),
+          profileId: "profile-a",
+          agents: {
+            defaultId: "main",
+            mainKey: "main",
+            scope: "per-sender",
+            agents: [{ id: "main" }],
+          },
+          groups: [],
+          sectionOrder: [],
+        }),
+      );
+      const runtime = bootstrapApplication();
+      try {
+        expect(runtime.warmBoot).toBe(true);
+        expect(runtime.context.gateway.snapshot.phase).toBe("stopped");
+        expect(runtime.context.gateway.snapshot.hello).toBeNull();
+      } finally {
+        runtime.stop();
+        window.history.replaceState({}, "", previousUrl);
+      }
+    },
+  );
+
+  it("does not revive warm admission after pairing rejection followed by network loss", () => {
+    const previousUrl = window.location.href;
+    window.history.replaceState({}, "", "/chat");
+    const scope = gatewayCredentialScope(loadSettings().gatewayUrl);
+    const record: BootRecord = {
+      version: 2,
+      authMethod: "token",
+      credential: "9d17676d",
+      scope,
+      savedAt: Date.now(),
+      profileId: null,
+      agents: { defaultId: "main", mainKey: "main", scope: "per-sender", agents: [{ id: "main" }] },
+      groups: [],
+      sectionOrder: [],
+    };
+    localStorage.setItem(BOOT_RECORD_PREFIX + scope, JSON.stringify(record));
+    sessionStorage.setItem("retained-draft", "Keep this draft");
+    const fixture = createGatewayStoreTestStore();
+    vi.spyOn(gatewayStore, "createApplicationGateway").mockReturnValue(fixture.gateway);
+    const runtime = bootstrapApplication();
+    try {
+      expect(runtime.warmBoot).toBe(true);
+      fixture.gateway.connect();
+      fixture.current().opts.onClose?.({
+        code: 4008,
+        reason: "pairing required",
+        willRetry: true,
+        error: { code: "PAIRING_REQUIRED", message: "Pairing required" },
+      });
+      expect(runtime.warmBoot).toBe(false);
+      fixture
+        .current()
+        .opts.onClose?.({ code: 1006, reason: "network unavailable", willRetry: true });
+      expect(fixture.gateway.snapshot.lastErrorCode).toBeNull();
+      expect(runtime.warmBoot).toBe(false);
+      expect(localStorage.getItem(BOOT_RECORD_PREFIX + scope)).toBeNull();
+      expect(sessionStorage.getItem("retained-draft")).toBe("Keep this draft");
+    } finally {
+      runtime.stop();
+      window.history.replaceState({}, "", previousUrl);
+    }
   });
 
   it.each([

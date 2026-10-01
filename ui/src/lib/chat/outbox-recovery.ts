@@ -3,7 +3,7 @@ import { getSafeSessionStorage } from "../../local-storage.ts";
 import { resolveUiConversationIdentity, hasUiSessionDefaults } from "../sessions/session-key.ts";
 import {
   observeOutboxRecoveryOwner,
-  outboxPayloadMatchesOwner,
+  outboxPayloadCanRecover,
 } from "./outbox-payload-store.runtime.ts";
 import { normalizeStoredSession } from "./outbox-store-codec.ts";
 import { nextDraftRevision, readDraftRevisionState } from "./outbox-store-draft-state.ts";
@@ -14,6 +14,7 @@ import {
   resolvePendingComposerSessions,
   storedChatOutboxScopeKey,
   storageTargetForGateway,
+  storageTargetForComposer,
   writeStoredOutboxStore,
   type ChatComposerScope,
   type StoredComposerRecovery,
@@ -30,14 +31,29 @@ export function readChatOutboxRecovery(state: ChatComposerScope): {
   if (!storage) {
     throw new Error("Browser storage is unavailable");
   }
-  const store = readStoredOutboxStore(storage, storageTargetForGateway(state.settings?.gatewayUrl));
+  const target = storageTargetForComposer(state);
+  const store = readStoredOutboxStore(storage, target);
+  // Legacy tab metadata has no account claim. Keep it in its original bucket
+  // until an explicit review transfers a row; no login adopts or drains it.
+  const legacy = target.recoveryScope
+    ? readStoredOutboxStore(storage, storageTargetForGateway(state.settings?.gatewayUrl))
+    : null;
+  const recovery = { ...store.recovery };
+  if (legacy) {
+    for (const [key, session] of Object.entries(legacy.sessions)) {
+      recovery["legacy-session:" + key] = { sourceVersion: 4, sourceScopeKey: key, session };
+    }
+    for (const [key, entry] of Object.entries(legacy.recovery)) {
+      recovery["legacy-recovery:" + key] = entry;
+    }
+  }
   return {
-    entries: Object.entries(store.recovery)
+    entries: Object.entries(recovery)
       .filter(([, entry]) =>
-        (entry.session.queue ?? []).every((item) => outboxPayloadMatchesOwner(state, item)),
+        (entry.session.queue ?? []).every((item) => outboxPayloadCanRecover(state, item)),
       )
       .map(([id, entry]) => Object.assign({}, entry, { id })),
-    blocked: store.recoveryBlocked === true,
+    blocked: store.recoveryBlocked === true || legacy?.recoveryBlocked === true,
   };
 }
 
@@ -46,8 +62,10 @@ export function captureChatOutboxRecoveryDestination(
   scope: StoredChatOutboxScope,
 ) {
   const storage = getSafeSessionStorage();
+  const recoveryScope = observeOutboxRecoveryOwner(state);
   if (
     !storage ||
+    !recoveryScope ||
     !hasUiSessionDefaults(state) ||
     state.selectedChatSessionIncognito ||
     isIncognitoSessionKey(scope.sessionKey) ||
@@ -55,7 +73,7 @@ export function captureChatOutboxRecoveryDestination(
   ) {
     return null;
   }
-  const target = storageTargetForGateway(state.settings?.gatewayUrl);
+  const target = storageTargetForComposer(state);
   const store = readStoredOutboxStore(storage, target);
   resolvePendingComposerSessions(store, state);
   const storeSessionKey = storedChatOutboxScopeKey(
@@ -65,7 +83,7 @@ export function captureChatOutboxRecoveryDestination(
   return {
     scope,
     gatewayOwner: target.gatewayOwner,
-    recoveryScope: observeOutboxRecoveryOwner(state),
+    recoveryScope,
     session: JSON.stringify(session),
     revision: readDraftRevisionState(storage, target.key, storeSessionKey, session?.draftRevision)
       .latestAttempt,
@@ -87,12 +105,20 @@ export function restoreChatOutboxRecovery(
     if (!current || JSON.stringify(current) !== JSON.stringify(destination)) {
       return "conflict";
     }
-    const target = storageTargetForGateway(state.settings?.gatewayUrl);
+    const target = storageTargetForComposer(state);
     const store = readStoredOutboxStore(storage, target);
     const { id, ...expected } = entry;
+    const legacyTarget = storageTargetForGateway(state.settings?.gatewayUrl);
+    const legacy = id.startsWith("legacy-") ? readStoredOutboxStore(storage, legacyTarget) : null;
+    const sourceKey = id.slice(id.indexOf(":") + 1);
+    const source = legacy
+      ? id.startsWith("legacy-session:")
+        ? { sourceVersion: 4, sourceScopeKey: sourceKey, session: legacy.sessions[sourceKey] }
+        : legacy.recovery[sourceKey]
+      : store.recovery[id];
     if (
-      JSON.stringify(store.recovery[id]) !== JSON.stringify(expected) ||
-      !(entry.session.queue ?? []).every((item) => outboxPayloadMatchesOwner(state, item))
+      JSON.stringify(source) !== JSON.stringify(expected) ||
+      !(entry.session.queue ?? []).every((item) => outboxPayloadCanRecover(state, item))
     ) {
       return "conflict";
     }
@@ -119,6 +145,8 @@ export function restoreChatOutboxRecovery(
       ),
       queue: session.queue?.map((item) =>
         Object.assign({}, item, scope, {
+          // Explicit review is the admission that assigns legacy input to this account.
+          storageScope: JSON.stringify([destination.gatewayOwner, destination.recoveryScope]),
           sendState:
             item.sendState === "held"
               ? "held"
@@ -140,6 +168,15 @@ export function restoreChatOutboxRecovery(
         JSON.stringify(normalizeStoredSession(store.sessions[key]))
     ) {
       return "storage-failed";
+    }
+    if (legacy) {
+      // Destination is verified before retiring the complete original source.
+      if (id.startsWith("legacy-session:")) {
+        delete legacy.sessions[sourceKey];
+      } else {
+        delete legacy.recovery[sourceKey];
+      }
+      writeStoredOutboxStore(storage, legacyTarget, legacy);
     }
     notifyStoredChatOutboxChanges();
     return "restored";

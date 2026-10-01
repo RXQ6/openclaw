@@ -1,6 +1,7 @@
-// @vitest-environment node
 import { expect, it } from "vitest";
 import { createDeferred } from "../../../../test/helpers/promise.js";
+// @vitest-environment node
+import { captureChatOutboxAdmission } from "../../lib/chat/outbox-store.ts";
 import { createSessionsListResult } from "../../test-helpers/chat-model.ts";
 import { getChatAttachmentDataUrl } from "./attachment-payload-store.ts";
 import { createStagedAttachment } from "./chat-delivery-attachments.test-support.ts";
@@ -142,7 +143,7 @@ it.each([true, false])(
     expect(
       chatOutboxOwner(host).admit(
         host,
-        { scope: { sessionKey: "global", agentId: "writer" }, awaitingDefaults: false },
+        captureChatOutboxAdmission(host, "global", "writer"),
         queued,
       ),
     ).toBe("admitted");

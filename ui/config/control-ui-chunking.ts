@@ -174,7 +174,7 @@ export function createControlUiCodeSplitting(options: { includeBootGroups?: bool
                 // Shared and chat groups both contain dense UI modules; keep their
                 // generated chunks within the existing compressed-size budget.
                 minSize: 16 * 1024,
-                maxSize: 1408 * 1024,
+                maxSize: 1344 * 1024,
               };
             }),
             ...(["shared", "new", "chat"] as const).map((route) => {

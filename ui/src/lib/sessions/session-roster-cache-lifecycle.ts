@@ -1,5 +1,10 @@
 import { gatewayCredentialScope } from "@openclaw/gateway-client/browser";
-import { resolveBootRecordAuth } from "../../app/boot-record.ts";
+import {
+  readOfflineStorageScope,
+  resolveBootRecordAuth,
+  subscribeBootRecordChanges,
+  bootRecordAccountMatches,
+} from "../../app/boot-record.ts";
 import type { SessionGateway, SessionListOptions, SessionState } from "./session-capability.ts";
 import { sessionRosterCache, type SessionRosterCacheOptions } from "./session-roster-cache.ts";
 
@@ -15,14 +20,54 @@ export function createSessionRosterCacheLifecycle(
   },
 ) {
   const cache = options.rosterCache ?? sessionRosterCache;
-  const currentScope = () =>
-    gateway.connection
+  const currentScope = () => {
+    const gatewayScope = gateway.connection
       ? gatewayCredentialScope(gateway.connection.gatewayUrl)
       : options.bootRecord?.scope;
+    const account =
+      readOfflineStorageScope({ client: gateway.snapshot.client }) ??
+      options.bootRecord?.recoveryScope;
+    return gatewayScope && account
+      ? `account:${JSON.stringify([gatewayScope, account])}`
+      : gatewayScope;
+  };
   let cachedScope = currentScope();
   let cachedConnectionRevision = gateway.connectionRevision;
   let cachedProfileId = options.bootRecord?.profileId;
   const retirement = new AbortController();
+  const stopRetirement = subscribeBootRecordChanges(({ scope, replacement }) => {
+    if (
+      !scope ||
+      scope ===
+        (gateway.connection
+          ? gatewayCredentialScope(gateway.connection.gatewayUrl)
+          : options.bootRecord?.scope)
+    ) {
+      if (
+        bootRecordAccountMatches(
+          replacement,
+          gateway.snapshot.hello?.auth?.recoveryScope ??
+            readOfflineStorageScope({ client: gateway.snapshot.client }) ??
+            options.bootRecord?.recoveryScope,
+          gateway.snapshot.selfUser?.id ?? cachedProfileId,
+        )
+      ) {
+        return;
+      }
+      retirement.abort();
+      if (host.readState().resultCached) {
+        host.publish({
+          ...host.readState(),
+          result: null,
+          resultCached: false,
+          agentId: null,
+          groups: [],
+          groupSettings: [],
+          sectionOrder: [],
+        });
+      }
+    }
+  });
   const initial = {
     scope: cachedScope,
     connectionRevision: cachedConnectionRevision,
@@ -85,7 +130,7 @@ export function createSessionRosterCacheLifecycle(
       cachedProfileId = undefined;
       cache.write({
         version: 1,
-        scope: gatewayCredentialScope(gateway.connection.gatewayUrl),
+        scope: currentScope()!,
         savedAt: Date.now(),
         profileId: gateway.snapshot.selfUser?.id ?? null,
         agentId: state.agentId,
@@ -97,6 +142,7 @@ export function createSessionRosterCacheLifecycle(
       });
     },
     dispose() {
+      stopRetirement();
       retirement.abort();
     },
   };

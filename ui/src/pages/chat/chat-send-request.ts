@@ -35,6 +35,7 @@ export async function requestChatSend(
     replyToId?: string;
     expectedLeafEntryId?: string | null;
   },
+  options?: { timeoutMs: number },
 ): Promise<ChatSendAck> {
   if (params.attachments?.length) {
     assertUploadsEnabled(state.uploadConfig);
@@ -60,24 +61,29 @@ export async function requestChatSend(
   const controlUiReconnectResume = Boolean(
     !params.intent && sessionId && state.reconnectResumeSessionId === sessionId,
   );
-  const payload = await state.client!.request("chat.send", {
-    sessionKey,
-    ...(isUiGlobalSessionKey(sessionKey) && selectedAgentId ? { agentId: selectedAgentId } : {}),
-    ...(sessionId ? { sessionId } : {}),
-    ...(controlUiReconnectResume ? { __controlUiReconnectResume: true } : {}),
-    message: params.message,
-    ...(params.workContext ? { workContext: params.workContext } : {}),
-    ...(params.mentions?.length ? { mentions: params.mentions } : {}),
-    ...(params.intent ? { intent: params.intent } : {}),
-    deliver: false,
-    ...(params.replyToId ? { replyToId: params.replyToId } : {}),
-    ...(params.queueMode ? { queueMode: params.queueMode } : {}),
-    ...(params.expectedLeafEntryId !== undefined
-      ? { expectedLeafEntryId: params.expectedLeafEntryId }
-      : {}),
-    idempotencyKey: params.runId,
-    attachments: buildChatApiAttachments(params.attachments),
-  });
+  const payload = await state.client!.request(
+    "chat.send",
+    {
+      sessionKey,
+      ...(isUiGlobalSessionKey(sessionKey) && selectedAgentId ? { agentId: selectedAgentId } : {}),
+      ...(sessionId ? { sessionId } : {}),
+      ...(controlUiReconnectResume ? { __controlUiReconnectResume: true } : {}),
+      message: params.message,
+      ...(params.workContext ? { workContext: params.workContext } : {}),
+      ...(params.mentions?.length ? { mentions: params.mentions } : {}),
+      ...(params.intent ? { intent: params.intent } : {}),
+      deliver: false,
+      ...(params.replyToId ? { replyToId: params.replyToId } : {}),
+      ...(params.queueMode ? { queueMode: params.queueMode } : {}),
+      ...(params.expectedLeafEntryId !== undefined
+        ? { expectedLeafEntryId: params.expectedLeafEntryId }
+        : {}),
+      idempotencyKey: params.runId,
+      attachments: buildChatApiAttachments(params.attachments),
+    },
+    // Detached commands have no durable uncertainty owner; only outbox-owned sends opt in.
+    { timeoutMs: options?.timeoutMs ?? null },
+  );
   if (controlUiReconnectResume) {
     state.reconnectResumeSessionId = null;
   }

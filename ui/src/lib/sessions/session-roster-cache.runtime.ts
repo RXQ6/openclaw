@@ -100,22 +100,55 @@ export async function flushSessionRosters(): Promise<void> {
   await writeChain;
 }
 
-export async function clearCachedBootState(): Promise<void> {
+export async function clearCachedBootState(scope?: string, recoveryScope?: string): Promise<void> {
+  const matchesScope = (key: string) =>
+    recoveryScope && scope
+      ? key === `account:${JSON.stringify([scope, recoveryScope])}`
+      : key === scope || key.startsWith(`account:${JSON.stringify([scope]).slice(0, -1)},`);
   invalidateSessionRosterCache();
-  clearBootRecords();
+  clearBootRecords(scope);
   if (timer !== null) {
     clearTimeout(timer);
     timer = null;
   }
-  pending.clear();
-  latestPublications.clear();
+  if (scope) {
+    for (const key of pending.keys()) {
+      if (matchesScope(key)) {
+        pending.delete(key);
+        latestPublications.delete(key);
+      }
+    }
+  } else {
+    pending.clear();
+    latestPublications.clear();
+  }
   // A successor write must wait for deletion as well as the retired writer's lazy load.
   const precedingWrites = writeChain;
   writeChain = (async () => {
     try {
       await precedingWrites;
     } finally {
-      await resetSessionRosterDatabase();
+      if (!scope) {
+        await resetSessionRosterDatabase();
+      } else {
+        const database = await openSessionRosterDatabase();
+        if (database) {
+          try {
+            const transaction = database.transaction(SESSION_ROSTER_STORE_NAME, "readwrite");
+            const completed = rosterTransactionDone(transaction);
+            const store = transaction.objectStore(SESSION_ROSTER_STORE_NAME);
+            const keys = await rosterRequestResult(store.getAllKeys());
+            for (const key of keys) {
+              if (typeof key === "string" && matchesScope(key)) {
+                store.delete(key);
+              }
+            }
+            await completed;
+          } finally {
+            database.close();
+          }
+        }
+      }
     }
   })();
   await writeChain;

@@ -29,6 +29,7 @@ import { setAvatarGatewayOrigin } from "../lib/identity-avatar-context.ts";
 import { resolveSessionKey } from "../lib/sessions/index.ts";
 import { readSessionDefaults } from "../lib/sessions/session-key.ts";
 import { generateUUID } from "../lib/uuid.ts";
+import { clearBootRecords } from "./boot-record.ts";
 import { clearWarmBootState } from "./bootstrap-warm-boot.ts";
 import type {
   ApplicationGateway,
@@ -50,6 +51,7 @@ import {
 } from "./gateway-observers.ts";
 import { readSuspensionPhase } from "./gateway-readiness.ts";
 import { createAvailabilityIndicators } from "./gateway-store.availability.ts";
+import { prepareGatewayClientCredentials } from "./gateway-store.credentials.ts";
 import { createDeviceCredentialMethods } from "./gateway-store.device-credential.ts";
 import { createGatewaySelfProfile } from "./gateway-store.self-profile.ts";
 import { readHelloPluginCapabilities } from "./plugin-capabilities.ts";
@@ -331,7 +333,10 @@ export function createApplicationGateway(
     const retiredEventLog = credentialsChanged ? eventLog.resetConnection() : null;
     if (credentialsChanged) {
       connectionRevision += 1;
-      void clearWarmBootState();
+      void clearWarmBootState(
+        gatewayCredentialScope(connection.gatewayUrl),
+        client?.offlineRecoveryScope ?? client?.recoveryScope,
+      );
     }
     // Only a gateway URL that differs from the current connection counts as an
     // explicit selection. The login gate always resubmits its prefilled URL, so
@@ -386,13 +391,7 @@ export function createApplicationGateway(
     client?.stop();
 
     const nextClient = createClient({
-      url: nextConnection.gatewayUrl,
-      token: nextConnection.token.trim() ? nextConnection.token : undefined,
-      bootstrapToken: nextConnection.bootstrapToken.trim()
-        ? nextConnection.bootstrapToken
-        : undefined,
-      bootstrapProfile: nextConnection.bootstrapProfile,
-      password: nextConnection.password.trim() ? nextConnection.password : undefined,
+      ...prepareGatewayClientCredentials(nextConnection, credentialsChanged, client),
       clientName: options.clientOptions?.clientName ?? "openclaw-control-ui",
       clientVersion: CONTROL_UI_BUILD_INFO.version ?? "dev",
       clientBuildId: CONTROL_UI_BUILD_INFO.buildId,
@@ -525,6 +524,11 @@ export function createApplicationGateway(
           return;
         }
         canvasSurface.stop();
+        if (readConnectionAuthReason(error?.details) || error?.code === "PAIRING_REQUIRED") {
+          nextClient.retireOfflineRecoveryScope?.();
+          everConnected = false;
+          clearBootRecords(gatewayCredentialScope(nextConnection.gatewayUrl));
+        }
         const mismatchedBuildId = readControlUiBuildMismatchId(error?.details);
         if (mismatchedBuildId) {
           void scheduleStaleChunkReload({
@@ -717,6 +721,11 @@ export function createApplicationGateway(
       gatewayUrl: () => connection.gatewayUrl,
       connect,
       isStopped: () => stopped,
+      retireOfflineAccess: () => {
+        client?.retireOfflineRecoveryScope?.();
+        everConnected = false;
+        connectionRevision += 1;
+      },
     }),
   };
   return gateway;

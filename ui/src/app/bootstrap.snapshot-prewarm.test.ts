@@ -51,6 +51,7 @@ describe("bootstrap routed snapshot prewarm", () => {
     persistSessionToken(settings.gatewayUrl, "test-token");
     const record: BootRecord = {
       version: 2,
+      recoveryScope: "account-a",
       authMethod: "token",
       credential: "9d17676d",
       scope: gatewayCredentialScope(settings.gatewayUrl),
@@ -73,7 +74,9 @@ describe("bootstrap routed snapshot prewarm", () => {
     const runtime = bootstrapApplication();
     try {
       if (expected) {
-        expect(startRead).toHaveBeenCalledExactlyOnceWith(expected);
+        expect(startRead).toHaveBeenCalledExactlyOnceWith(
+          `scope:${JSON.stringify([record.scope, "account-a"])}\u0000${expected}`,
+        );
       } else {
         expect(startRead).not.toHaveBeenCalled();
       }

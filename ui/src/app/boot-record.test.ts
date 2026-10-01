@@ -174,4 +174,17 @@ describe("Control UI boot record", () => {
     expect(readBootRecord(scope, credential)).toBeNull();
     expect(clearBootRecords).not.toThrow();
   });
+  it.each(["trusted-proxy", "tailscale", "password"])(
+    "retains %s storage identity without a credential",
+    async (method) => {
+      const auth = resolveBootRecordAuth({ method, recoveryScope: "account-a" });
+      expect(auth).toEqual({ authMethod: method, credential: "" });
+      persistBootRecord({ ...record(), ...auth!, recoveryScope: "account-a" });
+      await settleWrite();
+      expect(readBootRecord(scope, () => "")?.recoveryScope).toBe("account-a");
+      clearBootRecords(scope);
+      window.dispatchEvent(new Event("pagehide"));
+      expect(readBootRecord(scope, () => "")).toBeNull();
+    },
+  );
 });

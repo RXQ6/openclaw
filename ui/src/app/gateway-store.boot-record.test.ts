@@ -52,3 +52,31 @@ it("clears persisted and pending warm state before yielding or pagehide", async 
     gateway.stop();
   }
 });
+
+it.each(["trusted-proxy", "tailscale", "password"])(
+  "supplies %s cached identity without authorizing recovery",
+  async (authMethod) => {
+    const settings = { ...loadSettings(), token: "" };
+    const record: BootRecord = {
+      version: 2,
+      authMethod,
+      credential: "",
+      recoveryScope: "account-a",
+      scope: gatewayCredentialScope(settings.gatewayUrl),
+      savedAt: Date.now(),
+      profileId: "profile-a",
+      agents: { defaultId: "main", mainKey: "main", scope: "per-sender", agents: [{ id: "main" }] },
+      groups: [],
+      sectionOrder: [],
+    };
+    persistBootRecord(record);
+    window.dispatchEvent(new Event("pagehide"));
+    const { gateway, current } = createGatewayStoreTestStore({ settings });
+    gateway.connect();
+    expect(current().opts.offlineRecoveryScope).toBe("account-a");
+    expect(current().opts.password).toBeUndefined();
+    expect(current().opts.token).toBeUndefined();
+    expect(gateway.snapshot.phase).toBe("connecting");
+    gateway.stop();
+  },
+);

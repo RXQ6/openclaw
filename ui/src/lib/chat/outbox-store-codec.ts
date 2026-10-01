@@ -44,6 +44,7 @@ export type StoredComposerSession = {
 export function sameQueuedDeliveryVersion(left: ChatQueueItem, right: ChatQueueItem): boolean {
   return (
     left.id === right.id &&
+    left.storageScope === right.storageScope &&
     left.asyncQuestionItemId === right.asyncQuestionItemId &&
     left.text === right.text &&
     left.workContextUnavailable === right.workContextUnavailable &&
@@ -114,6 +115,10 @@ export function normalizeStoredQueueItem(value: unknown): ChatQueueItem | null {
         .filter((item): item is ChatAttachment => item !== null)
     : [];
   const item: ChatQueueItem = { id, text, createdAt };
+  const storageScope = normalizeOptionalString(entry.storageScope);
+  if (storageScope) {
+    item.storageScope = storageScope;
+  }
   const asyncQuestionItemId = normalizeOptionalString(entry.asyncQuestionItemId);
   if (asyncQuestionItemId && asyncQuestionItemId.length <= 256) {
     item.asyncQuestionItemId = asyncQuestionItemId;
