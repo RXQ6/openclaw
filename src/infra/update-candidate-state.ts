@@ -491,6 +491,7 @@ export async function readUpdateDatabaseGenerationsIsolated(
     acquisition?: UpdateRecoveryCaptureAcquisition;
   } = {},
 ): Promise<UpdateDatabaseGenerations> {
+  const maintenanceOwner = options.acquisition?.mode === "maintenance-owner";
   const sourceEnv = options.env ?? process.env;
   const controller = new AbortController();
   const signal = options.signal
@@ -515,19 +516,16 @@ export async function readUpdateDatabaseGenerationsIsolated(
         await runUpdateStateInspectionWorker({
           ...worker,
           root: options.root,
-          ...(options.acquisition?.mode === "maintenance-owner"
-            ? { ioBudget: "deadline" as const }
-            : {}),
+          ...(maintenanceOwner ? { ioBudget: "deadline" as const } : {}),
           input: {
             mode: "database-generations",
             paths,
             stateDir: resolveStateDir(sourceEnv),
             config: {},
           },
-          databases:
-            options.acquisition?.mode === "maintenance-owner"
-              ? await readUpdateStateDatabaseSizesInProcess(paths)
-              : await readUpdateStateDatabaseSizes(paths, worker),
+          databases: maintenanceOwner
+            ? await readUpdateStateDatabaseSizesInProcess(paths)
+            : await readUpdateStateDatabaseSizes(paths, worker),
         }),
         z.record(z.string(), z.nullable(z.string().regex(/^[a-f0-9]{64}$/u))),
       );

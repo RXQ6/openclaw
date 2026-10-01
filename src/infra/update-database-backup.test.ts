@@ -212,6 +212,20 @@ it.each(["", "-wal", "-shm", "-journal"])(
 
 async function originalCaptureFixture(externalAgents = false) {
   const f = await fixture(externalAgents);
+  const registryOnly = path.join(f.root, "registry-only", "agent.sqlite");
+  if (externalAgents) {
+    await fs.mkdir(path.dirname(registryOnly));
+    await fs.copyFile(f.external[0]!, registryOnly);
+    const shared = new DatabaseSync(f.shared);
+    try {
+      shared.exec("ALTER TABLE agent_databases ADD COLUMN agent_id TEXT");
+      shared
+        .prepare("INSERT INTO agent_databases(path, agent_id) VALUES (?, ?)")
+        .run(registryOnly, "registry-only");
+    } finally {
+      shared.close();
+    }
+  }
   const configPath = path.join(f.stateDir, "openclaw.json");
   const authoredConfig = path.join(f.stateDir, "authored.json5");
   const include = path.join(f.stateDir, "settings.json5");
@@ -290,6 +304,7 @@ async function originalCaptureFixture(externalAgents = false) {
   };
   return {
     ...f,
+    registryOnly,
     bytes,
     family,
     familyPaths,
@@ -380,6 +395,7 @@ it("seals equivalent original bytes under isolated steps and one maintenance-own
   );
 
   const worker = vi.spyOn(inspection, "runUpdateStateInspectionWorker");
+  const parentDiscovery = vi.spyOn(candidateState, "discoverUpdateStateSchemaInspectionInProcess");
   const isolatedGenerations = vi.spyOn(candidateState, "readUpdateDatabaseGenerationsIsolated");
   const isolatedSizes = vi.spyOn(databaseSizes, "readUpdateStateDatabaseSizes");
   const scope = createOpenClawDatabaseMaintenanceScope({
@@ -404,6 +420,29 @@ it("seals equivalent original bytes under isolated steps and one maintenance-own
       expect(maintainedManifest[field], field).toEqual(manifest[field]);
     }
     expect(worker).toHaveBeenCalledOnce();
+    expect(parentDiscovery).toHaveBeenCalledOnce();
+    expect(parentDiscovery).toHaveBeenCalledWith(
+      expect.objectContaining({ preserveSourceArtifacts: true }),
+    );
+    const backupRequest = worker.mock.calls[0]![0];
+    expect(backupRequest.input).toMatchObject({
+      mode: "database-backup",
+      inspectionPlan: {
+        files: expect.arrayContaining([
+          [expect.any(String), expect.objectContaining({ spellings: [f.registryOnly] })],
+        ]),
+      },
+    });
+    expect(backupRequest.databases).toContainEqual({
+      path: f.registryOnly,
+      sizeBytes: (await fs.stat(f.registryOnly, { bigint: true })).size,
+    });
+    expect(maintainedManifest.databases).toContainEqual(
+      expect.objectContaining({ path: f.registryOnly, role: "agent", agentId: "registry-only" }),
+    );
+    expect(maintainedManifest.entries).toContainEqual(
+      expect.objectContaining({ sourcePath: f.registryOnly, kind: "file", sqlite: true }),
+    );
     expect(isolatedGenerations).not.toHaveBeenCalled();
     expect(isolatedSizes).not.toHaveBeenCalled();
     expect(await Promise.all(f.familyPaths.map((file) => fs.readFile(file)))).toEqual(f.family);
@@ -439,8 +478,8 @@ it("falls back to the isolated generation seal when live source reads were admit
     );
     expect(maintainedManifest.entries).toEqual(originalManifest.entries);
     expect(isolatedGenerations).toHaveBeenCalledOnce();
-    expect(isolatedSizes).not.toHaveBeenCalled();
-    expect(worker).toHaveBeenCalledTimes(2);
+    expect(isolatedSizes).toHaveBeenCalled();
+    expect(worker).toHaveBeenCalledTimes(3);
   } finally {
     await scope.close();
   }

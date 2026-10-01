@@ -3,6 +3,11 @@ import path from "node:path";
 import { sameFileIdentity } from "@openclaw/fs-safe/advanced";
 import { z } from "zod";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { openClawStateDatabaseCache } from "../state/openclaw-state-db-cache.js";
+import {
+  getOpenClawDatabaseMaintenanceScope,
+  maintenanceOwnerMayCopySourcesInProcess,
+} from "../state/openclaw-state-maintenance-context.js";
 import { resolvePathViaExistingAncestorSync } from "./boundary-path.js";
 import {
   ensureDurableDirectory,
@@ -23,7 +28,6 @@ import {
   runUpdateStateInspectionWorker,
 } from "./update-candidate-state.inspection.js";
 import {
-  collectStateDatabasePaths,
   discoverUpdateStateSchemaInspectionInProcess,
   UpdateStateSchemaInspectionPlanSchema,
 } from "./update-candidate-state.js";
@@ -221,15 +225,14 @@ async function canonicalDatabaseInventory(
 export async function createUpdateDatabaseBackupInProcess(
   input: BackupInput & {
     stagingRoot: string;
-    inspectionPlan?: InspectionPlan;
+    inspectionPlan: InspectionPlan;
     onProgress?: (progress: UpdateStateInspectionProgress) => void;
   },
 ): Promise<UpdateDatabaseBackup> {
   const directory = await fs.realpath(`${input.backupRoot}.databases`);
   // Older parents strip owners from discovery before calling the candidate worker.
   // Compare the same admitted dialect; absent metadata must not become an inventory change.
-  const inspectionPlan =
-    input.inspectionPlan ?? (await discoverUpdateStateSchemaInspectionInProcess(input));
+  const inspectionPlan = input.inspectionPlan;
   const includeOwners = inspectionPlan.files.some(([, database]) => database.owners !== undefined);
   const inventory = await canonicalDatabaseInventory(
     inspectionPlan,
@@ -350,9 +353,16 @@ export async function createUpdateDatabaseBackup({
         stagingRoot: directory,
       };
       const shared = path.resolve(input.stateDir, "state", "openclaw.sqlite");
-      const maintenanceOwner = acquisition?.mode === "maintenance-owner";
-      const inspectionPlan = maintenanceOwner
-        ? undefined
+      const custody =
+        acquisition?.mode === "maintenance-owner" &&
+        maintenanceOwnerMayCopySourcesInProcess(getOpenClawDatabaseMaintenanceScope(), shared) &&
+        !openClawStateDatabaseCache.isOpenClawStateDatabaseOpen(shared);
+      const inspectionPlan = custody
+        ? await discoverUpdateStateSchemaInspectionInProcess({
+            ...workerInput,
+            stagingRoot: directory,
+            preserveSourceArtifacts: true,
+          })
         : parseUpdateStateInspectionWorker(
             await runUpdateStateInspectionWorker({
               ...worker,
@@ -362,9 +372,7 @@ export async function createUpdateDatabaseBackup({
             UpdateStateSchemaInspectionPlanSchema,
           );
       const files = [
-        ...[...(inspectionPlan?.files ?? (await collectStateDatabasePaths(input)))].flatMap(
-          ([, database]) => database.spellings,
-        ),
+        ...inspectionPlan.files.flatMap(([, database]) => database.spellings),
         ...(additionalPaths ?? []),
         ...(additionalFiles ?? []),
       ];
@@ -374,10 +382,10 @@ export async function createUpdateDatabaseBackup({
           input: {
             ...workerInput,
             mode: "database-backup",
-            ...(inspectionPlan ? { inspectionPlan } : {}),
+            inspectionPlan,
           },
-          ...(maintenanceOwner ? { ioBudget: "deadline" as const } : {}),
-          databases: maintenanceOwner
+          ...(custody ? { ioBudget: "deadline" as const } : {}),
+          databases: custody
             ? await readUpdateStateDatabaseSizesInProcess(files)
             : await readUpdateStateDatabaseSizes(files, worker),
         }),

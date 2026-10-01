@@ -68,28 +68,19 @@ export async function preserveDoctorOriginalState(params: {
     if (!driver) {
       throw new Error("The Doctor process could not be identified for the pre-repair capture.");
     }
-    const [
-      { captureUpdateRecoveryBaseline, retireExpiredStandaloneDoctorCaptures },
-      { measureGatewayBootstrapStep },
-    ] = await Promise.all([
-      import("../infra/update-recovery-baseline-capture.js"),
-      import("../cli/startup-trace.js"),
-    ]);
+    const { captureUpdateRecoveryBaseline, retireExpiredStandaloneDoctorCaptures } =
+      await import("../infra/update-recovery-baseline-capture.js");
     assertCurrent();
     const standaloneRunId = `doctor-${randomUUID()}`;
-    const captured = await measureGatewayBootstrapStep(
-      "cli.bootstrap.doctor-original-capture",
-      () =>
-        captureUpdateRecoveryBaseline({
-          runId: standaloneRunId,
-          installRoot,
-          env: params.env,
-          drivers: [driver],
-          assertCurrent,
-          signal: params.signal,
-          acquisition: { mode: "maintenance-owner" },
-        }),
-    );
+    const captured = await captureUpdateRecoveryBaseline({
+      runId: standaloneRunId,
+      installRoot,
+      env: params.env,
+      drivers: [driver],
+      assertCurrent,
+      signal: params.signal,
+      acquisition: { mode: "maintenance-owner" },
+    });
     assertCurrent();
     params.runtime.log(
       `Pre-repair state retained for manual recovery at ${captured.ref.manifestPath}.`,
