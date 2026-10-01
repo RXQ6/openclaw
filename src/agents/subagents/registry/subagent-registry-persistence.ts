@@ -589,7 +589,10 @@ export async function publishSubagentRunPostimages(params: {
   let capturing = true;
   let publication: Promise<void>;
   try {
-    params.assertCurrent();
+    // An external writer can hide current facts until its turn; check them inside it.
+    if (!params.withPublication) {
+      params.assertCurrent();
+    }
     publication = params.persist(
       params.context,
       {
