@@ -49,6 +49,7 @@ export type PluginInvocationBinding = {
 };
 
 export type PluginInvocationContext = {
+  assertCurrent?: (instance: PluginInstanceHandle) => void;
   lookup: (instance: PluginInstanceHandle) => PluginInvocationBinding | undefined;
 };
 

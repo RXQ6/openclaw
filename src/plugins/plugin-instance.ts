@@ -383,6 +383,7 @@ export class PluginInstance {
   }
 
   private enter<T>(token: object, run: () => T): T {
+    pluginInvocationContext.getStore()?.assertCurrent?.(this);
     const current = invocation.getStore();
     const call =
       current?.instance === this && current.token === token ? current : { instance: this, token };

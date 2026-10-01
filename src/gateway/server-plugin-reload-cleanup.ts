@@ -295,7 +295,7 @@ export function createPluginReloadCleanup({
     }
     retainedWorkQueued = true;
     const deadlineAtMs = admittedWorkDeadline();
-    const reason = `Plugin replacement queued behind ${count} retained work item(s) for plugin ${[...pluginIds].join(", ")}; ${waitForDrain ? "waiting until they finish or the request is cancelled" : "applies when they finish within the 60s drain budget"}.`;
+    const reason = `Plugin replacement queued behind ${count} ${includeCalls ? "admitted" : "retained"} work item(s) for plugin ${[...pluginIds].join(", ")}; ${waitForDrain ? "waiting until they finish or the request is cancelled" : "applies when they finish within the 60s drain budget"}.`;
     reportStatus({ phase: "reloading", pluginIds: [...changedPluginIds], deadlineAtMs, reason });
     log.info(reason);
     try {
@@ -387,6 +387,14 @@ export function createPluginReloadCleanup({
       return release;
     },
     drainInstances,
+    quiesceInstances: () => {
+      for (const record of previousRegistry.plugins) {
+        const instance = changedPluginIds.has(record.id) && getPluginInstance(record);
+        if (instance && instance.quiesce()) {
+          quiescedInstances.push(instance);
+        }
+      }
+    },
     drainBeforeReplacement: async (
       pluginIds: ReadonlySet<string>,
       signal: AbortSignal,
@@ -401,12 +409,6 @@ export function createPluginReloadCleanup({
       assertCurrent();
       if (retainedWorkQueued) {
         recordWarning("Plugin replacement waited for retained work to finish.");
-      }
-      for (const record of previousRegistry.plugins) {
-        const instance = changedPluginIds.has(record.id) && getPluginInstance(record);
-        if (instance && instance.quiesce()) {
-          quiescedInstances.push(instance);
-        }
       }
       try {
         if (pluginIds.size) {

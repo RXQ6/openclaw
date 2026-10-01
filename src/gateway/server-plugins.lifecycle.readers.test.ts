@@ -105,6 +105,7 @@ it("serves active model and chat metadata throughout an admitted plugin call dra
       return result;
     });
     await draining.promise;
+    expect(instance.acceptingCalls).toBe(false);
     const during = await reads();
     expect(reloadSettled).toBe(false);
     expect(getActivePluginRegistry()).toBe(registry);

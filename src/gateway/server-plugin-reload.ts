@@ -153,6 +153,7 @@ export async function reloadGatewayPlugins(
     drainInstances,
     drainRetainedWork,
     drainBeforeReplacement,
+    quiesceInstances,
     resumeInstances,
     drainForRecovery,
     disposeInstances,
@@ -264,12 +265,13 @@ export async function reloadGatewayPlugins(
     await drainRetainedWork(resourceHandoffIds, drainSignal, replacement.setReloadStatus);
     assertCurrent();
     decisionReplacement = prepareDecisionProviderReload(previousRegistry, changedPluginIds);
+    channels.pause();
+    quiesceInstances();
     await drainRetainedWork(resourceHandoffIds, drainSignal, replacement.setReloadStatus, {
       includeCalls: true,
     });
     assertCurrent();
     configEffects.retire();
-    channels.pause();
     for (const sidecar of runtimeState.gatewayLifetimeSidecars.snapshot()) {
       const prepared = sidecar.preparePluginReload?.({
         previousRegistry,
@@ -283,7 +285,7 @@ export async function reloadGatewayPlugins(
       }
     }
     memoryReplacement = prepareMemoryRuntimeReload(previousRegistry, nextRegistry);
-    // Consumers release their handles while the producing instance is callable.
+    // Retained consumers and cleanup calls remain usable after ordinary admission closes.
     for (const sidecar of sidecarReplacements) {
       await sidecar.drain();
     }

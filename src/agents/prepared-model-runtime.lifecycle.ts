@@ -1,7 +1,6 @@
 /** Process close owns every admitted model runtime and native catalog worker. */
 import { createDeferredCore } from "../shared/deferred.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
-import type { PreparedModelRuntimePublicationQueue } from "./prepared-model-runtime.publication-queue.js";
 import type {
   PreparedModelRuntimeOwner,
   PreparedModelRuntimeReplacement,
@@ -135,7 +134,7 @@ export function createPreparedModelRuntimePluginDrain(
       };
     },
     async runAfter(
-      queue: Pick<PreparedModelRuntimePublicationQueue, "enqueue">,
+      queue: { enqueue: (task: () => Promise<void>) => Promise<void> },
       run: () => Promise<void>,
     ): Promise<void> {
       const assertCurrent = capturePreparedModelRuntimeLifetime();
