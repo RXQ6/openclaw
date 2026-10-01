@@ -168,6 +168,8 @@ it.runIf(process.platform !== "win32").for([
           );
       const env = {
         ...ciEnv(fixture.probe, parallelism, parallelism === 1),
+        // Parent reuse compares the threaded topology across both configs.
+        OPENCLAW_NODE_TEST_VITEST_ARGS_JSON: JSON.stringify(["--pool=threads"]),
         TMPDIR: temp,
         TMP: temp,
         TEMP: temp,
