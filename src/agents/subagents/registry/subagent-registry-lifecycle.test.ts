@@ -4205,7 +4205,7 @@ describe("requester settle wake trigger", () => {
     "owns context cleanup after its caller scope drains (%s)",
     async (mode) => {
       resetGatewayWorkAdmission();
-      resetContextEngineRuntimeQuarantineForTests();
+      await resetContextEngineRuntimeQuarantineForTests();
       runtimeMocks.log.mockClear();
       const registry = createEmptyPluginRegistry();
       const resources = new PluginRegistryInspectionResources(retireInspectionInstances);
@@ -4323,7 +4323,7 @@ describe("requester settle wake trigger", () => {
         vi.mocked(getRuntimeConfig).mockReset();
         vi.mocked(loadAgentRuntimePluginRegistryHandle).mockReset();
         resetSubagentRegistryRuntimeLoadersForTests();
-        resetContextEngineRuntimeQuarantineForTests();
+        await resetContextEngineRuntimeQuarantineForTests();
         resetGatewayWorkAdmission();
       }
     },

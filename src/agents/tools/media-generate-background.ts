@@ -324,7 +324,7 @@ export async function runMediaGenerationTask<T extends MediaGenerationExecutionR
           {
             type: "text" as const,
             text: [
-              `Background task started for ${generationLabel} generation (${handle.taskId}). Do not call ${toolName} again for this request. Wait for the completion event; the completion agent will send the finished ${generationLabel} here when it's ready.`,
+              `Background task started for ${generationLabel} generation (${handle.taskId}). Do not call ${toolName} again for this request. Do not wait, poll, or yield for it: end this turn (a short acknowledgement at most); the completion arrives as a later turn and sends the finished ${generationLabel} here.`,
               ...(params.messages ?? []),
             ]
               .filter((entry): entry is string => Boolean(entry))

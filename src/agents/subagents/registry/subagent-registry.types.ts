@@ -119,6 +119,8 @@ type SwarmQueuedLaunch = {
 
 /** Durable outbox state for the top-level requester settle wake. */
 export type RequesterSettleWakeState = {
+  /** Pending message-wait notice; consuming it leaves the completion cohort armed. */
+  pauseNotice?: { acknowledgment: string };
   status: "pending" | "dispatching";
   /** Number of delivery attempts already admitted. */
   attemptCount: number;
@@ -264,6 +266,8 @@ export type SubagentRegistrationScope = {
 };
 
 export type RegisterSubagentRunOptions = {
+  persistence?: "worker";
   assertCurrent?: () => void;
+  assertPublicationCurrent?: () => void;
   retainOwnership?: (scope: SubagentRegistrationScope) => void;
 };

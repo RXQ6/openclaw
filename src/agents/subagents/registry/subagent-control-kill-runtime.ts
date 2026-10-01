@@ -12,10 +12,7 @@ import {
 import { createLazyImportLoader } from "../../../shared/lazy-promise.js";
 import type { OpenClawStateWorkerContext } from "../../../state/openclaw-state-worker-context.types.js";
 import { createAgentRunDirectAbortError } from "../../run-termination.js";
-import {
-  persistSubagentAbortedLastRun,
-  type SubagentKillSession,
-} from "./subagent-control-session.js";
+import type { SubagentKillSession } from "./subagent-control-session.js";
 import {
   SUBAGENT_KILL_TASK_ERROR,
   type SubagentCancellationControl,
@@ -530,21 +527,6 @@ export async function killSubagentRun(params: {
             targetState: resolveSubagentKillTargetState(params.entry),
           };
         }
-        await persistSubagentAbortedLastRun({
-          childSessionKey,
-          storePath: resolved.storePath,
-          hasSessionEntry: resolved.entry !== undefined,
-          expectedSessionId: sessionId,
-          expectedLifecycleRevision: sessionLifecycleRevision,
-          abortedLastRun: true,
-          isCurrent: killOwnerCurrent,
-          assertCommitAllowed: () => {
-            assertState();
-            if (!killOwnerCurrent()) {
-              throw new Error("subagent kill lifecycle retired before abort-marker commit");
-            }
-          },
-        });
         return { killed: marked > 0, sessionId };
       };
       try {

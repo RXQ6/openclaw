@@ -79,20 +79,6 @@ function mergeStreamingConfig(base: unknown, override: unknown): unknown {
   return merged;
 }
 
-function mergeStreamingEntry(
-  base: AcpParentProgressStreamingConfig,
-  override: StreamingCompatEntry | undefined,
-): StreamingCompatEntry {
-  if (!override) {
-    return base;
-  }
-  return {
-    ...base,
-    ...override,
-    streaming: mergeStreamingConfig(base.streaming, override.streaming),
-  };
-}
-
 function resolveParentProgressStreamingEntry(params: {
   cfg: OpenClawConfig | undefined;
   deliveryContext: DeliveryContext | undefined;
@@ -114,7 +100,13 @@ function resolveParentProgressStreamingEntry(params: {
     channelId,
     normalizeAccountId,
   );
-  return mergeStreamingEntry(channelCfg, accountCfg);
+  return accountCfg
+    ? {
+        ...channelCfg,
+        ...accountCfg,
+        streaming: mergeStreamingConfig(channelCfg.streaming, accountCfg.streaming),
+      }
+    : channelCfg;
 }
 
 export function startAcpSpawnParentStreamRelay(params: {
@@ -308,9 +300,7 @@ export function startAcpSpawnParentStreamRelay(params: {
     if (disposed || flushTimer) {
       return;
     }
-    flushTimer = setTimeout(() => {
-      flushPending();
-    }, STREAM_FLUSH_MS);
+    flushTimer = setTimeout(flushPending, STREAM_FLUSH_MS);
     flushTimer.unref?.();
   };
 

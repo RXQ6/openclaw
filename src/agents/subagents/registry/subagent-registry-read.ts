@@ -108,6 +108,7 @@ export async function countPendingDescendantRuns(
       assertCurrent();
       return countPendingDescendantRunsFromRuns(new Map(runs), rootSessionKey);
     },
+    { sessionKeys: [rootSessionKey], descendants: true },
   );
   assertCurrent();
   return count;
@@ -156,21 +157,19 @@ export function listSubagentRunsForRequester(
 }
 
 export function getSubagentRunByChildSessionKey(childSessionKey: string): SubagentRunRecord | null {
-  const key = childSessionKey.trim();
   return getSubagentRunByChildSessionKeyFromRuns(
-    getSubagentRunsSnapshotForChildSession(subagentRuns, key),
-    key,
+    getSubagentRunsSnapshotForChildSession(subagentRuns, childSessionKey),
+    childSessionKey,
   );
 }
 
 export function getLatestSubagentRunByChildSessionKey(
   childSessionKey: string,
 ): SubagentRunRecord | null {
-  const key = childSessionKey.trim();
   return (
     getLatestSubagentRunByChildSessionKeyFromRuns(
-      getSubagentRunsSnapshotForChildSession(subagentRuns, key),
-      key,
+      getSubagentRunsSnapshotForChildSession(subagentRuns, childSessionKey),
+      childSessionKey,
     ) ?? null
   );
 }

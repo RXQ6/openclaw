@@ -59,10 +59,7 @@ export function hasSessionLocalHeartbeatRelayRoute(params: {
 
   // Explicit delivery overrides are not session-local and can route updates
   // to unrelated destinations (for example a pinned ops channel).
-  if (normalizeOptionalString(heartbeat?.to)) {
-    return false;
-  }
-  if (normalizeOptionalString(heartbeat?.accountId)) {
+  if (normalizeOptionalString(heartbeat.to) || normalizeOptionalString(heartbeat.accountId)) {
     return false;
   }
 

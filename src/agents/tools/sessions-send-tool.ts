@@ -8,7 +8,6 @@ import { resolveSessionThreadInfo } from "../../channels/plugins/session-convers
 import { tryResolveLegacyCompatibilityAgentId } from "../../config/legacy.default-agent-owner.js";
 import type { SessionDeliveryGeneration } from "../../config/sessions/session-delivery-generation.types.js";
 import { resolvePersistedSessionStoreOwnerForKey } from "../../config/sessions/session-store-owner.js";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { shouldResumeParentSubagent } from "../../gateway/session-subagent-resume.js";
 import { resolveGatewaySessionStoreTargetWithStore } from "../../gateway/session-utils-store-lookup.js";
 import { formatErrorMessage } from "../../infra/errors.js";
@@ -24,15 +23,13 @@ import {
   isUnscopedSessionKeySentinel,
   normalizeAgentId,
   normalizeAgentIdStrict,
-  toAgentStoreSessionKey,
 } from "../../routing/session-key.js";
 import { annotateInterSessionPromptText } from "../../sessions/input-provenance.js";
 import { isCronRunSessionKey, parseAgentSessionKey } from "../../sessions/session-key-utils.js";
 import { recordSessionParticipantBestEffort } from "../../sessions/session-participant-recording.js";
-import { registerSessionStateWatch } from "../../sessions/session-state-events.js";
 import { normalizeDeliveryContext } from "../../utils/delivery-context.shared.js";
 import { INTERNAL_MESSAGE_CHANNEL } from "../../utils/message-channel.js";
-import { listAgentIds, resolveSessionAgentId } from "../agent-scope.js";
+import { resolveSessionAgentId } from "../agent-scope.js";
 import { bindRequesterYieldCronAuthority } from "../cron-creator-authority-context.js";
 import { resolveNestedAgentLaneForSession } from "../lanes.js";
 import { isTerminalAgentWaitTimeout, waitForAgentRunReply } from "../run-wait.js";
@@ -59,15 +56,17 @@ import {
   resolveVisibleSessionReference,
 } from "./sessions-helpers.js";
 import {
-  prepareSessionsSendFollowup,
-  startSessionsSendFollowup,
-} from "./sessions-send-followup.js";
+  PlacedSessionsSendSchema,
+  PLACED_SESSIONS_SEND_DESCRIPTION,
+} from "./sessions-placement-tool-contract.js";
+import { dispatchSessionsSendFollowup } from "./sessions-send-followup.js";
 import { startSessionsSendReplyFlow } from "./sessions-send-reply-flow.js";
 import { captureSessionsSendResumeCaller, resumeSessionsSendTask } from "./sessions-send-resume.js";
 import {
   createConfiguredAgentMainSession,
+  isConfiguredAgentMainSessionKey,
   notifySessionsSendSession,
-  trySessionsSendActiveRunDelivery,
+  resolveConfiguredAgentMainSessionKey,
 } from "./sessions-send-tool.delivery.js";
 import { SessionsSendToolSchema, SessionsSendOutputSchema } from "./sessions-send-tool.schema.js";
 import type { SessionsSendToolOptions } from "./sessions-send-tool.types.js";
@@ -90,44 +89,6 @@ function sendFailure(
   });
 }
 
-function resolveConfiguredAgentMainSessionKey(params: {
-  cfg: OpenClawConfig;
-  agentId: string;
-  mainKey: string;
-}): string | undefined {
-  const agentId = normalizeAgentId(params.agentId);
-  if (!listAgentIds(params.cfg).includes(agentId)) {
-    return undefined;
-  }
-  return toAgentStoreSessionKey({
-    agentId,
-    requestKey: "main",
-    mainKey: params.mainKey,
-  });
-}
-
-function isConfiguredAgentMainSessionKey(params: {
-  cfg: OpenClawConfig;
-  sessionKey: string;
-  mainKey: string;
-}): boolean {
-  if (isUnscopedSessionKeySentinel(params.sessionKey)) {
-    return false;
-  }
-  if (params.sessionKey === params.mainKey) {
-    return true;
-  }
-  const agentId = parseAgentSessionKey(params.sessionKey)?.agentId;
-  return agentId
-    ? params.sessionKey ===
-        resolveConfiguredAgentMainSessionKey({
-          cfg: params.cfg,
-          agentId,
-          mainKey: params.mainKey,
-        })
-    : false;
-}
-
 export function createSessionsSendTool(opts?: SessionsSendToolOptions): AnyAgentTool {
   const requesterOrigin = normalizeDeliveryContext(opts?.requesterOrigin);
   const withRequesterAuthority = bindRequesterYieldCronAuthority(opts?.requesterTurnRunId);
@@ -135,8 +96,10 @@ export function createSessionsSendTool(opts?: SessionsSendToolOptions): AnyAgent
     label: "Session Send",
     name: "sessions_send",
     displaySummary: SESSIONS_SEND_TOOL_DISPLAY_SUMMARY,
-    description: describeSessionsSendTool(),
-    parameters: SessionsSendToolSchema,
+    description: opts?.workerPlacement
+      ? PLACED_SESSIONS_SEND_DESCRIPTION
+      : describeSessionsSendTool(),
+    parameters: opts?.workerPlacement ? PlacedSessionsSendSchema : SessionsSendToolSchema,
     outputSchema: SessionsSendOutputSchema,
     execute: wrapGatewayPersonalToolExecution(async (_toolCallId, args) => {
       const params = isRecord(args) ? args : {};
@@ -507,6 +470,7 @@ export function createSessionsSendTool(opts?: SessionsSendToolOptions): AnyAgent
 
       return await runWithScopedSessionAccess({
         cfg,
+        storePath: opts?.expectedTargetStorePath,
         agentId: targetAgentId,
         expectedSessionId,
         ...(opts?.signal ? { signal: opts.signal } : {}),
@@ -556,22 +520,6 @@ export function createSessionsSendTool(opts?: SessionsSendToolOptions): AnyAgent
             targetSessionEntry,
             targetAcpMeta,
           );
-          // Register watches only after successful dispatch, using any Cron fallback's actual target.
-          const watchRequested = params.watch === true;
-          const registerWatchIfRequested = (targetSessionKey: string) => {
-            const watched =
-              watchRequested &&
-              !expectedSessionId &&
-              requesterSessionKey &&
-              requesterSessionKey !== targetSessionKey
-                ? registerSessionStateWatch({
-                    watcherSessionKey: requesterSessionKey,
-                    targetSessionKey,
-                    targetAgentId,
-                  })
-                : false;
-            return watchRequested ? { watched } : {};
-          };
           const inputProvenance = {
             kind: "inter_session" as const,
             sourceSessionKey: requesterSessionKey,
@@ -644,7 +592,7 @@ export function createSessionsSendTool(opts?: SessionsSendToolOptions): AnyAgent
                 : "peer";
 
           const ownChild = targetSessionEntry?.spawnedBy === effectiveRequesterKey;
-          const startParams: Parameters<typeof startSessionsSendFollowup>[1] = {
+          const startParams: Parameters<typeof dispatchSessionsSendFollowup>[0] = {
             cfg,
             callGateway: gatewayCall,
             runId,
@@ -657,20 +605,7 @@ export function createSessionsSendTool(opts?: SessionsSendToolOptions): AnyAgent
             allowActiveRunQueueDelivery: timeoutSeconds === 0,
             expectedSessionId,
           };
-          const activeDelivery = await trySessionsSendActiveRunDelivery(startParams, ownChild);
-          const followup =
-            !("ok" in activeDelivery) && replyMode === "one-way" && ownChild && requesterSessionKey
-              ? await prepareSessionsSendFollowup({
-                  withRequesterAuthority,
-                  requesterTurnRunId: opts?.requesterTurnRunId,
-                  runId,
-                  requesterAgentId,
-                  requesterSessionKey,
-                  targetAgentId,
-                  targetSessionKey: resolvedKey,
-                })
-              : undefined;
-          const replyContext: Parameters<typeof startSessionsSendFollowup>[2] = {
+          const replyContext: Parameters<typeof dispatchSessionsSendFollowup>[1] = {
             callGateway: gatewayCall,
             targetSessionKey: resolvedKey,
             targetAgentId,
@@ -684,21 +619,27 @@ export function createSessionsSendTool(opts?: SessionsSendToolOptions): AnyAgent
             requesterOrigin,
             requesterChannel,
           };
-          const { start, completion } =
-            "ok" in activeDelivery
-              ? { start: activeDelivery, completion: undefined }
-              : await startSessionsSendFollowup(
-                  followup,
-                  { ...startParams, ...activeDelivery },
-                  replyContext,
-                );
+          const { start, completion, registryCompletion, watchField } =
+            await dispatchSessionsSendFollowup(startParams, replyContext, {
+              message,
+              ownChild,
+              nativeChild: !targetAcpMeta,
+              requesterSessionKey: effectiveRequesterKey,
+              requesterAgentId,
+              requesterTurnRunId: opts?.requesterTurnRunId,
+              withRequesterAuthority,
+              watch: params.watch === true,
+            });
           if (!start.ok) {
             return start.result;
           }
           const acceptedTargetSessionKey = start.a2aSessionKey ?? resolvedKey;
           // Steering and registered completion owners retain their delivery obligation.
           const delayedDelivery = {
-            status: replyMode && start.targetDisposition === "queued" ? "pending" : "skipped",
+            status:
+              registryCompletion || (replyMode && start.targetDisposition === "queued")
+                ? "pending"
+                : "skipped",
           } as const;
           recordSessionToolActionFact({
             operation: "send",
@@ -733,7 +674,6 @@ export function createSessionsSendTool(opts?: SessionsSendToolOptions): AnyAgent
             log.warn("failed to record session participant", { error });
           }
           runId = start.runId;
-          const watchField = registerWatchIfRequested(acceptedTargetSessionKey);
           const accepted = () =>
             jsonResult({
               runId,
@@ -748,7 +688,7 @@ export function createSessionsSendTool(opts?: SessionsSendToolOptions): AnyAgent
               ...replyContext,
               runId,
               completion,
-              skip: delayedDelivery.status === "skipped",
+              skip: registryCompletion || delayedDelivery.status === "skipped",
               targetSessionKey: acceptedTargetSessionKey,
               displayKey: start.a2aSessionKey ?? displayKey,
               notifyRequesterOnWaitFailure:

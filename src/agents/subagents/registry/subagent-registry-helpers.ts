@@ -50,9 +50,6 @@ const FROZEN_RESULT_TEXT_MAX_BYTES = 100 * 1024;
 
 export function capFrozenResultText(resultText: string): string {
   const trimmed = resultText.trim();
-  if (!trimmed) {
-    return "";
-  }
   const totalBytes = Buffer.byteLength(trimmed, "utf8");
   if (totalBytes <= FROZEN_RESULT_TEXT_MAX_BYTES) {
     return trimmed;
@@ -131,10 +128,7 @@ export async function persistSubagentSessionTiming(
     typeof entry.execution.endedAt === "number" && Number.isFinite(entry.execution.endedAt)
       ? entry.execution.endedAt
       : undefined;
-  const runtimeMs =
-    endedAt !== undefined
-      ? getSubagentSessionRuntimeMs(entry, endedAt)
-      : getSubagentSessionRuntimeMs(entry);
+  const runtimeMs = getSubagentSessionRuntimeMs(entry, endedAt);
   const status = resolveSubagentSessionStatus(entry);
 
   const lastRunError = status
@@ -159,22 +153,16 @@ export async function persistSubagentSessionTiming(
     }
     const next = { ...sessionEntry };
 
-    if (typeof startedAt === "number" && Number.isFinite(startedAt)) {
-      next.startedAt = startedAt;
-    } else {
-      delete next.startedAt;
-    }
-
-    if (typeof endedAt === "number" && Number.isFinite(endedAt)) {
-      next.endedAt = endedAt;
-    } else {
-      delete next.endedAt;
-    }
-
-    if (typeof runtimeMs === "number" && Number.isFinite(runtimeMs)) {
-      next.runtimeMs = runtimeMs;
-    } else {
-      delete next.runtimeMs;
+    for (const [key, value] of [
+      ["startedAt", startedAt],
+      ["endedAt", endedAt],
+      ["runtimeMs", runtimeMs],
+    ] as const) {
+      if (typeof value === "number" && Number.isFinite(value)) {
+        next[key] = value;
+      } else {
+        delete next[key];
+      }
     }
 
     if (status) {
@@ -317,10 +305,7 @@ function resolveArchiveAfterMs(cfg?: OpenClawConfig) {
   const minutes =
     config.agents?.defaults?.subagents?.archiveAfterMinutes ??
     DEFAULT_SUBAGENT_ARCHIVE_AFTER_MINUTES;
-  if (!Number.isFinite(minutes) || minutes < 0) {
-    return undefined;
-  }
-  if (minutes === 0) {
+  if (!Number.isFinite(minutes) || minutes <= 0) {
     return undefined;
   }
   return Math.max(1, Math.floor(minutes)) * 60_000;

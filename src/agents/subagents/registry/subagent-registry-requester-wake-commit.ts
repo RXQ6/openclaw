@@ -15,7 +15,10 @@ import {
 } from "./subagent-registry-persistence.js";
 import type { RequesterInitialTransfer } from "./subagent-registry-requester-yield.js";
 import type { SubagentRunRecord } from "./subagent-registry.types.js";
-import { captureRequesterSettleRunIdentity } from "./subagent-requester-settle-identity.js";
+import {
+  captureRequesterSettleRunIdentity,
+  isRequesterCompletionCohortCurrent,
+} from "./subagent-requester-settle-identity.js";
 
 // Reporting thresholds never change the durable obligation or retry cadence.
 const REQUESTER_SETTLE_WAKE_COMMIT_SUSTAINED_FAILURES = 5;
@@ -282,7 +285,9 @@ export function commitRequesterInitialTransfer(
       params.entries.some(
         (entry) =>
           context.pendingRequesterSettleWakeCommits.get(entry) !== pending ||
-          context.newerGenerationOwnsSession(entry),
+          !isRequesterCompletionCohortCurrent(entry, params.entries, (key, matches) =>
+            context.options.getLatestRunForChildSession(key, matches),
+          ),
       )
     ) {
       throw new Error("Initial requester transfer episode was superseded");
@@ -528,7 +533,9 @@ export function commitRequesterWake(
       if (
         !owner ||
         !isDeepStrictEqual(captureRequesterSettleRunIdentity(entry), owner.identity) ||
-        context.newerGenerationOwnsSession(entry)
+        !isRequesterCompletionCohortCurrent(entry, entries, (key, matches) =>
+          context.options.getLatestRunForChildSession(key, matches),
+        )
       ) {
         return false;
       }

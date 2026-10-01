@@ -99,7 +99,7 @@ export async function buildActiveSubagentRuntimeContext(params: {
     (snapshot) => {
       const index = buildSubagentRunReadIndexFromRuns({
         runs: snapshot,
-        inMemoryRuns: subagentRuns.values(),
+        inMemoryRuns: [...snapshot.keys()].flatMap((id) => subagentRuns.get(id) ?? []),
       });
       const yielded = [...index.latestRunsByChildSessionKey.values()].filter(
         (entry) => isVisible(entry) && entry.pauseReason === "sessions_yield",
@@ -205,5 +205,6 @@ export async function buildActiveSubagentRuntimeContext(params: {
       }
       return lines.join("\n");
     },
+    { sessionKeys: [controllerSessionKey], descendants: true },
   );
 }

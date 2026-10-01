@@ -1,6 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
-import { mergeMockedModule } from "../../../test-utils/vitest-module-mocks.js";
 
 const enqueueSystemEventMock = vi.fn();
 const requestHeartbeatMock = vi.fn();
@@ -11,25 +10,23 @@ vi.mock("../../../infra/system-events.js", () => ({
 }));
 
 vi.mock("../../../infra/heartbeat-wake.js", async () => {
-  return await mergeMockedModule(
-    await vi.importActual<typeof import("../../../infra/heartbeat-wake.js")>(
-      "../../../infra/heartbeat-wake.js",
-    ),
-    () => ({
-      requestHeartbeat: (...args: unknown[]) => requestHeartbeatMock(...args),
-    }),
+  const actual = await vi.importActual<typeof import("../../../infra/heartbeat-wake.js")>(
+    "../../../infra/heartbeat-wake.js",
   );
+  return {
+    ...actual,
+    requestHeartbeat: (...args: unknown[]) => requestHeartbeatMock(...args),
+  } satisfies typeof actual;
 });
 
 vi.mock("./acp-parent-stream-store.sqlite.js", async () => {
-  return await mergeMockedModule(
-    await vi.importActual<typeof import("./acp-parent-stream-store.sqlite.js")>(
-      "./acp-parent-stream-store.sqlite.js",
-    ),
-    () => ({
-      recordAcpParentStreamEvents: (...args: unknown[]) => recordAcpParentStreamEventsMock(...args),
-    }),
+  const actual = await vi.importActual<typeof import("./acp-parent-stream-store.sqlite.js")>(
+    "./acp-parent-stream-store.sqlite.js",
   );
+  return {
+    ...actual,
+    recordAcpParentStreamEvents: (...args: unknown[]) => recordAcpParentStreamEventsMock(...args),
+  } satisfies typeof actual;
 });
 
 let emitAgentEvent: typeof import("../../../infra/agent-events.js").emitAgentEvent;
