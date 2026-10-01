@@ -49,13 +49,12 @@ import type { GatewayClient, GatewayRequestContext, GatewayRequestHandlers } fro
 import { defineValidatedGatewayHandler } from "./validation.js";
 
 type ReactionTarget = NonNullable<ReturnType<typeof resolveSessionSharingTarget>>;
-type ReactionAuthorization = {
+
+function authorizeSessionReaction(params: {
   client: GatewayClient | null;
   cfg: ReturnType<GatewayRequestContext["getRuntimeConfig"]>;
   target: ReactionTarget;
-};
-
-function authorizeSessionReaction(params: ReactionAuthorization) {
+}) {
   const role = resolveSessionSharingRole(params);
   const cap = operatorSessionCap(params.client, params.cfg);
   if (cap === "none") {

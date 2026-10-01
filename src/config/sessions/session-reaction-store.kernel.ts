@@ -46,10 +46,10 @@ export function setSessionReactionInDatabase(
   const existing = rows.some(
     (row) => row.emoji === params.emoji && row.identity_id === params.identityId,
   );
+  if (params.remove ? !existing : existing) {
+    return { reactions: summarizeReactions(rows), changed: false };
+  }
   if (params.remove) {
-    if (!existing) {
-      return { reactions: summarizeReactions(rows), changed: false };
-    }
     executeSqliteQuerySync(
       database.db,
       db
@@ -61,9 +61,6 @@ export function setSessionReactionInDatabase(
         .where("identity_id", "=", params.identityId),
     );
   } else {
-    if (existing) {
-      return { reactions: summarizeReactions(rows), changed: false };
-    }
     const count =
       executeSqliteQueryTakeFirstSync(
         database.db,

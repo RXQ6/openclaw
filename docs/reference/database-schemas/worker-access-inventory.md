@@ -652,7 +652,7 @@ Counts use `Q/F/S/A/R` in that order. Source locations are available in `--json`
 | **src/sessions** · `src/sessions/session-state-events.worker.ts`                                                    |         0/0/2/0/0 |         27 | Worker implementation; keep SQL in this owner |
 | **src/skills/workshop** · `src/skills/workshop/store.worker.ts`                                                     |         0/0/2/0/0 |         86 | Worker implementation; keep SQL in this owner |
 | **src/state** · `src/state/openclaw-agent-execution-cleanup.worker.ts`                                              |         0/0/1/0/0 |         16 | Worker implementation; keep SQL in this owner |
-| **src/state** · `src/state/openclaw-agent-execution.worker.ts`                                                      |         0/0/0/1/0 |        330 | Worker implementation; keep SQL in this owner |
+| **src/state** · `src/state/openclaw-agent-execution.worker.ts`                                                      |         0/0/0/1/0 |        320 | Worker implementation; keep SQL in this owner |
 | **src/state** · `src/state/openclaw-state-worker-runtime.ts`                                                        |        0/0/11/0/0 |        335 | Worker implementation; keep SQL in this owner |
 | **src/state** · `src/state/session-repository-workspaces.worker.ts`                                                 |         0/0/1/0/0 |         54 | Worker implementation; keep SQL in this owner |
 | **src/state** · `src/state/user-channel-identities.worker.ts`                                                       |         0/0/1/0/0 |         72 | Worker implementation; keep SQL in this owner |
