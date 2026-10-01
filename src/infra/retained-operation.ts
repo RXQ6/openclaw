@@ -77,10 +77,7 @@ export function mapRetainedOperation<T, U>(
       servicing = false;
     }
   }
-  void source.result.then(
-    () => completion.operation.service(),
-    () => completion.operation.service(),
-  );
+  void source.result.then(completion.operation.service, completion.operation.service);
   completion.operation.service();
   return completion.operation;
 }
@@ -125,10 +122,7 @@ function flatMapRetainedOutcome<T, U>(
           return;
         }
         child = next(outcome);
-        void child.result.then(
-          () => completion.operation.service(),
-          () => completion.operation.service(),
-        );
+        void child.result.then(completion.operation.service, completion.operation.service);
       }
       child.service();
       const outcome = child.read();
@@ -143,10 +137,7 @@ function flatMapRetainedOutcome<T, U>(
       servicing = false;
     }
   }
-  void source.result.then(
-    () => completion.operation.service(),
-    () => completion.operation.service(),
-  );
+  void source.result.then(completion.operation.service, completion.operation.service);
   completion.operation.service();
   return completion.operation;
 }
@@ -183,10 +174,7 @@ export function finallyRetainedOperation<T>(
           original = { status: "rejected", error };
         }
         child = cleanup(original);
-        void child.result.then(
-          () => completion.operation.service(),
-          () => completion.operation.service(),
-        );
+        void child.result.then(completion.operation.service, completion.operation.service);
       }
       if (!child) {
         return;
@@ -216,10 +204,7 @@ export function finallyRetainedOperation<T>(
       servicing = false;
     }
   }
-  void source.result.then(
-    () => completion.operation.service(),
-    () => completion.operation.service(),
-  );
+  void source.result.then(completion.operation.service, completion.operation.service);
   completion.operation.service();
   return completion.operation;
 }
