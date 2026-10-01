@@ -163,12 +163,17 @@ describe("runCronIsolatedAgentTurn - meta.error status propagation", () => {
 
   it.each([
     {
-      reply: "AUTOMATION_FAILED\nNo shell tool is available in this run.",
-      expected: { status: "error", error: "No shell tool is available in this run." },
+      // Transient-looking prose must not turn the agent's verdict into a scheduler retry.
+      reply: "AUTOMATION_FAILED\nNetwork timeout: no shell tool is available in this run.",
+      expected: {
+        status: "error",
+        error: "Network timeout: no shell tool is available in this run.",
+        errorClassification: { kind: "permanent" },
+      },
     },
     {
       reply: "Report posted. Reply AUTOMATION_FAILED only when the report is blocked.",
-      expected: { status: "ok", error: undefined },
+      expected: { status: "ok", error: undefined, errorClassification: undefined },
     },
   ])("settles the run from a reported failure line: $expected.status", async (testCase) => {
     await useRealOutcome();

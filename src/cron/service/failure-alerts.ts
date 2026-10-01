@@ -121,9 +121,19 @@ export function resolveFailureAlert(
   const primaryAnnounceRoute =
     primaryRoute.mode === "announce" && primaryRoute.requested ? primaryRoute : undefined;
   const explicitlyConfigured = jobConfig !== undefined || globalConfig !== undefined;
-  const ownerSessionKey = normalizeOptionalString(job.owner?.sessionKey);
-  if (!alternateRoute && !primaryAnnounceRoute && !explicitlyConfigured && !ownerSessionKey) {
-    return null;
+  if (!alternateRoute && !primaryAnnounceRoute && !explicitlyConfigured) {
+    // A routeless job stays silent; an owned one only asks its owner conversation to repair it.
+    return normalizeOptionalString(job.owner?.sessionKey)
+      ? {
+          after: DEFAULT_FAILURE_ALERT_AFTER,
+          cooldownMs: DEFAULT_FAILURE_ALERT_COOLDOWN_MS,
+          channel: "last",
+          mode: "announce",
+          includeSkipped: false,
+          alternateRoute: false,
+          repairOnly: true,
+        }
+      : null;
   }
   const configuredMode =
     jobConfig?.mode ?? (jobConfig?.channel ? "announce" : undefined) ?? globalConfig?.mode;
@@ -151,10 +161,6 @@ export function resolveFailureAlert(
     mode === "announce" && !hasAnnounceRouteSelector && primaryChannel
       ? primaryChannel
       : (resolveFailureAlertChannel(route?.channel, route?.to) ?? "last");
-  // With no other alert route, an owned job alerts its owner conversation through that
-  // conversation's stored route, the same place its repair request goes.
-  const ownerRoute =
-    mode === "announce" && !route && !hasAnnounceRouteSelector ? ownerSessionKey : undefined;
   const routeUsesPrimaryChannel =
     mode === "announce" && primaryAnnounceRoute !== undefined && channel === primaryChannel;
   const to =
@@ -195,7 +201,6 @@ export function resolveFailureAlert(
     threadId: primaryRouteMatches ? primaryAnnounceRoute.threadId : undefined,
     includeSkipped: jobConfig?.includeSkipped ?? globalConfig?.includeSkipped ?? false,
     alternateRoute: alternateRoute !== null && !primaryRouteMatches,
-    ...(ownerRoute ? { sessionKey: ownerRoute } : {}),
   };
 }
 
@@ -359,27 +364,29 @@ export function maybeEmitFailureAlert(
   if (params.job.delivery?.bestEffort === true && !params.job.failureAlert) {
     return;
   }
-  const incident = failureIncident({ ...params, route: alertConfig });
-  const now = state.deps.nowMs();
+  // Command jobs and on-exit or stream schedules are operator-only, so they alert as before.
+  const repairable =
+    alertConfig.mode === "announce" &&
+    params.status === "error" &&
+    params.job.owner?.sessionKey?.trim() &&
+    params.job.payload.kind !== "command" &&
+    params.job.schedule.kind !== "on-exit" &&
+    params.job.schedule.kind !== "stream";
   // The repair request took this incident's alert and cooldown slot; if the job still
   // fails, the user gets the alert once, and the streak is never repaired twice.
   const repairRequested = params.job.state.failureAlertIncident?.repair !== undefined;
+  if (alertConfig.repairOnly && (repairRequested || !repairable)) {
+    return;
+  }
+  const incident = failureIncident({ ...params, route: alertConfig });
+  const now = state.deps.nowMs();
   if (repairRequested) {
     startFailureAlertCycle(params.job, incident, now);
   } else if (!requestFailureNotification(state, params.job, alertConfig, incident)) {
     return;
   }
   const job = cronNotificationJob(params.job);
-  if (
-    !repairRequested &&
-    alertConfig.mode === "announce" &&
-    params.status === "error" &&
-    params.job.owner?.sessionKey?.trim() &&
-    // Command jobs and on-exit or stream schedules are operator-only, so they alert as before.
-    params.job.payload.kind !== "command" &&
-    params.job.schedule.kind !== "on-exit" &&
-    params.job.schedule.kind !== "stream"
-  ) {
+  if (!repairRequested && repairable) {
     const opened = params.job.state.failureAlertIncident ?? incident;
     params.job.state.failureAlertIncident = { ...opened, repair: { atMs: now } };
     // No alert is sent for this cycle; the repair conversation owns any messaging.

@@ -34,6 +34,8 @@ type CronPayloadOutcome = {
   hasFatalErrorPayload: boolean;
   hasFatalStructuredErrorPayload: boolean;
   embeddedRunError?: string;
+  /** The run error is the agent's own AUTOMATION_FAILED report, not a runtime failure. */
+  agentReportedFailure?: true;
   pendingPresentationWarningError?: string;
 };
 
@@ -341,6 +343,9 @@ export function resolveCronPayloadOutcome(params: {
       : failureSignal
         ? formatCronFailureSignal(failureSignal)
         : (runLevelError ?? reportedFailure),
+    ...(fatalDeliveryText === reportedFailure && reportedFailure !== undefined
+      ? { agentReportedFailure: true as const }
+      : {}),
     pendingPresentationWarningError: hasPendingPresentationWarning
       ? lastErrorPayloadText
       : undefined,
