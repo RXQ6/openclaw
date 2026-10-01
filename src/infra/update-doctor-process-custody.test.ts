@@ -3,6 +3,8 @@ import path from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import * as groups from "../process/child-process-tree.js";
+import { spawnCommand, withCommandProcessScope } from "../process/exec-spawn.js";
+import * as packageRoot from "./openclaw-root.js";
 import {
   createUpdateDoctorProcessCustody,
   retainUpdateDoctorProcesses,
@@ -14,6 +16,30 @@ const directories = useAutoCleanupTempDirTracker(afterEach);
 afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+});
+
+it("permits no-child Doctor work without an installation root while refusing writer admission", async () => {
+  const root = directories.make("doctor-unresolved-root-");
+  const resultPath = path.join(root, "result.json");
+  const effect = path.join(root, "writer-effect");
+  vi.spyOn(process, "platform", "get").mockReturnValue("linux");
+  vi.stubEnv(UPDATE_POST_INSTALL_DOCTOR_RESULT_PATH_ENV, resultPath);
+  vi.spyOn(packageRoot, "resolveOpenClawPackageRoot").mockResolvedValue(null);
+  using custody = await retainUpdateDoctorProcesses();
+  expect(custody).toBeDefined();
+  await expect(
+    withCommandProcessScope(
+      async () =>
+        await spawnCommand([
+          process.execPath,
+          "-e",
+          `require('node:fs').writeFileSync(${JSON.stringify(effect)}, 'written')`,
+        ]),
+      undefined,
+      custody,
+    ),
+  ).rejects.toThrow("Doctor process custody requires its installation root");
+  expect(fs.existsSync(effect)).toBe(false);
 });
 
 it.each([false, true])(

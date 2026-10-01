@@ -85,25 +85,18 @@ export async function retainUpdateDoctorProcesses(
   if (receipt.pid !== 0) {
     throw new Error("Doctor process custody does not match its delegated invocation.");
   }
+  receipt.pid = process.pid;
+  writeReceipt(file, receipt);
+  let root: string | null | undefined;
   if (!receipt.namespace) {
     const { resolveOpenClawPackageRoot } = await import("./openclaw-root.js");
-    const root = await resolveOpenClawPackageRoot({
+    root = await resolveOpenClawPackageRoot({
       moduleUrl: import.meta.url,
       argv1: process.argv[1],
       cwd: process.cwd(),
     });
-    if (!root) {
-      throw new Error("Doctor process custody requires its installation root.");
-    }
-    receipt.namespace = pinNamespace({ roots: [root] });
   }
-  receipt.pid = process.pid;
-  writeReceipt(file, receipt);
-  const { custody } = createManagedCommandProcessCustody({
-    ...receipt.namespace,
-    runId: receipt.runId,
-    assertCurrent,
-  });
+  let custody: CommandProcessCustody | undefined;
   let sequence = 0;
   return {
     [Symbol.dispose]() {
@@ -112,6 +105,21 @@ export async function retainUpdateDoctorProcesses(
       }
     },
     reserve(argv) {
+      // Root discovery may be unavailable during otherwise useful diagnostics.
+      // Native installation custody is required before dispatching a child.
+      if (!custody) {
+        if (!receipt.namespace) {
+          if (!root) {
+            throw new Error("Doctor process custody requires its installation root.");
+          }
+          receipt.namespace = pinNamespace({ roots: [root] });
+        }
+        custody = createManagedCommandProcessCustody({
+          ...receipt.namespace,
+          runId: receipt.runId,
+          assertCurrent,
+        }).custody;
+      }
       const retained = custody.reserve(argv);
       const slot: Receipt["slots"][number] = { id: ++sequence };
       receipt.slots.push(slot);
