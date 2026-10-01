@@ -83,7 +83,6 @@ import {
   getActiveSecretsRuntimeSnapshotRevision,
   type PreparedSecretsRuntimeSnapshot,
 } from "../secrets/runtime.js";
-import { openOpenClawStateDatabase } from "../state/openclaw-state-db.js";
 import { createChannelTestPluginBase, createTestRegistry } from "../test-utils/channel-plugins.js";
 import {
   createGatewaySchedulerClock,
@@ -121,6 +120,7 @@ import {
   createTestConfigRevisionProjector,
   createConfigWriteListenerRef,
   createManagedReloadAuthFixture,
+  createMonitorPublicationFailure,
   createManagedRestartSequenceConfigs,
   createConfigWriteNotification,
   createCronRestartPlan,
@@ -2124,7 +2124,7 @@ describe("gateway hot reload model state", () => {
         broadcast: vi.fn(),
       });
       cronState.cron.pauseScheduling();
-      const db = openOpenClawStateDatabase().db;
+      const publicationFailure = createMonitorPublicationFailure();
       let state = createDefaultGatewayReloadState({ cronState });
       const requestRecoveryRestart = vi.fn(() => ({ status: "emitted" as const }));
       const handlers = createGatewayReloadHandlers({
@@ -2171,11 +2171,7 @@ describe("gateway hot reload model state", () => {
           .map((job) => (job.schedule.kind === "every" ? job.schedule.everyMs : undefined));
       try {
         await expect(cronState.reconcileSystemJobs()).resolves.toBe("converged");
-        // Cron writes use a worker connection, which cannot see this connection's TEMP schema.
-        db.exec(`CREATE TRIGGER monitor_publication_failure BEFORE UPDATE ON cron_jobs
-          WHEN json_extract(NEW.job_json, '$.agentId') = 'second'
-            AND json_extract(NEW.job_json, '$.schedule.everyMs') = 7200000
-          BEGIN SELECT RAISE(FAIL, 'monitor write failed'); END`);
+        publicationFailure.install();
         const result = await managed
           .onHotReload(
             buildGatewayReloadPlan([
@@ -2191,7 +2187,7 @@ describe("gateway hot reload model state", () => {
         expect(result).toBe("applied-restart-required");
         expect(markRuntimeCommitted).toHaveBeenCalledOnce();
         expect(getActiveSecretsRuntimeSnapshot()?.config).toEqual(nextConfig);
-        db.exec("DROP TRIGGER monitor_publication_failure");
+        publicationFailure.remove();
         const successorConfig = { ...nextConfig, logging: { level: "debug" as const } };
         if (successor === "rejected") {
           await expect(
@@ -2220,10 +2216,13 @@ describe("gateway hot reload model state", () => {
             .map((job) => job.enabled),
         ).toEqual([false, false]);
       } finally {
-        db.exec("DROP TRIGGER IF EXISTS monitor_publication_failure");
-        handlers.stopRestartRetries();
-        cronState.cron.stop();
-        await scheduler.stop();
+        try {
+          publicationFailure.dispose();
+        } finally {
+          handlers.stopRestartRetries();
+          cronState.cron.stop();
+          await scheduler.stop();
+        }
       }
     },
   );
