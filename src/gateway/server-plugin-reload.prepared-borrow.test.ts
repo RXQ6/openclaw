@@ -337,10 +337,14 @@ it.each(["plugins.reload", "auth refresh"] as const)(
               reason: "reload",
               operationId: "borrow-reload",
             },
-            prepareConfigEffects: () => {
-              markPreparedModelRuntimeSnapshotsStale("plugin reload", { waitForReplacement: true });
-              return async () => {};
-            },
+            prepareConfigEffects: () => ({
+              retire: () => {
+                markPreparedModelRuntimeSnapshotsStale("plugin reload", {
+                  waitForReplacement: true,
+                });
+              },
+              rollback: async () => {},
+            }),
             env,
             commitRuntime: async (publication) => {
               publication?.publish();
