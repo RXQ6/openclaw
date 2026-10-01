@@ -5,6 +5,7 @@ import * as registryRead from "../agents/subagents/registry/subagent-registry-re
 import { setRuntimeConfigSnapshot } from "../config/config.js";
 import * as transcripts from "../config/sessions/session-accessor.js";
 import * as activeEvents from "../config/sessions/session-accessor.sqlite-active-events.js";
+import { MAX_SESSION_ROW_FACTS_KEYS } from "../config/sessions/session-transcript-worker.types.js";
 import { sessionChanges } from "../sessions/session-row-changes.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { sessionByKeyReadHandlers } from "./server-methods/sessions-read-by-key.js";
@@ -37,9 +38,14 @@ it("serves describe during a 2,048-session drain without transcript reads in row
     console.log("Prepared 2,048 legacy rows and transcript graphs");
     let inMaterialization = false;
     let materializationTranscriptReads = 0;
+    let describeInFlight = false;
+    let describeMaterializations = 0;
     const readInputs = rowInputs.readSessionRowInputs;
     vi.spyOn(rowInputs, "readSessionRowInputs").mockImplementation((params) => {
       inMaterialization = true;
+      if (describeInFlight) {
+        describeMaterializations++;
+      }
       try {
         return readInputs(params);
       } finally {
@@ -83,8 +89,11 @@ it("serves describe during a 2,048-session drain without transcript reads in row
     bindSessionRowProjection(context, () => projection);
     const startupMs = performance.now() - started;
     const respond = vi.fn();
+    /** Resolves with the rows materialized while the request was in flight. */
     const describe = async (id: string, includeDerivedTitles?: boolean) => {
       const releaseForeground = retainSessionListForegroundWork();
+      describeInFlight = true;
+      describeMaterializations = 0;
       try {
         await sessionByKeyReadHandlers["sessions.describe"]!({
           req: { type: "req", id, method: "sessions.describe" },
@@ -95,12 +104,14 @@ it("serves describe during a 2,048-session drain without transcript reads in row
           respond,
         });
       } finally {
+        describeInFlight = false;
         releaseForeground();
       }
+      return describeMaterializations;
     };
     try {
       const requestStarted = performance.now();
-      await describe("under-drain", true);
+      const underDrainRows = await describe("under-drain", true);
       const describeMs = performance.now() - requestStarted;
       const remainingAtResponse = projection.dirtyRowCount;
       await projection.ensureMaterialized();
@@ -109,7 +120,7 @@ it("serves describe during a 2,048-session drain without transcript reads in row
       expect(indexBuilds).toHaveBeenCalledTimes(1);
       sessionChanges.emit({ all: true, scope: "config" });
       const dirtyRequestStarted = performance.now();
-      await describe("dirty-drain");
+      const dirtyDrainRows = await describe("dirty-drain");
       const dirtyDescribeMs = performance.now() - dirtyRequestStarted;
       const remainingAfterDirtyResponse = projection.dirtyRowCount;
       console.log(
@@ -120,6 +131,8 @@ it("serves describe during a 2,048-session drain without transcript reads in row
           initialDrainThreadCpuMs: (initialDrainCpu.user + initialDrainCpu.system) / 1000,
           describeMs,
           dirtyDescribeMs,
+          underDrainRows,
+          dirtyDrainRows,
           remainingAfterDirtyResponse,
           remainingAtResponse,
           materializationTranscriptReads,
@@ -133,8 +146,10 @@ it("serves describe during a 2,048-session drain without transcript reads in row
       expect(materializationTranscriptReads).toBe(0);
       expect(materializationUsageReads).toBe(0);
       expect(materializationBoundedReads).toBe(0);
-      expect(describeMs).toBeLessThan(100);
-      expect(dirtyDescribeMs).toBeLessThan(100);
+      // A keyed read materializes its own exact facts and at most the bulk batch
+      // already in flight; the drain parks behind the retained exact preparation.
+      expect(underDrainRows).toBeLessThanOrEqual(MAX_SESSION_ROW_FACTS_KEYS + 1);
+      expect(dirtyDrainRows).toBeLessThanOrEqual(MAX_SESSION_ROW_FACTS_KEYS + 1);
       // A response must not depend on completion of unrelated resident rows.
       expect(remainingAtResponse).toBeGreaterThan(0);
       expect(remainingAfterDirtyResponse).toBeGreaterThan(0);
