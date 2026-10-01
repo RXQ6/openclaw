@@ -480,9 +480,13 @@ describe("detectChangedScope", () => {
     expect(detectChangedScope(["src/plugin-sdk/provider-entry.ts"])).toEqual(
       expectedNodeAndChangedSmokeScope,
     );
-    expect(detectChangedScope(["packages/gateway-protocol/src/schema/messages.ts"])).toEqual(
-      expectedNodeAndChangedSmokeScope,
-    );
+    expect(detectChangedScope(["packages/gateway-protocol/src/schema/messages.ts"])).toEqual({
+      ...expectedNodeAndChangedSmokeScope,
+      runMacos: true,
+      runMacosNode: true,
+      runIosBuild: true,
+      runAndroid: true,
+    });
     expect(detectChangedScope(["packages/gateway-client/src/client.ts"])).toEqual(
       expectedNodeAndChangedSmokeScope,
     );
@@ -742,6 +746,7 @@ describe("detectChangedScope", () => {
       execFileSync("git", ["config", "user.name", "CI"], { cwd: repoDir });
       for (const sourcePath of [
         "scripts/ci-changed-scope.mjs",
+        "scripts/native-protocol-inputs.json",
         "scripts/lib/arg-utils.runtime.mjs",
         "scripts/lib/changed-path-facts.mjs",
         "scripts/lib/ci-native-generated-scope.mjs",

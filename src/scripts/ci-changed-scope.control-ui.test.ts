@@ -55,18 +55,21 @@ it.each([
 });
 
 it.each([
-  "packages/normalization-core/src/string-normalization.ts",
-  "packages/normalization-core/src/record-coerce.test.ts",
-])("keeps unrelated normalization changes out of Mermaid asset builds: %s", (changedPath) => {
-  expect(detectChangedScope([changedPath])).toMatchObject({
-    runNode: true,
-    runAndroid: false,
-    runMacos: false,
-    runIosBuild: false,
-    runUiTests: false,
-  });
-  expect(shouldRunIosScreenshots([changedPath])).toBe(false);
-});
+  ["packages/normalization-core/src/string-normalization.ts", true],
+  ["packages/normalization-core/src/record-coerce.test.ts", false],
+] as const)(
+  "keeps unrelated normalization changes out of Mermaid asset builds: %s",
+  (changedPath, nativeProtocolInput) => {
+    expect(detectChangedScope([changedPath])).toMatchObject({
+      runNode: true,
+      runAndroid: nativeProtocolInput,
+      runMacos: nativeProtocolInput,
+      runIosBuild: nativeProtocolInput,
+      runUiTests: false,
+    });
+    expect(shouldRunIosScreenshots([changedPath])).toBe(false);
+  },
+);
 
 it.each([
   ".github/workflows/ci.yml",
@@ -112,13 +115,7 @@ it.each([
   expect(detectChangedScope([changedPath]).runUiTests).toBe(false);
 });
 
-it.each([
-  "package.json",
-  "pnpm-lock.yaml",
-  "pnpm-workspace.yaml",
-  "tsconfig.json",
-  "test/vitest/vitest.shared.config.ts",
-])(
+it.each(["pnpm-lock.yaml", "test/vitest/vitest.shared.config.ts"])(
   "keeps global Node inputs with Node owners instead of all platform families: %s",
   (changedPath) => {
     expect(detectChangedScope([changedPath])).toMatchObject({
@@ -128,6 +125,21 @@ it.each([
       runAndroid: false,
       runMacos: false,
       runIosBuild: false,
+    });
+    expect(shouldRunIosScreenshots([changedPath])).toBe(false);
+  },
+);
+
+it.each(["package.json", "pnpm-workspace.yaml", "tsconfig.json"])(
+  "routes native protocol build configuration through native consumers: %s",
+  (changedPath) => {
+    expect(detectChangedScope([changedPath])).toMatchObject({
+      runNode: true,
+      runWindows: false,
+      runUiTests: false,
+      runAndroid: true,
+      runMacos: true,
+      runIosBuild: true,
     });
     expect(shouldRunIosScreenshots([changedPath])).toBe(false);
   },
