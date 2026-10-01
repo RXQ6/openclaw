@@ -21,6 +21,27 @@ import { UpdateFinalizationLifecycle } from "./update-finalization-lifecycle.js"
 
 const dirs = createTempDirTracker();
 
+it("logs successful finalization progress as info and failures as errors", async () => {
+  const lifecycle = new UpdateFinalizationLifecycle(false, 5_000, () => {});
+  await lifecycle.run("doctor", async () => undefined);
+  expect(defaultRuntime.log).toHaveBeenCalledWith(
+    expect.stringContaining('"status":"in_progress"'),
+  );
+  expect(defaultRuntime.log).toHaveBeenCalledWith(expect.stringContaining('"status":"completed"'));
+  expect(defaultRuntime.error).not.toHaveBeenCalled();
+  lifecycle.recordWarnings(["A plugin update was deferred."]);
+  expect(console.warn).toHaveBeenCalledWith(
+    expect.stringContaining('"step":"warning:finalize:doctor:0"'),
+  );
+  await expect(
+    lifecycle.run("plugins", async () => {
+      throw new Error("fixture failure");
+    }),
+  ).rejects.toThrow("fixture failure");
+  expect(defaultRuntime.error).toHaveBeenCalledWith(expect.stringContaining('"status":"failed"'));
+  lifecycle.fail();
+});
+
 it("records a Doctor refusal before reporting standalone finalization", async () => {
   const lifecycle = new UpdateFinalizationLifecycle(false, 5_000, () => {});
   lifecycle.attachLedger();
@@ -99,6 +120,8 @@ beforeEach(() => {
   vi.stubEnv("OPENCLAW_STATE_DIR", dirs.make("openclaw-finalize-heartbeat-"));
   vi.stubEnv(UPDATE_RUN_ID_ENV, undefined);
   vi.spyOn(defaultRuntime, "error").mockImplementation(() => {});
+  vi.spyOn(defaultRuntime, "log").mockImplementation(() => {});
+  vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
 afterEach(() => {

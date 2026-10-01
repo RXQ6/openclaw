@@ -166,7 +166,14 @@ export class UpdateFinalizationLifecycle {
         : {}),
       ...(status === "in_progress" ? { startedAtMs: at } : { endedAtMs: at }),
     };
-    defaultRuntime.error(`[update finalize] ${JSON.stringify(step)}`);
+    const message = `[update finalize] ${JSON.stringify(step)}`;
+    if (status === "failed") {
+      defaultRuntime.error(message);
+    } else if (name.startsWith("warning:")) {
+      console.warn(message);
+    } else {
+      defaultRuntime.log(message);
+    }
     if (this.runId) {
       try {
         recordUpdateRunStep(this.runId, step, this.ledgerOptions);
