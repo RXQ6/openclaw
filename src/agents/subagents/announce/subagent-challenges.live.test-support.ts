@@ -4,7 +4,7 @@ import path from "node:path";
 import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 import { expect, onTestFinished } from "vitest";
 import { acquireGatewayTestClient } from "../../../../test/helpers/gateway-client.js";
-import { createDeferred, withTestTimeout } from "../../../../test/helpers/promise.js";
+import { createDeferred } from "../../../../test/helpers/promise.js";
 import { runQaGatewayFixture } from "../../../../test/helpers/qa-gateway-cleanup.js";
 import { clearRuntimeConfigSnapshot, type OpenClawConfig } from "../../../config/config.js";
 import { loadSessionEntry } from "../../../config/sessions/session-accessor.js";
@@ -472,15 +472,11 @@ export async function runWithLiveSubagentGateway(
         const unsubscribe = subscribeSubagentRunChanges("persistence", inspect);
         onTestFinished(() => {
           unsubscribe();
-          completed.reject(new Error("Test ended before descendant settlement"));
+          completed.reject(new Error(`Test ended before descendant settlement for ${sessionKey}`));
         });
         try {
           inspect();
-          await withTestTimeout(
-            completed.promise,
-            WAIT_MS,
-            `Live subagent stress timed out: descendant settlement for ${sessionKey}`,
-          );
+          await completed.promise;
         } finally {
           unsubscribe();
         }
