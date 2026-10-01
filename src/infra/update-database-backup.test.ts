@@ -10,7 +10,9 @@ import { createOpenClawDatabaseMaintenanceScope } from "../state/openclaw-state-
 import { admitOpenClawMaintenanceLiveAuthorityReads } from "../state/openclaw-state-maintenance-context.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import * as diskSpace from "./disk-space.js";
+import * as sqliteSnapshot from "./sqlite-snapshot.js";
 import * as inspection from "./update-candidate-state.inspection.js";
+import { discoverUpdateStateSchemaInspectionInProcess } from "./update-candidate-state.js";
 import * as candidateState from "./update-candidate-state.js";
 import * as databaseSizes from "./update-candidate-state.sizes.js";
 import { resolveUpdateCaptureRoot } from "./update-capture-paths.js";
@@ -66,7 +68,7 @@ async function fixture(externalAgents = false) {
     }
   }
   const input = { backupRoot, stateDir, config: {}, env: {}, stagingRoot };
-  const inspectionPlan = await candidateState.discoverUpdateStateSchemaInspectionInProcess(input);
+  const inspectionPlan = await discoverUpdateStateSchemaInspectionInProcess(input);
   return {
     root,
     stateDir,
@@ -108,6 +110,11 @@ it.each(["legacy", "current"] as const)(
           ].toSorted((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
     );
     expect(backup.databases).toHaveLength(1);
+    const published = await fs.readFile(backup.databases[0]!.snapshotPath);
+    expect(backup.databases[0]).toMatchObject({
+      sha256: createHash("sha256").update(published).digest("hex"),
+      sizeBytes: published.length,
+    });
     const snapshot = new DatabaseSync(backup.databases[0]!.snapshotPath, { readOnly: true });
     try {
       expect(snapshot.prepare("SELECT rowid,value FROM payload").all()).toEqual([
@@ -120,6 +127,41 @@ it.each(["legacy", "current"] as const)(
   },
 );
 
+it.each(["modified", "replaced"] as const)(
+  "keeps the verified digest when a snapshot is %s before backup metadata is recorded",
+  async (change) => {
+    const f = await fixture();
+    const createSnapshot = sqliteSnapshot.createVerifiedSqliteSnapshot;
+    let published: Buffer | undefined;
+    vi.spyOn(sqliteSnapshot, "createVerifiedSqliteSnapshot").mockImplementationOnce(
+      async (options) => {
+        const result = await createSnapshot(options);
+        published = await fs.readFile(result.path);
+        const changed = Buffer.from(published);
+        const offset = changed.indexOf("retained");
+        assert(offset >= 0, "Snapshot must contain the captured row");
+        changed.write("modified", offset);
+        if (change === "modified") {
+          await fs.writeFile(result.path, changed);
+        } else {
+          const replacement = `${result.path}.replacement`;
+          await fs.writeFile(replacement, changed);
+          await fs.rename(replacement, result.path);
+        }
+        return result;
+      },
+    );
+
+    const backup = await f.capture();
+    assert(published, "Snapshot publication must complete before the injected change");
+    expect(backup.databases[0]).toMatchObject({
+      sha256: createHash("sha256").update(published).digest("hex"),
+      sizeBytes: published.length,
+    });
+    expect(await fs.readFile(backup.databases[0]!.snapshotPath)).not.toEqual(published);
+  },
+);
+
 it.each(["path", "owner"] as const)(
   "still refuses a changed database %s after discovery",
   async (change) => {
@@ -128,9 +170,7 @@ it.each(["path", "owner"] as const)(
     db.exec("ALTER TABLE agent_databases ADD COLUMN agent_id TEXT");
     db.prepare("UPDATE agent_databases SET agent_id = ?").run("before");
     db.close();
-    const inspectionPlan = await candidateState.discoverUpdateStateSchemaInspectionInProcess(
-      f.input,
-    );
+    const inspectionPlan = await discoverUpdateStateSchemaInspectionInProcess(f.input);
     const changed = new DatabaseSync(f.shared);
     try {
       if (change === "owner") {
