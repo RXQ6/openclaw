@@ -1,5 +1,5 @@
 // Runs oxlint with local resource policy, sparse-checkout filtering, and
-// plugin package-boundary artifact preparation when needed.
+// generated database types and plugin package-boundary artifacts when needed.
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
@@ -9,6 +9,7 @@ import type { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import JSON5 from "json5";
 import type { DummyRuleMap, OxlintConfig } from "oxlint";
+import { ensureKyselyTypes } from "./generate-kysely-types.mts";
 import { limitsAreAdvisory, reportLimitViolations } from "./lib/check-limits.mts";
 import { parseStaticDiagnostics } from "./lib/ci-static-check-evidence.mjs";
 import { isDirectRunUrl } from "./lib/direct-run.mjs";
@@ -660,6 +661,13 @@ export async function runOxlint(
   }
 
   const run = async (ownedDirectory?: string) => {
+    if (
+      !focusedConfig &&
+      !finalArgs.some((arg) => OXLINT_PREPARE_SKIP_FLAGS.has(arg.replace(/[=][\s\S]*$/u, "")))
+    ) {
+      // Core and skip-prepare shard children still consume generated database types.
+      await ensureKyselyTypes(process.cwd());
+    }
     if (needsArtifactPreparation) {
       // Declaration compilation owns its Go policy; lint limits belong to the oxlint child.
       await prepareExtensionPackageBoundaryArtifacts(localEnv);
