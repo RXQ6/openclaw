@@ -19,23 +19,29 @@ import {
 } from "./host.js";
 import { cleanupSessionResources as cleanupRegisteredSessionResources } from "./session-resources.js";
 
+type ActiveAiTransportHost = ReturnType<typeof getDefaultAiTransportHost>;
+
 function createRuntime(registry: ApiRegistry, transportHost?: Partial<AiTransportHost>) {
   const explicitHost =
     transportHost === undefined ? undefined : createAiTransportHost(transportHost);
-  const runWithRuntimeHost = <T>(operation: () => T): T => {
+  const resolveRuntimeHost = () => explicitHost ?? getDefaultAiTransportHost();
+  const runWithHost = <T>(host: ActiveAiTransportHost, operation: () => T): T => {
     // A normal runtime uses its current embedding owner, even when invoked from
     // another runtime's callback. Do not capture the default during construction.
-    const host = explicitHost ?? getDefaultAiTransportHost();
     return runWithAiTransportHost(
       explicitHost || supportsScopedAiTransportHosts() ? host : getDefaultAiTransportHost(),
       operation,
     );
   };
+  const runWithRuntimeHost = <T>(operation: () => T): T =>
+    runWithHost(resolveRuntimeHost(), operation);
   const startStream = (
     start: () => AssistantMessageEventStreamContract,
   ): AssistantMessageEventStreamContract => {
-    const started = runWithRuntimeHost(start);
-    return bindAssistantMessageEventStream(started, runWithRuntimeHost);
+    const host = resolveRuntimeHost();
+    const runWithStreamHost = <T>(operation: () => T): T => runWithHost(host, operation);
+    const started = runWithStreamHost(start);
+    return bindAssistantMessageEventStream(started, runWithStreamHost);
   };
   function resolveApiProvider(api: Api) {
     const provider = registry.getApiProvider(api);

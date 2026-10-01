@@ -248,6 +248,19 @@ describe("runtime-owned transport host", () => {
     expect(() => getAiTransportHost().resolveSecretSentinel("unknown")).toThrow("unknown Gateway");
   });
 
+  it("binds an ordinary stream to the default host selected when it starts", async () => {
+    configureAiTransportHost({ resolveSecretSentinel: (value) => "first:" + value });
+    const runtime = createLlmRuntime(
+      registryFor(async (value) => getAiTransportHost().resolveSecretSentinel(value)),
+    );
+    const stream = runtime.streamSimple(model, { messages: [] }, { apiKey: "opaque" });
+
+    configureAiTransportHost({ resolveSecretSentinel: (value) => "replacement:" + value });
+
+    expect((await stream.result()).content).toEqual([{ type: "text", text: "first:opaque" }]);
+    expect(getAiTransportHost().resolveSecretSentinel("caller")).toBe("replacement:caller");
+  });
+
   it("does not let a nested ordinary runtime inherit native policy", async () => {
     configureAiTransportHost({ resolveSecretSentinel: (value) => "Gateway:" + value });
     const ordinary = createLlmRuntime(
