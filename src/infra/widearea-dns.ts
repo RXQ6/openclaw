@@ -4,6 +4,7 @@ import path from "node:path";
 import { replaceFileAtomicSync } from "@openclaw/fs-safe/atomic";
 import { expectDefined } from "@openclaw/normalization-core";
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
+import { fnv1aUtf16 } from "../shared/fnv1a.js";
 import { CONFIG_DIR } from "../utils.js";
 
 const DNS_LABEL_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/;
@@ -123,16 +124,6 @@ function extractContentHash(zoneText: string): string | null {
   return match?.[1] ?? null;
 }
 
-function computeContentHash(body: string): string {
-  // Cheap stable hash; avoids importing crypto (and keeps deterministic across runtimes).
-  let h = 2166136261;
-  for (let i = 0; i < body.length; i++) {
-    h ^= body.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return (h >>> 0).toString(16).padStart(8, "0");
-}
-
 export type WideAreaGatewayZoneOpts = {
   domain: string;
   gatewayPort: number;
@@ -205,7 +196,7 @@ export function renderWideAreaGatewayZoneText(
       line === soaLine ? `@ IN SOA ns1 hostmaster SERIAL 7200 3600 1209600 60` : line,
     )
     .join("\n")}\n`;
-  const contentHash = computeContentHash(hashBody);
+  const contentHash = fnv1aUtf16(hashBody).toString(16).padStart(8, "0");
 
   return `; openclaw-content-hash: ${contentHash}\n${contentBody}`;
 }

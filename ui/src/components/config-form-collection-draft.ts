@@ -1,8 +1,11 @@
+import {
+  isJsonSchemaValueValid,
+  jsonSchemaValuesEqual,
+} from "@openclaw/normalization-core/json-schema";
 import { html, nothing, type PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
 import { t } from "../i18n/index.ts";
 import { OpenClawLightDomElement } from "../lit/openclaw-element.ts";
-import { configValuesEqual, isSupportedConfigValueValid } from "./config-form.constraints.ts";
 import { coerceConfigFormNumberString } from "./config-form.numeric.ts";
 import { schemaMayAcceptString, schemaType, type JsonSchema } from "./config-form.shared.ts";
 
@@ -58,7 +61,7 @@ export class ConfigFormCollectionDraft extends OpenClawLightDomElement {
         // identity while the bytes are unchanged — closing here would wipe
         // the operator's in-progress add-entry draft mid-typing.
         (!Object.is(previous.sourceIdentity, next.sourceIdentity) &&
-          !configValuesEqual(previous.sourceIdentity, next.sourceIdentity)))
+          !jsonSchemaValuesEqual(previous.sourceIdentity, next.sourceIdentity)))
     ) {
       this.closeDraft();
     }
@@ -126,13 +129,13 @@ export class ConfigFormCollectionDraft extends OpenClawLightDomElement {
         }
         // JSON.parse has already rounded unsafe integer spellings. Preserve
         // the source text only when the union accepts it as a string.
-        return stringNumberUnion && isSupportedConfigValueValid(schema, this.draftValue)
+        return stringNumberUnion && isJsonSchemaValueValid(schema, this.draftValue)
           ? { ok: true, value: this.draftValue }
           : { ok: false, message: t("configForm.invalidNumber") };
       }
       return { ok: true, value: parsed };
     } catch {
-      return stringNumberUnion && isSupportedConfigValueValid(schema, this.draftValue)
+      return stringNumberUnion && isJsonSchemaValueValid(schema, this.draftValue)
         ? { ok: true, value: this.draftValue }
         : { ok: false, message: t("configForm.invalidJson") };
     }
@@ -148,7 +151,7 @@ export class ConfigFormCollectionDraft extends OpenClawLightDomElement {
       this.fail("value", parsed.message);
       return;
     }
-    if (!isSupportedConfigValueValid(props.schema, parsed.value)) {
+    if (!isJsonSchemaValueValid(props.schema, parsed.value)) {
       this.fail(
         "value",
         ["number", "integer"].includes(schemaType(props.schema) ?? "")
@@ -158,7 +161,7 @@ export class ConfigFormCollectionDraft extends OpenClawLightDomElement {
       return;
     }
     if (
-      props.existingValues?.some((value) => configValuesEqual(value, parsed.value)) ||
+      props.existingValues?.some((value) => jsonSchemaValuesEqual(value, parsed.value)) ||
       props.validateValue?.(parsed.value) === false
     ) {
       this.fail("value", t("configForm.invalidString"));
@@ -206,7 +209,7 @@ export class ConfigFormCollectionDraft extends OpenClawLightDomElement {
       return nothing;
     }
     const valueType = schemaType(props.schema);
-    const canUseNull = isSupportedConfigValueValid(props.schema, null);
+    const canUseNull = isJsonSchemaValueValid(props.schema, null);
     const usesTextInput =
       valueType === "string" || valueType === "number" || valueType === "integer";
     const errorId = `${this.id}-error`;

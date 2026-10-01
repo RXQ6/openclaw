@@ -11,12 +11,6 @@ import { arrayItemSchema, collectAllOfSchemas, combinedSchema } from "./config-f
 import { decimalRational } from "./config-form.numeric.ts";
 import { schemaType, type JsonSchema } from "./config-form.shared.ts";
 
-export const configValuesEqual = jsonSchemaValuesEqual;
-
-export function isSupportedConfigValueValid(schema: JsonSchema, value: unknown): boolean {
-  return isJsonSchemaValueValid(schema, value);
-}
-
 function ownPropertySchema(schema: JsonSchema, key: string): JsonSchema | undefined {
   const properties = schema.properties;
   return properties && Object.hasOwn(properties, key) ? properties[key] : undefined;
@@ -217,7 +211,7 @@ export function objectAdditionalPropertiesSchema(
 }
 
 function objectRepairIssueCount(schema: JsonSchema, value: Record<string, unknown>): number {
-  let issues = isSupportedConfigValueValid(schema, value) ? 0 : 1;
+  let issues = isJsonSchemaValueValid(schema, value) ? 0 : 1;
   const knownKeys = new Set(objectPropertyKeys(schema));
   for (const key of requiredPropertyKeys(schema)) {
     if (!Object.hasOwn(value, key)) {
@@ -228,7 +222,7 @@ function objectRepairIssueCount(schema: JsonSchema, value: Record<string, unknow
   for (const [key, entryValue] of Object.entries(value)) {
     const propertySchema = objectPropertySchema(schema, key);
     if (propertySchema) {
-      if (!isSupportedConfigValueValid(propertySchema, entryValue)) {
+      if (!isJsonSchemaValueValid(propertySchema, entryValue)) {
         issues += 1;
       }
       continue;
@@ -237,7 +231,7 @@ function objectRepairIssueCount(schema: JsonSchema, value: Record<string, unknow
       !knownKeys.has(key) &&
       (additionalProperties === false ||
         additionalProperties === undefined ||
-        !isSupportedConfigValueValid(additionalProperties, entryValue))
+        !isJsonSchemaValueValid(additionalProperties, entryValue))
     ) {
       issues += 1;
     }
@@ -250,7 +244,7 @@ export function isObjectPropertyNameValid(schema: JsonSchema, key: string): bool
     ({ propertyNames }) =>
       propertyNames === undefined ||
       propertyNames === true ||
-      (propertyNames !== false && isSupportedConfigValueValid(propertyNames, key)),
+      (propertyNames !== false && isJsonSchemaValueValid(propertyNames, key)),
   );
 }
 
@@ -268,10 +262,10 @@ export function canApplyObjectCandidate(
   ) {
     return false;
   }
-  if (isSupportedConfigValueValid(schema, candidate)) {
+  if (isJsonSchemaValueValid(schema, candidate)) {
     return true;
   }
-  if (isSupportedConfigValueValid(schema, current)) {
+  if (isJsonSchemaValueValid(schema, current)) {
     return false;
   }
   return objectRepairIssueCount(schema, candidate) <= objectRepairIssueCount(schema, current);
@@ -308,7 +302,7 @@ function arrayCandidateDistance(value: readonly unknown[], candidate: readonly u
   let distance = Math.abs(value.length - candidate.length);
   const sharedLength = Math.min(value.length, candidate.length);
   for (let index = 0; index < sharedLength; index += 1) {
-    if (!configValuesEqual(value[index], candidate[index])) {
+    if (!jsonSchemaValuesEqual(value[index], candidate[index])) {
       distance += 1;
     }
   }
@@ -323,7 +317,7 @@ function arrayRepairIssueCount(
   const { minItems, maxItems } = arrayInputConstraints(schema);
   let issues = Math.max(0, minItems - value.length);
   const constrainedDistances = arrayConstraintCandidates(schema)
-    .filter((candidate) => isSupportedConfigValueValid(schema, candidate))
+    .filter((candidate) => isJsonSchemaValueValid(schema, candidate))
     .map((candidate) => arrayCandidateDistance(value, candidate));
   if (constrainedDistances.length > 0) {
     issues += Math.min(...constrainedDistances);
@@ -333,12 +327,12 @@ function arrayRepairIssueCount(
   }
   for (let index = 0; index < value.length; index += 1) {
     const itemSchema = arrayItemSchema(schema, index);
-    if (itemSchema && !isSupportedConfigValueValid(itemSchema, value[index])) {
+    if (itemSchema && !isJsonSchemaValueValid(itemSchema, value[index])) {
       issues += 1;
     }
     if (
       uniqueItems &&
-      value.slice(index + 1).some((candidate) => configValuesEqual(value[index], candidate))
+      value.slice(index + 1).some((candidate) => jsonSchemaValuesEqual(value[index], candidate))
     ) {
       issues += 1;
     }
@@ -353,10 +347,10 @@ export function canApplyArrayCandidate(
   uniqueItems: boolean,
   allowEqualRepair: boolean,
 ): boolean {
-  if (isSupportedConfigValueValid(schema, candidate)) {
+  if (isJsonSchemaValueValid(schema, candidate)) {
     return true;
   }
-  if (isSupportedConfigValueValid(schema, current)) {
+  if (isJsonSchemaValueValid(schema, current)) {
     return false;
   }
   const currentIssues = arrayRepairIssueCount(schema, current, uniqueItems);
@@ -523,7 +517,7 @@ function defaultStringValue(schema: JsonSchema): string | typeof NO_SAFE_DEFAULT
 }
 
 function validatedDefaultCandidate(schema: JsonSchema, candidate: unknown): unknown {
-  if (candidate === NO_SAFE_DEFAULT || !isSupportedConfigValueValid(schema, candidate)) {
+  if (candidate === NO_SAFE_DEFAULT || !isJsonSchemaValueValid(schema, candidate)) {
     return NO_SAFE_DEFAULT;
   }
   if (!candidate || typeof candidate !== "object") {

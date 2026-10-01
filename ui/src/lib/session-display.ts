@@ -3,6 +3,7 @@ import {
   normalizeOptionalString,
 } from "@openclaw/normalization-core/string-coerce";
 import { sliceUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
+import { escapeRegExp } from "../../../src/shared/regexp.js";
 import { isCronSessionDisplayKey } from "../../../src/shared/session-list-visibility.ts";
 import type { GatewaySessionRow } from "../api/types.ts";
 import { t } from "../i18n/index.ts";
@@ -308,7 +309,7 @@ export function resolveSessionDisplayName(
       kind === "automation"
         ? rawName.replace(/^cron(\s+job)?:\s*/i, "").trim() || rawName
         : rawName;
-    const prefixPattern = new RegExp(`^${prefix.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\s*`, "i");
+    const prefixPattern = new RegExp(`^${escapeRegExp(prefix)}\\s*`, "i");
     if (kind === "subagent" && options.includeSubagentPrefix === false) {
       return name.replace(prefixPattern, "").trim() || fallbackName;
     }

@@ -1,4 +1,4 @@
-import { configValuesEqual } from "./config-form.constraints.ts";
+import { jsonSchemaValuesEqual } from "@openclaw/normalization-core/json-schema";
 
 /** One rendered array owns row DOM identity, including unchanged cloned snapshots. */
 export class ConfigFormArrayIdentity {
@@ -15,13 +15,15 @@ export class ConfigFormArrayIdentity {
     // Reserve unchanged positions so a new equal value cannot steal a survivor's key.
     const remaining = new Set(
       this.previous.flatMap((entry, index) =>
-        configValuesEqual(entry, value[index]) ? [] : [index],
+        jsonSchemaValuesEqual(entry, value[index]) ? [] : [index],
       ),
     );
     const keys = value.map((entry, index) => {
-      const match = configValuesEqual(entry, this.previous[index])
+      const match = jsonSchemaValuesEqual(entry, this.previous[index])
         ? index
-        : [...remaining].find((candidate) => configValuesEqual(entry, this.previous[candidate]));
+        : [...remaining].find((candidate) =>
+            jsonSchemaValuesEqual(entry, this.previous[candidate]),
+          );
       if (match === undefined) {
         return Symbol("array-row");
       }

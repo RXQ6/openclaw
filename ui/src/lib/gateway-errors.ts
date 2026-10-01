@@ -5,8 +5,6 @@ import {
   readMissingScopeError,
 } from "@openclaw/gateway-client/browser";
 import { asNullableRecord as asRecord } from "@openclaw/normalization-core/record-coerce";
-import { ConnectErrorDetailCodes } from "../../../packages/gateway-protocol/src/connect-error-details.js";
-import { resolveGatewayErrorDetailCode } from "../api/gateway.ts";
 
 function hasGatewayErrorDetail(err: unknown, expectedCode: string, detailCode: string): boolean {
   const error = asRecord(err);
@@ -46,12 +44,7 @@ export function isMissingOperatorReadScopeError(err: unknown): boolean {
   if (!(err instanceof Error) || err.name !== "GatewayRequestError") {
     return false;
   }
-  if (readMissingScopeError(err)?.missingScope === "operator.read") {
-    return true;
-  }
-  const detailCode = resolveGatewayErrorDetailCode(err as { details?: unknown });
-  // Older gateways sometimes reused the connect-time authorization detail for RPC failures.
-  return detailCode === ConnectErrorDetailCodes.AUTH_UNAUTHORIZED;
+  return readMissingScopeError(err)?.missingScope === "operator.read";
 }
 
 export function isArchiveAccessDeniedError(err: unknown): boolean {
