@@ -209,9 +209,8 @@ suite.define(() => {
           const title = await row.locator(".sidebar-recent-session__name").boundingBox();
           expect(lead).not.toBeNull();
           expect(title).not.toBeNull();
-          // Compare at Chromium's 1/64 CSS-pixel layout precision, not raw bounding-box floats.
-          const gap = title!.x - (lead!.x + lead!.width);
-          expect(Math.round(gap * 64)).toBeGreaterThanOrEqual(8 * 64);
+          // The renderer reports fractional layout values; allow 0.01 px of rounding.
+          expect(title!.x - (lead!.x + lead!.width)).toBeGreaterThanOrEqual(8 - 0.01);
         }
         await page.mouse.move(600, 60);
         await captureSidebarUiProof(suite, page, "sidebar-roster-after.png");
