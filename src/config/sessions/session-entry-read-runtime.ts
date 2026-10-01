@@ -24,6 +24,7 @@ import { captureOpenClawAgentDatabaseExecution } from "../../state/openclaw-agen
 import { runOpenClawAgentWorkerWrite } from "../../state/openclaw-agent-write-admission.js";
 import { cloneEnvWithPlatformSemantics } from "../config-env-vars.js";
 import { resolveStateDir } from "../state-dir.js";
+import { listSessionEntriesReadOnly } from "./session-accessor.sqlite-entry-list.read.js";
 import {
   loadSessionEntry,
   loadSessionEntryReadOnlyResultInScope,
@@ -292,10 +293,42 @@ type SessionStoreWorkerReadScope = {
   env?: NodeJS.ProcessEnv;
 };
 
+/** Read descriptive summaries through the original store selection and reader lifetime. */
+export async function readSessionEntrySummariesInWorker(input: SessionStoreWorkerReadScope) {
+  const { scope, agentId } = captureSessionEntryReadScope({ ...input, sessionKey: "" });
+  if (isNativeSessionEntryRead(scope, agentId)) {
+    // Process-held transcripts keep their existing native reader until its worker cutover.
+    return listSessionEntriesReadOnly({
+      ...scope,
+      projection: "list",
+      hydrateSkillPromptRefs: false,
+    });
+  }
+  return withSessionStoreReaderInWorker(
+    { ...input, env: scope.env, storePath: scope.storePath ?? input.storePath },
+    async ({ reader, database, continuation, assertCurrent }) => {
+      assertCurrent();
+      const entries = await reader.readEntries(
+        {
+          agentId: database.agentId,
+          storePath: database.path,
+          env: database.env,
+          projection: "list",
+          hydrateSkillPromptRefs: false,
+        },
+        continuation,
+      );
+      assertCurrent();
+      return entries;
+    },
+    { backing: true, dataOnly: true },
+  );
+}
+
 type SessionEntryWorkerRead = SessionStoreWorkerReadScope &
   SessionExactEntriesWorkerSelection & {
     lifecycleSessionKey?: string;
-    projection?: "full" | "backing" | "sharing" | "list";
+    projection?: "full" | "sharing" | "list";
     includeMembers?: boolean;
     includeParticipantRecords?: boolean;
     includeAuthorization?: boolean;
@@ -393,7 +426,7 @@ export async function withSessionEntriesFromStoreInWorker<T>(
       assertCurrent();
       return consume({ result, database, assertCurrent });
     },
-    { backing: input.projection === "backing" || input.projection === "list", dataOnly },
+    { backing: input.projection === "list", dataOnly },
   );
 }
 
@@ -416,6 +449,7 @@ export function withSessionRegistryEntriesInWorker<T>(
         agentId: database.agentId,
         storePath: database.path,
         env: database.env,
+        cronRetention: true,
       });
       assertCurrent();
       return await consume(entries, assertCurrent);
