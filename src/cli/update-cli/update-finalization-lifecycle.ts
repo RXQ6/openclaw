@@ -31,6 +31,8 @@ import {
 } from "../../infra/update-run-timeouts.js";
 import type { UpdateRunResult } from "../../infra/update-runner-types.js";
 import { redactSupportDiagnosticLine } from "../../logging/diagnostic-support-redaction.js";
+import { formatConsoleDiagnosticLine } from "../../logging/json-console-line.js";
+import { getLogger } from "../../logging/logger.js";
 import { hasCommandProcessCleanupError } from "../../process/exec-result.js";
 import { resolveCommandProcessSignal, withCommandProcessScope } from "../../process/exec-spawn.js";
 import { defaultRuntime } from "../../runtime.js";
@@ -172,7 +174,8 @@ export class UpdateFinalizationLifecycle {
     } else if (name.startsWith("warning:")) {
       console.warn(message);
     } else {
-      defaultRuntime.log(message);
+      getLogger().info(message);
+      process.stderr.write(`${formatConsoleDiagnosticLine({ level: "info", message })}\n`);
     }
     if (this.runId) {
       try {

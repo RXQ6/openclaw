@@ -12,6 +12,7 @@ import {
   ABANDONED_UPDATE_RUN_MS,
   UPDATE_RUN_HEARTBEAT_MS,
 } from "../../infra/update-run-timeouts.js";
+import { flushLogger, resetLogger, setLoggerOverride } from "../../logging/logger.js";
 import { defaultRuntime } from "../../runtime.js";
 import { createDeferredCore } from "../../shared/deferred.js";
 import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
@@ -21,13 +22,28 @@ import { UpdateFinalizationLifecycle } from "./update-finalization-lifecycle.js"
 
 const dirs = createTempDirTracker();
 
-it("logs successful finalization progress as info and failures as errors", async () => {
+it("writes successful finalization progress to stderr and failures as errors", async () => {
+  const logPath = path.join(dirs.make("openclaw-finalize-log-"), "openclaw.log");
+  setLoggerOverride({ level: "info", file: logPath });
   const lifecycle = new UpdateFinalizationLifecycle(false, 5_000, () => {});
   await lifecycle.run("doctor", async () => undefined);
-  expect(defaultRuntime.log).toHaveBeenCalledWith(
+  expect(process.stderr.write).toHaveBeenCalledWith(
     expect.stringContaining('"status":"in_progress"'),
   );
-  expect(defaultRuntime.log).toHaveBeenCalledWith(expect.stringContaining('"status":"completed"'));
+  expect(process.stderr.write).toHaveBeenCalledWith(
+    expect.stringContaining('"status":"completed"'),
+  );
+  await flushLogger();
+  const phaseRecords = fs
+    .readFileSync(logPath, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line))
+    .filter((record) => JSON.stringify(record).includes("finalize:doctor"));
+  expect(phaseRecords).toEqual([
+    expect.objectContaining({ _meta: expect.objectContaining({ logLevelName: "INFO" }) }),
+    expect.objectContaining({ _meta: expect.objectContaining({ logLevelName: "INFO" }) }),
+  ]);
   expect(defaultRuntime.error).not.toHaveBeenCalled();
   lifecycle.recordWarnings(["A plugin update was deferred."]);
   expect(console.warn).toHaveBeenCalledWith(
@@ -120,13 +136,15 @@ beforeEach(() => {
   vi.stubEnv("OPENCLAW_STATE_DIR", dirs.make("openclaw-finalize-heartbeat-"));
   vi.stubEnv(UPDATE_RUN_ID_ENV, undefined);
   vi.spyOn(defaultRuntime, "error").mockImplementation(() => {});
-  vi.spyOn(defaultRuntime, "log").mockImplementation(() => {});
+  vi.spyOn(process.stderr, "write").mockImplementation(() => true);
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  resetLogger();
+  setLoggerOverride(null);
   closeOpenClawStateDatabaseForTest();
   vi.unstubAllEnvs();
   dirs.cleanup();
