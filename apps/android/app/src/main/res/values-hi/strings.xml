@@ -31,7 +31,6 @@
     <string name="native_00d108e2e6466940" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"हाल की कॉल का इतिहास दिखाएँ"</string>
     <string name="native_00e8aeba41d79ce3" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"1 लंबित"</string>
     <string name="native_010f6550a1c8f554" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"असमर्थित अटैचमेंट"</string>
-    <string name="native_011a304126358b40" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"इमोजी टाइप या पेस्ट करें।"</string>
     <string name="native_01267be21eb77392" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"0 = सटीक"</string>
     <string name="native_0138259aa2e15ead" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"पिछली चैट बहाल नहीं हो सकी. साइडबार से कोई चैट चुनें."</string>
     <string name="native_014c41bdcbc7ec0e" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"सत्र की पहुँच से बाहर के अनुरोधों की मानवीय समीक्षा।"</string>
@@ -211,7 +210,6 @@
     <string name="native_1a9e3989a89e862b" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"लिप्यंतरण उपलब्ध नहीं है: %1$s"</string>
     <string name="native_1aa4cb0bcca76e92" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"छवि"</string>
     <string name="native_1afff5a07eab0e88" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"ज्वार के साथ बह रहे हैं"</string>
-    <string name="native_1b420bb001b48a1e" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"और…"</string>
     <string name="native_1b68e1a6b3cff1cf" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"इस Gateway से कनेक्ट करें?"</string>
     <string name="native_1b7f9ecb7cd6a212" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"तेज़ मोड"</string>
     <string name="native_1b9e1aa135771a2f" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"छवि का पूर्वावलोकन बंद करें"</string>
@@ -428,7 +426,6 @@
     <string name="native_37053dc1f680546b" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"पेलोड टेक्स्ट"</string>
     <string name="native_3741f267a6170e88" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"टेक्स्ट सेट करें"</string>
     <string name="native_37582309e7a1dbe5" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"मंज़ूरी %1$s"</string>
-    <string name="native_3769ad05951286f9" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"%1$s ने %2$s से प्रतिक्रिया दी"</string>
     <string name="native_379ce0aacf46c35f" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Gateway ने %1$s की तैयारी की स्थिति नहीं लौटाई"</string>
     <string name="native_37b637bd85f6d2cb" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"%1$s कॉन्फ़िगर किए गए मॉडल. उपलब्धता दोबारा जाँचने के लिए रीफ़्रेश करें."</string>
     <string name="native_381428f5f251a764" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Conversation Send"</string>
@@ -573,7 +570,6 @@
     <string name="native_4b5adc86775abf03" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Gateway डिवाइस तक पहुँच"</string>
     <string name="native_4b8bacd8a13f37e1" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"कोई पूर्वावलोकन नहीं है"</string>
     <string name="native_4ba5121d4d1be174" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"डिवाइस"</string>
-    <string name="native_4bbdc8a76ed99d97" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"कोई भी इमोजी"</string>
     <string name="native_4bc652d0bc018e69" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Android के लिए OpenClaw."</string>
     <string name="native_4bcf240ace02f19c" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"क्षमता की मंज़ूरी लंबित है"</string>
     <string name="native_4bd2d2d5866e6010" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"ब्राउज़र नियंत्रित करें"</string>
@@ -729,7 +725,6 @@
     <string name="native_614e83ef17c13f3c" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"कोई मेल खाने वाले थ्रेड नहीं मिले"</string>
     <string name="native_6197595503f01ee2" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"delete"</string>
     <string name="native_619837a134285528" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"लेआउट: संक्षिप्त"</string>
-    <string name="native_61ad8976e650e153" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"इमोजी"</string>
     <string name="native_61ffa9c8c703dd5e" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"channels"</string>
     <string name="native_62026a42b2390a87" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"अनुमति दी गई"</string>
     <string name="native_624fccb6586a4c4d" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"हर %1$s मिनट"</string>
@@ -1148,7 +1143,6 @@
     <string name="native_9ac97bafbb1dae00" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"ऑटोमेशन रोका गया."</string>
     <string name="native_9b797864ba532a10" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Gateway अनुपलब्ध"</string>
     <string name="native_9b9a8d05a7ec353b" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Read"</string>
-    <string name="native_9bab6dbed548051e" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"त्वरित प्रतिक्रियाएँ"</string>
     <string name="native_9bb725005055412c" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"पहले"</string>
     <string name="native_9bd88f2485acbb94" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"डेस्कटॉप"</string>
     <string name="native_9bf2a8e048a8308e" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"इस कौशल के लिए 1 सेटअप आइटम आवश्यक है. Android दिखाता है कि क्या इंस्टॉल है; सेटअप/कॉन्फ़िगरेशन में बदलाव केवल डेस्कटॉप या CLI पर किए जा सकते हैं."</string>
@@ -1258,7 +1252,6 @@
     <string name="native_ab604a360777735f" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"अस्वीकार करें"</string>
     <string name="native_ab79b5cb27bfd124" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Gateway ने %2$s के बाद \'%1$s\' स्थिति लौटाई."</string>
     <string name="native_ab818d5c4f01b3e7" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"%1$s (%2$s)"</string>
-    <string name="native_ab8692263c15c6ed" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"प्रतिक्रिया में केवल एक इमोजी हो सकता है।"</string>
     <string name="native_abb34924b54b502e" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Gateway टोकन कॉन्फ़िगर नहीं किया गया है"</string>
     <string name="native_abc2fd2de6ddfb65" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"इस एजेंट के लिए उपलब्ध नहीं है"</string>
     <string name="native_abc7e9892806b047" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"फ़ाइलें"</string>
@@ -1352,7 +1345,6 @@
     <string name="native_b906e4f5d8dd6128" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"अभी तक कोई एजेंट लोड नहीं हुआ है."</string>
     <string name="native_b93a70717669740b" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"ClawHub में खोजें"</string>
     <string name="native_b96a4e034aae9cd8" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"पेयर करना आवश्यक है"</string>
-    <string name="native_b97faabe907f00cb" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"त्वरित प्रतिक्रियाओं पर वापस जाएँ"</string>
     <string name="native_b99fa6c061504f00" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"पूर्वावलोकन उपलब्ध नहीं है"</string>
     <string name="native_b9cf97697898d132" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"सक्रिय रन"</string>
     <string name="native_b9d5d026db17b9e4" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"विफल — %1$s"</string>
@@ -1598,7 +1590,6 @@
     <string name="native_d942f64886578d87" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"import"</string>
     <string name="native_d94cfb21b67ddc09" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"यह फ़ोन OpenClaw में कैसा दिखाई देता है।"</string>
     <string name="native_d96f2b0eab4e67b7" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"थ्रेड खोज पर फ़ोकस करें"</string>
-    <string name="native_d97239a628a7c471" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"प्रतिक्रिया जोड़ें"</string>
     <string name="native_d9acbd86a4467bc2" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"चयन की शुरुआत, दाईं ओर"</string>
     <string name="native_d9be42d9b30ce057" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"कैलेंडर पढ़ें"</string>
     <string name="native_d9f8f72809fd29f7" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"स्किल अक्षम नहीं की जा सकी."</string>
@@ -1685,7 +1676,6 @@
     <string name="native_e5125d9f63d2947b" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"सीमित"</string>
     <string name="native_e51aa2de89dcd71a" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"OpenClaw लोगो"</string>
     <string name="native_e52b3044724b9f4d" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"मॉडल का पिन हटाएँ"</string>
-    <string name="native_e5493b051f3d4903" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"%1$s %2$s. %3$s"</string>
     <string name="native_e5584bc5057284ae" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"इस Gateway से जुड़े मैसेजिंग इंटरफ़ेस."</string>
     <string name="native_e56faa0fe752ff19" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"चयन का अंत, दाईं ओर"</string>
     <string name="native_e595f17fac1d8384" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"भेजा जा रहा है"</string>
@@ -1715,7 +1705,6 @@
     <string name="native_e89cf42d1a094262" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"अनुमतियाँ लागू की जा रही हैं…"</string>
     <string name="native_e93372533f323b2f" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"नोड"</string>
     <string name="native_e95bb222e07ff673" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"सियान"</string>
-    <string name="native_e96c91503f7edb9c" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"%1$s %2$s"</string>
     <string name="native_e98feb46bd5d7792" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"%1$s "</string>
     <string name="native_e9b1af312c5b638b" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"api.example.com, uploads.example.com"</string>
     <string name="native_ea2100dc89ae9fe2" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"लॉग"</string>
@@ -1845,7 +1834,6 @@
     <string name="native_fae8fa3bc050ab7e" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"वॉइस नोट रद्द करें"</string>
     <string name="native_fb287aa12f6cdc96" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"%1$s को संदेश भेजें"</string>
     <string name="native_fb2c3707ff8cfcd8" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"पीछे स्क्रॉल करें"</string>
-    <string name="native_fb31e391bfb3e25e" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"%1$s और %2$s अन्य"</string>
     <string name="native_fb7ad4cc59155311" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"openclaw gateway"</string>
     <string name="native_fbba7592ca9da80e" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"Gateway पेयर हो गया"</string>
     <string name="native_fbd2ae2ba1642ca5" formatted="false" tools:ignore="Typos,TypographyDashes,TypographyEllipsis">"केंचुल बदलना"</string>
