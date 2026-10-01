@@ -84,11 +84,11 @@ it.each(["keep", "close", "replace"] as const)(
           await release.promise;
         });
         await entered.promise;
-        const periodicWork: Promise<unknown>[] = [];
+        const initialPeriodicWork: Promise<unknown>[] = [];
         try {
-          periodicWork.push(Promise.resolve(periodic()));
-          periodicWork.push(Promise.resolve(periodic()));
-          periodicWork.push(Promise.resolve(periodic()));
+          initialPeriodicWork.push(Promise.resolve(periodic()));
+          initialPeriodicWork.push(Promise.resolve(periodic()));
+          initialPeriodicWork.push(Promise.resolve(periodic()));
           expect(vacuumCalls()).toHaveLength(0);
           expect(checkpointCalls()).toHaveLength(0);
           expect(freePages()).toBe(before);
@@ -110,7 +110,7 @@ it.each(["keep", "close", "replace"] as const)(
             await runOpenClawAgentWriteAdmission(options, () => undefined);
             await foreground;
           } finally {
-            await Promise.all(periodicWork);
+            await Promise.all(initialPeriodicWork);
           }
         }
         if (retirement === "keep") {
