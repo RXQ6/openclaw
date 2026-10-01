@@ -1,7 +1,10 @@
 import fs from "node:fs/promises";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { hasErrnoCode } from "../../infra/errors.js";
-import { createUpdateDoctorProcessCustody } from "../../infra/update-doctor-process-custody.js";
+import {
+  createUpdateDoctorProcessCustody,
+  type UpdateDoctorProcessNamespace,
+} from "../../infra/update-doctor-process-custody.js";
 import { UPDATE_POST_INSTALL_DOCTOR_RESULT_PATH_ENV } from "../../infra/update-doctor-result.js";
 import type { UpdateRequester } from "../../infra/update-requester-authority.js";
 import type { UpdateRecoveryFence } from "../../infra/update-run-recovery.js";
@@ -100,7 +103,12 @@ export type UpdateDoctorChildContext = {
 
 /** Both delegated and standalone update Doctors publish through the same result channel. */
 export async function runUpdateDoctorProcess(
-  context: { runId: string; root: string; onProcessSettlement?: (step: UpdateStepResult) => void },
+  context: {
+    runId: string;
+    root: string;
+    processNamespace?: UpdateDoctorProcessNamespace;
+    onProcessSettlement?: (step: UpdateStepResult) => void;
+  },
   argv: string[],
   options: CommandOptions,
 ): Promise<SpawnResult> {
@@ -110,7 +118,12 @@ export async function runUpdateDoctorProcess(
       "Doctor process custody requires its result channel.",
     );
   }
-  const custody = createUpdateDoctorProcessCustody(context.runId, context.root, resultPath);
+  const custody = createUpdateDoctorProcessCustody(
+    context.runId,
+    context.root,
+    resultPath,
+    context.processNamespace,
+  );
   try {
     const result = await runUtf8CommandWithTimeout(argv, {
       ...options,
@@ -165,17 +178,33 @@ export async function withUpdateDoctorChild<T>(
         requester: context.requester,
       };
       return await operation((argv, options) =>
-        runUpdateDoctorProcess({ ...context, root: params.root }, argv, {
-          ...options,
-          input: JSON.stringify(input),
-          beforeInput: (pid, spawnedArgv) => {
-            context.assertRequesterCurrent();
-            bindChild(pid, spawnedArgv);
-            // Only the bound target may read state-backed policy after migration.
-            // The parent retains identity and native custody, never schema admission.
-            context.onStateHandoff?.();
+        runUpdateDoctorProcess(
+          {
+            ...context,
+            root: params.root,
+            processNamespace: {
+              roots: [
+                executor.childKey,
+                ...(executor.originalChildKey ? [executor.originalChildKey] : []),
+                ...(executor.retainedChildKey ? [executor.retainedChildKey] : []),
+                ...(executor.slot ? [executor.slot.childKey] : []),
+              ],
+              databaseIdentity: executor.databaseIdentity,
+            },
           },
-        }),
+          argv,
+          {
+            ...options,
+            input: JSON.stringify(input),
+            beforeInput: (pid, spawnedArgv) => {
+              context.assertRequesterCurrent();
+              bindChild(pid, spawnedArgv);
+              // Only the bound target may read state-backed policy after migration.
+              // The parent retains identity and native custody, never schema admission.
+              context.onStateHandoff?.();
+            },
+          },
+        ),
       );
     },
   );

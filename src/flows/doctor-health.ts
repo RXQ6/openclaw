@@ -59,7 +59,7 @@ export async function runDoctorHealthFlow(
   writeAuthority?: UpdateDoctorWriteAuthority,
   databasePreflight?: DoctorDatabasePreflight,
 ) {
-  using custody = retainUpdateDoctorProcesses();
+  using custody = await retainUpdateDoctorProcesses(writeAuthority?.assertCurrent);
   return await withCommandProcessScope(
     () =>
       withDeferredDebugProxyCapture(async (resumeCapture) => {

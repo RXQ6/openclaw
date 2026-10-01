@@ -21,7 +21,10 @@ vi.mock("./windows-command.js", () => ({
     usesWindowsExitCodeShim: false,
   }),
 }));
-vi.mock("../shared/pid-alive.js", () => ({ getFileLockProcessStartTime: () => 1 }));
+vi.mock("../shared/pid-alive.js", () => ({
+  getFileLockProcessStartTime: () => 1,
+  getProcessInstanceStartTime: () => 1,
+}));
 vi.mock("./kill-tree.js", () => ({ killProcessTree: vi.fn() }));
 vi.mock("./exec-termination.js", () => ({
   createCommandTerminationController: () => ({ terminate: () => false, settle: transport.settle }),

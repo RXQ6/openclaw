@@ -8,14 +8,27 @@ import {
   type CommandProcessIdentity,
 } from "../process/command-process-custody.js";
 import type { SpawnResult } from "../process/exec-result.js";
+import { retainCommandProcessCleanup } from "../process/exec-spawn.js";
 import { hasErrnoCode } from "./errno.js";
 import { UPDATE_POST_INSTALL_DOCTOR_RESULT_PATH_ENV } from "./update-doctor-result.js";
+import { createManagedCommandProcessCustody } from "./update-managed-command-custody.js";
+import type { ManagedUpdateLeaseDatabaseIdentity } from "./update-managed-service-handoff-identity.js";
 import type { UpdateStepResult } from "./update-step-result.js";
 
 const receiptSchema = z.object({
   nonce: z.string(),
   runId: z.string(),
   pid: z.number().int().nonnegative(),
+  namespace: z
+    .object({
+      roots: z.array(z.string()).nonempty(),
+      databaseIdentity: z.object({
+        databasePath: z.string(),
+        databaseIdentity: z.string(),
+        parentIdentity: z.string(),
+      }),
+    })
+    .optional(),
   slots: z.array(
     z.object({
       id: z.number().int().positive(),
@@ -38,7 +51,9 @@ function writeReceipt(file: string, receipt: Receipt): void {
   fs.renameSync(pending, file);
 }
 
-export function retainUpdateDoctorProcesses(): (CommandProcessCustody & Disposable) | undefined {
+export async function retainUpdateDoctorProcesses(
+  assertCurrent?: () => void,
+): Promise<(CommandProcessCustody & Disposable) | undefined> {
   const resultPath = process.env[UPDATE_POST_INSTALL_DOCTOR_RESULT_PATH_ENV]?.trim();
   if (!resultPath) {
     return;
@@ -67,8 +82,25 @@ export function retainUpdateDoctorProcesses(): (CommandProcessCustody & Disposab
   if (receipt.pid !== 0) {
     throw new Error("Doctor process custody does not match its delegated invocation.");
   }
+  if (!receipt.namespace) {
+    const { resolveOpenClawPackageRoot } = await import("./openclaw-root.js");
+    const root = await resolveOpenClawPackageRoot({
+      moduleUrl: import.meta.url,
+      argv1: process.argv[1],
+      cwd: process.cwd(),
+    });
+    if (!root) {
+      throw new Error("Doctor process custody requires its installation root.");
+    }
+    receipt.namespace = pinNamespace({ roots: [root] });
+  }
   receipt.pid = process.pid;
   writeReceipt(file, receipt);
+  const { custody } = createManagedCommandProcessCustody({
+    ...receipt.namespace,
+    runId: receipt.runId,
+    assertCurrent,
+  });
   let sequence = 0;
   return {
     [Symbol.dispose]() {
@@ -76,16 +108,24 @@ export function retainUpdateDoctorProcesses(): (CommandProcessCustody & Disposab
         fs.rmSync(file, { force: true });
       }
     },
-    reserve() {
+    reserve(argv) {
+      const retained = custody.reserve(argv);
       const slot: Receipt["slots"][number] = { id: ++sequence };
       receipt.slots.push(slot);
-      writeReceipt(file, receipt);
+      try {
+        writeReceipt(file, receipt);
+      } catch (error) {
+        retained.settled();
+        throw error;
+      }
       return {
         spawned(identity: CommandProcessIdentity) {
+          retained.spawned(identity);
           slot.identity = identity;
           writeReceipt(file, receipt);
         },
         settled() {
+          retained.settled();
           const index = receipt.slots.indexOf(slot);
           if (index >= 0) {
             receipt.slots.splice(index, 1);
@@ -97,7 +137,25 @@ export function retainUpdateDoctorProcesses(): (CommandProcessCustody & Disposab
   };
 }
 
-export function createUpdateDoctorProcessCustody(runId: string, root: string, resultPath: string) {
+export type UpdateDoctorProcessNamespace = {
+  roots: readonly string[];
+  databaseIdentity?: ManagedUpdateLeaseDatabaseIdentity;
+};
+
+function pinNamespace(namespace: UpdateDoctorProcessNamespace) {
+  const { databaseIdentity } = createManagedCommandProcessCustody({
+    ...namespace,
+    runId: "",
+  });
+  return { roots: [...namespace.roots], databaseIdentity };
+}
+
+export function createUpdateDoctorProcessCustody(
+  runId: string,
+  root: string,
+  resultPath: string,
+  namespace: UpdateDoctorProcessNamespace = { roots: [root] },
+) {
   // This is the existing Doctor result IPC channel, not a new state store.
   const descriptor = {
     path: `${resultPath}.processes`,
@@ -105,7 +163,13 @@ export function createUpdateDoctorProcessCustody(runId: string, root: string, re
   };
   fs.writeFileSync(
     descriptor.path,
-    JSON.stringify({ nonce: descriptor.nonce, runId, pid: 0, slots: [] }),
+    JSON.stringify({
+      nonce: descriptor.nonce,
+      runId,
+      pid: 0,
+      slots: [],
+      namespace: pinNamespace(namespace),
+    }),
     { flag: "wx", mode: 0o600 },
   );
   let mayRemove = false;
@@ -152,10 +216,18 @@ export function createUpdateDoctorProcessCustody(runId: string, root: string, re
       const identities =
         receipt?.slots.flatMap((slot) => (slot.identity ? [slot.identity] : [])) ?? [];
       const pending = receipt?.slots.filter((slot) => !slot.identity).length ?? 0;
-      const groups =
+      const cleanup =
         rootExtinct && receipt
-          ? await settleCommandProcessGroups(identities)
-          : { settled: false, pids: identities.map((identity) => identity.pid) };
+          ? settleCommandProcessGroups(identities)
+          : Promise.resolve({
+              settled: false,
+              pids: identities.map((identity) => identity.pid),
+              reason: "Doctor root process extinction could not be proven",
+            });
+      retainCommandProcessCleanup(
+        cleanup.then((groups) => (groups.settled && pending === 0 ? "normal" : "uncertain")),
+      );
+      const groups = await cleanup;
       const settled = rootExtinct && receipt !== undefined && pending === 0 && groups.settled;
       mayRemove = settled;
       if (settled && !abnormal && receipt?.slots.length === 0) {
@@ -169,7 +241,7 @@ export function createUpdateDoctorProcessCustody(runId: string, root: string, re
       ];
       const message = settled
         ? "Doctor did not finish normally, but every tracked process group stopped. Preserving migrated state; run `openclaw update repair` to finish deferred maintenance."
-        : `Doctor processes remain unsettled, data-at-risk. PIDs/process groups: ${pids.join(", ") || "unavailable"}; ${!receipt ? "custody receipt unavailable" : pending > 0 ? `${pending} spawn reservations lack a process identity` : "process extinction could not be proven"}. Keep the Gateway stopped and preserve ${descriptor.path}; inspect these processes, then run \`openclaw update repair\`.`;
+        : `Doctor processes remain unsettled, data-at-risk. PIDs/process groups: ${pids.join(", ") || "unavailable"}; ${!receipt ? "custody receipt unavailable" : pending > 0 ? `${pending} spawn reservations lack a process identity` : (groups.reason ?? "process extinction could not be proven")}. Keep the Gateway stopped and preserve ${descriptor.path}; inspect these processes, then run \`openclaw update repair\`.`;
       return {
         name: "doctor process settlement",
         command: "settle doctor process groups",

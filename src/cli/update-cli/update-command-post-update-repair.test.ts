@@ -740,6 +740,7 @@ describe("post-activation failure settlement without inference", () => {
       }));
       mocks.restartCommand.mockImplementation(async () => {
         mocks.healthy = true;
+        return "accepted";
       });
       vi.mocked(verifyUpdatedGateway).mockImplementation(async ({ result }) => {
         result.verification = {

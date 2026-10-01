@@ -24,7 +24,7 @@ import {
 } from "../../process/command-process-custody.js";
 import { hasCommandProcessCleanupError } from "../../process/exec-result.js";
 import * as processRunner from "../../process/exec.js";
-import { getFileLockProcessStartTime } from "../../shared/pid-alive.js";
+import { getProcessInstanceStartTime } from "../../shared/pid-alive.js";
 import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
 import { waitForPidToExit } from "../../test-utils/process-tree.js";
 import type { UpdateCommandOptions } from "./shared.js";
@@ -362,7 +362,7 @@ it.skipIf(process.platform === "win32").each([true, false])(
               [
                 process.execPath,
                 ...(custodyModule.pathname.endsWith(".ts")
-                  ? ["--import", import.meta.resolve("tsx")]
+                  ? ["--import", new URL("../../../scripts/tsx.mjs", import.meta.url).href]
                   : []),
                 "--input-type=module",
                 "-e",
@@ -374,7 +374,7 @@ it.skipIf(process.platform === "win32").each([true, false])(
                 process.on('SIGTERM', () => {});
                   process.stdin.resume();
                   process.stdin.on('end', async () => {
-                    const custody = retainUpdateDoctorProcesses();
+                    const custody = await retainUpdateDoctorProcesses();
                     const reserve = custody.reserve;
                     if (!${identityAvailable}) custody.reserve = (...args) => {
                       const slot = reserve(...args);
@@ -406,7 +406,7 @@ it.skipIf(process.platform === "win32").each([true, false])(
             });
             const pid = Number(/Doctor busy (\d+)/.exec(result.stdout)?.[1]);
             assert(pid > 0, result.stderr);
-            writer = { pid, startedAt: getFileLockProcessStartTime(pid) };
+            writer = { pid, startedAt: getProcessInstanceStartTime(pid) };
             return result;
           },
         );

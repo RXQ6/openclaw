@@ -39,7 +39,7 @@ it.skipIf(process.platform === "win32")(
       import fs from 'node:fs';
       import { once } from 'node:events';
       import { withCommandProcessScope, spawnCommand } from ${JSON.stringify(spawnOwner.href)};
-      import { getFileLockProcessStartTime } from ${JSON.stringify(identityOwner.href)};
+      import { getProcessInstanceStartTime } from ${JSON.stringify(identityOwner.href)};
       const record = value => fs.writeFileSync(${JSON.stringify(receipt)}, JSON.stringify(value));
       process.on('SIGTERM', () => {});
       await withCommandProcessScope(async () => {
@@ -48,7 +48,7 @@ it.skipIf(process.platform === "win32")(
         });
         await once(child.stdout, 'data');
         process.stdout.write(JSON.stringify({ root: process.pid,
-          identity: { pid: child.pid, startedAt: getFileLockProcessStartTime(child.pid) } }) + '\\n');
+          identity: { pid: child.pid, startedAt: getProcessInstanceStartTime(child.pid) } }) + '\\n');
         while (true) {}
       }, undefined, { reserve() {
         record({ state: 'reserved' });

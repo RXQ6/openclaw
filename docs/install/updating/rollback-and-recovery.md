@@ -240,7 +240,9 @@ and verify Gateway health. The report retains the Doctor failure, records a
 maintenance warning, and recommends `openclaw update repair`; recovery does not
 claim that unfinished Doctor repairs completed. If any writer remains or cannot
 be accounted for, the report names the known PIDs and keeps the Gateway stopped
-because concurrent writes put data at risk. Preserve the recovery snapshots.
+because concurrent writes put data at risk. Later update attempts retain this
+block even if the original updater has exited. Preserve the recovery snapshots
+and follow the reported process-inspection guidance before retrying repair.
 The installed updater owns this process supervision: a first update driven by
 2026.9.5 remains limited by that older parent's settlement checks.
 

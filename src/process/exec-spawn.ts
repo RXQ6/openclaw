@@ -5,7 +5,7 @@ import process from "node:process";
 import { execa } from "execa";
 import { markOpenClawExecEnv } from "../infra/openclaw-exec-env.js";
 import { mergeProcessEnv } from "../infra/process-env.js";
-import { getFileLockProcessStartTime } from "../shared/pid-alive.js";
+import { getFileLockProcessStartTime, getProcessInstanceStartTime } from "../shared/pid-alive.js";
 import { isChildProcessTreeAlive } from "./child-process-tree.js";
 import type { CommandProcessCustody } from "./command-process-custody.js";
 import {
@@ -235,10 +235,10 @@ function retainCommandProcess(
     pid = child.pid;
     if (pid !== undefined) {
       try {
-        if (process.platform !== "win32" || reservation) {
+        if (process.platform !== "win32") {
           startedAt = getFileLockProcessStartTime(pid);
         }
-        reservation?.spawned({ pid, startedAt });
+        reservation?.spawned({ pid, startedAt: getProcessInstanceStartTime(pid) });
         if (scope.signal.aborted) {
           stop();
         }

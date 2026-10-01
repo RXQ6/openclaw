@@ -14,7 +14,7 @@ it.skipIf(process.platform === "win32")(
   async () => {
     const kill = vi.spyOn(termination, "killProcessTree").mockReturnValue(undefined);
     vi.spyOn(groups, "isChildProcessTreeAlive").mockImplementation(({ pid }) => pid !== 4244);
-    vi.spyOn(identity, "getFileLockProcessStartTime").mockImplementation((pid) =>
+    vi.spyOn(identity, "getProcessInstanceStartTime").mockImplementation((pid) =>
       pid === 4242 ? 2 : null,
     );
     const result = await settleCommandProcessGroups([
@@ -34,7 +34,7 @@ it.skipIf(process.platform === "win32")(
     vi.useFakeTimers();
     const kill = vi.spyOn(termination, "killProcessTree").mockReturnValue(undefined);
     vi.spyOn(groups, "isChildProcessTreeAlive").mockReturnValue(true);
-    vi.spyOn(identity, "getFileLockProcessStartTime").mockReturnValue(1);
+    vi.spyOn(identity, "getProcessInstanceStartTime").mockReturnValue(1);
     const result = settleCommandProcessGroups([{ pid: 4242, startedAt: 1 }]);
     await vi.advanceTimersByTimeAsync(300);
     expect(await result).toMatchObject({ settled: false, pids: [4242] });

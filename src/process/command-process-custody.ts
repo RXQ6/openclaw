@@ -1,4 +1,4 @@
-import { getFileLockProcessStartTime } from "../shared/pid-alive.js";
+import { getProcessInstanceStartTime } from "../shared/pid-alive.js";
 import { isChildProcessTreeAlive } from "./child-process-tree.js";
 import { COMMAND_PROCESS_TREE_KILL_GRACE_MS } from "./exec-spawn.js";
 import { killProcessTree } from "./kill-tree.js";
@@ -34,13 +34,13 @@ export async function settleCommandProcessGroups(
           return undefined;
         }
         // An orphaned group has no leader whose start identity can authorize a signal.
-        if (startedAt === null || getFileLockProcessStartTime(pid) !== startedAt) {
+        if (startedAt === null || getProcessInstanceStartTime(pid) !== startedAt) {
           return unresolved("Recorded process identity could not be confirmed");
         }
         killProcessTree(pid, { detached: true, force: true });
         const deadline = Date.now() + COMMAND_PROCESS_TREE_KILL_GRACE_MS;
         while (isChildProcessTreeAlive(identity)) {
-          const current = getFileLockProcessStartTime(pid);
+          const current = getProcessInstanceStartTime(pid);
           if (current !== null && current !== startedAt) {
             return unresolved("Process identity changed during cleanup");
           }
