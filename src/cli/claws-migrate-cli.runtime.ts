@@ -1,5 +1,8 @@
+import { realpath } from "node:fs/promises";
 import { withAgentDeletion } from "../agents/agent-lifecycle-registry.js";
+import { digestClawValue } from "../claws/digest.js";
 import { assertExperimentalClawsEnabled } from "../claws/experimental.js";
+import { withAuthoredAgentRoster } from "../claws/migrate-validation.js";
 import {
   applyClawMigrationPlan,
   buildClawMigrationPlan,
@@ -7,10 +10,27 @@ import {
   CLAW_MIGRATION_PLAN_SCHEMA_VERSION,
 } from "../claws/migrate.js";
 import { CLAW_OUTPUT_STABILITY } from "../claws/types.js";
-import { getRuntimeConfig } from "../config/config.js";
+import { readConfigFileSnapshot } from "../config/config.js";
+import { withConfigSourceLocks } from "../config/write-lock.js";
 import { defaultRuntime, writeRuntimeJson, type RuntimeEnv } from "../runtime.js";
 import { emitClawFailure, logClawExperimentalWarning } from "./claws-cli-output.js";
 import type { ClawsMigrateOptions } from "./claws-cli.js";
+
+async function readMigrationConfig() {
+  const snapshot = await readConfigFileSnapshot({ observe: false, isolateEnv: true });
+  if (!snapshot.exists || !snapshot.valid) {
+    throw new ClawMigrationError(
+      "migration_config_unavailable",
+      "Migration requires an existing valid local configuration. Repair the config before retrying.",
+    );
+  }
+  return {
+    config: withAuthoredAgentRoster(snapshot.runtimeConfig, snapshot.sourceConfigBeforeMigrations),
+    sources: [
+      ...new Set([snapshot.path, await realpath(snapshot.path), ...(snapshot.includedPaths ?? [])]),
+    ].toSorted(),
+  };
+}
 
 function logMigrationPlan(
   plan: Awaited<ReturnType<typeof buildClawMigrationPlan>>["plan"],
@@ -86,10 +106,12 @@ export async function runClawsMigrateCommand(
   }
 
   let migration: Awaited<ReturnType<typeof buildClawMigrationPlan>>;
+  let previewConfig: Awaited<ReturnType<typeof readMigrationConfig>>;
   try {
+    previewConfig = await readMigrationConfig();
     migration = await buildClawMigrationPlan({
       agentId,
-      config: getRuntimeConfig(),
+      config: previewConfig.config,
       options: { env: process.env },
     });
   } catch (error) {
@@ -135,24 +157,45 @@ export async function runClawsMigrateCommand(
   try {
     const result = await withAgentDeletion(
       agentId,
-      async () => {
-        const current = await buildClawMigrationPlan({
-          agentId,
-          config: getRuntimeConfig(),
-          options: { env: process.env },
-        });
-        if (current.plan.planIntegrity !== migration.plan.planIntegrity) {
-          throw new ClawMigrationError(
-            "migration_changed",
-            "The agent, workspace files, or ownership changed after consent. Review a fresh dry-run plan before retrying.",
-          );
-        }
-        return await applyClawMigrationPlan({
-          migration: current,
-          config: getRuntimeConfig(),
-          options: { env: process.env },
-        });
-      },
+      async () =>
+        await withConfigSourceLocks(
+          previewConfig.sources,
+          async (assertCurrent) => {
+            const changed = () =>
+              new ClawMigrationError(
+                "migration_changed",
+                "The agent, workspace files, or ownership changed after consent. Review a fresh dry-run plan before retrying.",
+              );
+            const latest = await readMigrationConfig();
+            assertCurrent();
+            if (digestClawValue(latest.sources) !== digestClawValue(previewConfig.sources)) {
+              throw changed();
+            }
+            const current = await buildClawMigrationPlan({
+              agentId,
+              config: latest.config,
+              options: { env: process.env },
+            });
+            if (current.plan.planIntegrity !== migration.plan.planIntegrity) {
+              throw changed();
+            }
+            const expectedConfig = digestClawValue(latest);
+            return await applyClawMigrationPlan({
+              migration: current,
+              config: latest.config,
+              options: { env: process.env },
+              assertCurrentConfig: async () => {
+                assertCurrent();
+                const live = await readMigrationConfig();
+                assertCurrent();
+                if (digestClawValue(live) !== expectedConfig) {
+                  throw changed();
+                }
+              },
+            });
+          },
+          process.env,
+        ),
       { env: process.env },
     );
     if (opts.json) {

@@ -34,7 +34,11 @@ import {
 } from "./migrate-validation.js";
 import { readSelectedWorkspaceFiles } from "./migrate-workspace-files.js";
 import { readClawSecondaryReferenceTables } from "./provenance-secondary-references.js";
-import { readClawInstallRecordFromDatabase, readClawInstallRecords } from "./provenance.js";
+import {
+  persistClawMigrationOwnership,
+  readClawInstallRecordFromDatabase,
+  readClawInstallRecords,
+} from "./provenance.js";
 import { readClawManifestFile } from "./reader.js";
 import { isPortableClawAvatar } from "./schema-portability.js";
 import type { ClawManifest, ClawOpenClawProfile } from "./types.js";
@@ -454,6 +458,7 @@ export async function applyClawMigrationPlan(params: {
   migration: BuiltMigration;
   config: OpenClawConfig;
   options?: OpenClawStateDatabaseOptions;
+  assertCurrentConfig?: () => Promise<void>;
 }): Promise<ClawMigrationResult> {
   const options = params.options ?? {};
   const root = params.migration.plan.packageRoot;
@@ -490,6 +495,7 @@ export async function applyClawMigrationPlan(params: {
       "$.packageRoot",
     );
   }
+  await params.assertCurrentConfig?.();
   await createGeneratedPackage(root, params.migration.packageFiles);
   try {
     await assertWorkspaceSnapshotUnchanged(
@@ -578,12 +584,8 @@ export async function applyClawMigrationPlan(params: {
       createdAtMs: Date.now(),
       updatedAtMs: Date.now(),
     }));
-    const install = (await import("./provenance.js")).persistClawMigrationOwnership(
-      finalPlan,
-      finalOwnershipFiles,
-      options,
-    );
-    void install;
+    await params.assertCurrentConfig?.();
+    persistClawMigrationOwnership(finalPlan, finalOwnershipFiles, options);
     return {
       schemaVersion: CLAW_MIGRATION_RESULT_SCHEMA_VERSION,
       stability: "experimental",
