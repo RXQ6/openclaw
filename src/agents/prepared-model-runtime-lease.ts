@@ -1,6 +1,7 @@
 /** Agent-run lease admission for lifecycle-owned prepared model runtimes. */
 import { createAbortError, racePromiseWithAbortSignal } from "../infra/abort-signal.js";
 import { withPluginMetadataSnapshotScope } from "../plugins/current-plugin-metadata-snapshot.js";
+import { pluginInstanceInvocation } from "../plugins/plugin-instance-invocation.js";
 import { resolvePluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.js";
 import { isReservedSystemAgentId } from "../system-agent/agent-id.js";
 import { getPreparedModelRuntimeBorrowedSnapshot } from "./prepared-model-runtime-generation-scope.js";
@@ -140,6 +141,13 @@ export async function acquirePreparedModelRuntimeLeaseFromOwners(
     previousAttempt = attempt;
     supersededPublication = undefined;
     if (replacement) {
+      // Reload can be joining this exact call or retained consumer, even after quiescing.
+      // Work in that drain must not wait for the same reload to commit its replacement.
+      if (pluginInstanceInvocation.getStore()?.instance.hasActiveCall) {
+        throw new PreparedModelRuntimeOwnerNotPublishedError(
+          "Model runtime replacement is in progress; admitted plugin work cannot wait for the reload. Retry after the plugin reload completes.",
+        );
+      }
       lastExternalPublication = replacement.promise;
       await racePromiseWithAbortSignal(replacement.promise, options.abortSignal);
       if (context.getPendingReplacement()) {
