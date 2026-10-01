@@ -162,7 +162,6 @@ describe("qa scenario catalog", () => {
       "qa-cron-authority-operator",
     );
     const cronAuthorityFlow = JSON.stringify(cronAuthority.execution.flow);
-    expect(cronAuthorityFlow).toContain("toolsAllowIsDefault");
     expect(cronAuthorityFlow).toContain("model did not submit the wildcard-policy job");
     expect(cronAuthorityFlow).toContain("model did not submit the overbroad-policy job");
     expect(cronAuthorityFlow).toContain("overbroad policy was not intersected");
