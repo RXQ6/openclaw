@@ -280,17 +280,24 @@ openclaw backup restore --from offsite --namespace gateway latest --target ./res
 
 The first upload claims the namespace for the installation's durable Gateway
 device identity. Its `owner.json` contains the device ID, hostname, and claim
-time, and uses the location's encryption settings. Before archiving and again
-before retention, OpenClaw checks ownership. A different device identity causes
-a failed attempt with the owner's hostname and abbreviated device ID, even if
+time, and uses the location's encryption settings. OpenClaw checks ownership
+before archiving, at archive publication, and before each retention deletion.
+A different device identity causes a failed attempt with the owner's hostname and abbreviated device ID, even if
 both machines use the same hostname.
 
 Choose another `--namespace` for a separate installation. To deliberately take
-over the existing namespace, for example after moving to new hardware, run:
+over a stopped or retired installation's namespace, for example after moving to
+new hardware, run:
 
 ```bash
 openclaw backup create --to offsite --namespace gateway --claim-namespace
 ```
+
+The displaced installation is rejected at its next publication or deletion.
+Object stores cannot make an object's write conditional on a separate ownership
+claim, so a residual provider round-trip window remains between the final check
+and the effect. Stop the old installation before taking over; use a separate
+namespace for installations that run concurrently.
 
 Retention runs only after a successful upload. It keeps the newest backup in
 each selected UTC day, week, or month, combining the policies and always

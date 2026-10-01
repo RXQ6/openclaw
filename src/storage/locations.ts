@@ -3,6 +3,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { coerceSecretRef } from "../config/types.secrets.js";
 import type { StorageLocationConfig } from "../config/types.storage.js";
 import { hasErrnoCode, isMissingPathError } from "../infra/errno.js";
+import { formatErrorMessage } from "../infra/errors.js";
 import { resolveStorageProvider } from "../plugins/storage-provider-registry.js";
 import {
   decryptStorageObject,
@@ -45,6 +46,9 @@ export type StorageProbeResult = {
   message?: string;
 };
 type OperationOptions = { signal?: AbortSignal };
+type MutationOptions = OperationOptions & {
+  precondition?: (signal?: AbortSignal) => Promise<void>;
+};
 export type StorageLocationObjectInfo = StorageObjectInfo & { storedBytes: number };
 export type StorageLocation = {
   describe(): StorageLocationDescription;
@@ -52,7 +56,7 @@ export type StorageLocation = {
   putObject(
     key: string,
     body: AsyncIterable<Uint8Array>,
-    opts: OperationOptions & { sizeBytes?: number },
+    opts: MutationOptions & { sizeBytes?: number },
   ): Promise<{ sizeBytes: number; storedBytes: number }>;
   getObject(key: string, opts?: OperationOptions): Promise<AsyncIterable<Uint8Array> | undefined>;
   stat(key: string, opts?: OperationOptions): Promise<StorageLocationObjectInfo | undefined>;
@@ -60,7 +64,7 @@ export type StorageLocation = {
     prefix?: string,
     opts?: OperationOptions & { acceptKey?: (key: string) => boolean },
   ): AsyncIterable<StorageLocationObjectInfo>;
-  delete(key: string, opts?: OperationOptions): Promise<void>;
+  delete(key: string, opts?: MutationOptions): Promise<void>;
   scope(prefix: string): StorageLocation;
   close(): Promise<void>;
 };
@@ -253,6 +257,7 @@ async function makeLocation(
         }
         await check(operation.signal);
         let plaintextBytes = 0;
+        let preconditionFailure: { error: unknown } | undefined;
         async function* counted() {
           for await (const chunk of body) {
             operation.signal?.throwIfAborted();
@@ -267,11 +272,16 @@ async function makeLocation(
           }
           // Recheck identity after consuming a potentially long producer, before publication.
           await check(operation.signal);
+          try {
+            await opts.precondition?.(operation.signal);
+            assertOpen(operation.signal);
+          } catch (error) {
+            preconditionFailure = { error };
+            throw error;
+          }
         }
-        const stored = await backend.putObject(
-          fullKey,
-          masterKey ? encryptStorageObject(counted(), masterKey) : counted(),
-          {
+        const stored = await backend
+          .putObject(fullKey, masterKey ? encryptStorageObject(counted(), masterKey) : counted(), {
             ...operation,
             sizeBytes:
               opts.sizeBytes === undefined
@@ -279,8 +289,17 @@ async function makeLocation(
                 : masterKey
                   ? encryptedStorageSize(opts.sizeBytes)
                   : opts.sizeBytes,
-          },
-        );
+          })
+          .catch((error: unknown) => {
+            if (!preconditionFailure || error === preconditionFailure.error) {
+              throw error;
+            }
+            // Keep the caller's refusal and provider diagnostics, including failed cleanup.
+            throw new Error(
+              `${formatErrorMessage(preconditionFailure.error)}\n${formatErrorMessage(error)}`,
+              { cause: error },
+            );
+          });
         return { sizeBytes: plaintextBytes, storedBytes: stored.sizeBytes };
       },
       getObject: async (key, opts) => {
@@ -329,6 +348,8 @@ async function makeLocation(
         const fullKey = keyFor(key);
         const operation = options(opts);
         await check(operation.signal);
+        await opts?.precondition?.(operation.signal);
+        assertOpen(operation.signal);
         await backend.deleteObject(fullKey, operation);
       },
       scope: (prefix) => {

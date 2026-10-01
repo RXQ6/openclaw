@@ -123,18 +123,25 @@ same namespace when listing, verifying, or restoring from another host.
 
 The first upload creates `backups/<namespace>/owner.json` with the installation's
 durable Gateway device ID, hostname, and claim time. The claim uses the location's
-encryption settings. Before archiving and again before retention, OpenClaw checks
-that the claim matches this installation. A different device ID refuses the run
-before archiving and records a failed attempt naming the owner. Identical
+encryption settings. OpenClaw checks that the claim matches this installation
+before archiving, at archive publication, and before each retention deletion.
+An existing claim with a different device ID refuses the run before archiving
+and records a failed attempt naming the owner. Identical
 hostnames do not grant shared ownership.
 
 Use a different `--namespace` for a separate installation. To deliberately take
-over an existing namespace, such as after moving to new hardware, pass
-`--claim-namespace` with `--to`. This also replaces a damaged ownership claim:
+over a stopped or retired installation's namespace, such as after moving to new
+hardware, pass `--claim-namespace` with `--to`. This also replaces a damaged ownership claim:
 
 ```bash
 openclaw backup create --to offsite --namespace gateway --claim-namespace
 ```
+
+The displaced installation is rejected at its next publication or deletion.
+Object stores cannot make an object's write conditional on a separate ownership
+claim, so a residual provider round-trip window remains between the final check
+and the effect. Stop the old installation before taking over; use a separate
+namespace for installations that run concurrently.
 
 A restored installation retains its device identity and can continue using its
 namespace. A cloned copy running at the same time shares that identity and must

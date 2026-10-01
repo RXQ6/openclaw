@@ -103,6 +103,7 @@ export async function createOffsiteBackupArchive(
     await assertBackupNamespaceOwner(location, namespace, deviceId);
     const uploaded = await location.putObject(key, createReadStream(result.archivePath), {
       sizeBytes: plaintextBytes,
+      precondition: () => assertBackupNamespaceOwner(location, namespace, deviceId),
     });
     const stored = await location.stat(key);
     if (
@@ -136,10 +137,11 @@ export async function createOffsiteBackupArchive(
         (await listBackupObjects(location)).map((object) => object.key),
         retention,
       );
-      await assertBackupNamespaceOwner(location, namespace, deviceId);
       for (const expired of selected.deleted) {
         await assertBackupNamespaceOwner(location, namespace, deviceId);
-        await location.delete(expired);
+        await location.delete(expired, {
+          precondition: () => assertBackupNamespaceOwner(location, namespace, deviceId),
+        });
       }
       output.retention = { kept: selected.kept.length, deleted: selected.deleted.length };
     }

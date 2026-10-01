@@ -4,8 +4,10 @@ import path from "node:path";
 import { json } from "node:stream/consumers";
 import { Command } from "commander";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { claimBackupNamespace } from "../../commands/backup-namespace.js";
 import type { OffsiteBackupResult } from "../../commands/backup-remote.js";
 import { getRuntimeConfig } from "../../config/config.js";
+import * as deviceIdentity from "../../infra/device-identity-async.js";
 import { loadDeviceIdentityIfPresentAsync } from "../../infra/device-identity-async.js";
 import { defaultRuntime } from "../../runtime.js";
 import { readBackupRuns } from "../../state/backup-run-records.js";
@@ -14,14 +16,214 @@ import {
   closeOpenClawStateDatabaseAsync,
 } from "../../state/openclaw-state-db.js";
 import { resolveOpenClawStateSqlitePath } from "../../state/openclaw-state-db.paths.js";
+import { filesystemStorageProvider } from "../../storage/filesystem.js";
 import { openStorageLocation } from "../../storage/locations.js";
+import type { StorageBackend } from "../../storage/types.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import { registerBackupCommand } from "./register.backup.js";
 import { registerStorageCommand } from "./register.storage.js";
 
 afterEach(() => vi.restoreAllMocks());
 
+function createCliHarness() {
+  const writeJson = vi.spyOn(defaultRuntime, "writeJson").mockImplementation(() => {});
+  vi.spyOn(defaultRuntime, "log").mockImplementation(() => {});
+  const errors = vi.spyOn(defaultRuntime, "error").mockImplementation(() => {});
+  vi.spyOn(defaultRuntime, "exit").mockImplementation((code) => {
+    throw new Error(`CLI exit ${code}`);
+  });
+  const run = async (...argv: string[]) => {
+    writeJson.mockClear();
+    const program = new Command().exitOverride();
+    registerBackupCommand(program);
+    registerStorageCommand(program);
+    await program.parseAsync([...argv, "--json"], { from: "user" });
+    return writeJson.mock.calls.at(-1)?.[0];
+  };
+  return { run, errors };
+}
+
 describe("offsite backup CLI", () => {
+  async function withNamespaceRace(
+    exercise: (fixture: {
+      run: ReturnType<typeof createCliHarness>["run"];
+      errors: ReturnType<typeof createCliHarness>["errors"];
+      namespaceDir: string;
+      scratchRoot: string;
+      takeOver: () => Promise<void>;
+      useNewOwner: () => void;
+      intercept: (configure: (backend: StorageBackend) => void) => void;
+    }) => Promise<void>,
+  ) {
+    await withOpenClawTestState({ layout: "state-only" }, async (state) => {
+      const destination = state.path("offsite");
+      const scratchRoot = state.path("scratch");
+      await fs.mkdir(destination);
+      await fs.mkdir(scratchRoot);
+      vi.spyOn(os, "tmpdir").mockReturnValue(scratchRoot);
+      await state.writeConfig({
+        storage: {
+          locations: {
+            archive: {
+              provider: "filesystem",
+              settings: { path: destination },
+              encryption: { passphrase: "synthetic-backup-test-passphrase" },
+            },
+          },
+        },
+      });
+      const { run, errors } = createCliHarness();
+      await run("storage", "init", "archive");
+      const identity = await deviceIdentity.loadOrCreateProcessDeviceIdentityAsync();
+      const nextIdentity = { ...identity, deviceId: "replacement-installation-device-id" };
+      const location = await openStorageLocation({ name: "archive", config: getRuntimeConfig() });
+      const scoped = location.scope("backups/test-host");
+      try {
+        await claimBackupNamespace(scoped, "test-host", identity.deviceId, false);
+        const open = filesystemStorageProvider.open;
+        await exercise({
+          run,
+          errors,
+          namespaceDir: path.join(destination, "backups", "test-host"),
+          scratchRoot,
+          takeOver: () => claimBackupNamespace(scoped, "test-host", nextIdentity.deviceId, true),
+          useNewOwner: () => {
+            vi.spyOn(deviceIdentity, "loadOrCreateProcessDeviceIdentityAsync").mockResolvedValue(
+              nextIdentity,
+            );
+          },
+          intercept: (configure) => {
+            vi.spyOn(filesystemStorageProvider, "open").mockImplementation(async (params) => {
+              const backend = await open(params);
+              configure(backend);
+              return backend;
+            });
+          },
+        });
+      } finally {
+        await location.close();
+      }
+    });
+  }
+
+  it("rejects publication after namespace takeover during streaming and lets the new owner create", async () => {
+    await withNamespaceRace(async (fixture) => {
+      const before = await fs.readdir(fixture.namespaceDir);
+      let displaced = false;
+      fixture.intercept((backend) => {
+        const put = backend.putObject;
+        backend.putObject = (key, body, opts) =>
+          put(
+            key,
+            (async function* () {
+              for await (const chunk of body) {
+                yield chunk;
+                if (key.endsWith(".tar.gz") && !displaced) {
+                  displaced = true;
+                  await fixture.takeOver();
+                }
+              }
+            })(),
+            opts,
+          );
+      });
+      const create = () =>
+        fixture.run(
+          "backup",
+          "create",
+          "--to",
+          "archive",
+          "--namespace",
+          "test-host",
+          "--only-config",
+        );
+      await expect(create()).rejects.toThrow("CLI exit 1");
+      expect(displaced).toBe(true);
+      expect(await fs.readdir(fixture.namespaceDir)).toEqual(before);
+      expect(await fs.readdir(fixture.scratchRoot)).toEqual([]);
+      expect((await readBackupRuns(process.env))[0]).toMatchObject({
+        status: "failed",
+        target: "archive",
+        namespace: "test-host",
+        error: expect.stringContaining("belongs to another OpenClaw installation"),
+      });
+      expect(fixture.errors.mock.calls.flat().join(" ")).toContain(
+        "belongs to another OpenClaw installation",
+      );
+      fixture.useNewOwner();
+      const created = (await create()) as OffsiteBackupResult;
+      expect(created.verified).toBe(true);
+      expect(await fs.readdir(fixture.namespaceDir)).toEqual(
+        expect.arrayContaining([...before, created.location!.key]),
+      );
+      expect((await readBackupRuns(process.env))[0]).toMatchObject({ status: "ok" });
+      expect(await fs.readdir(fixture.scratchRoot)).toEqual([]);
+    });
+  });
+
+  it("stops retention when namespace takeover follows the first delete's ownership check", async () => {
+    await withNamespaceRace(async (fixture) => {
+      const expired = [
+        "20260101T000000Z-11111111.tar.gz",
+        "20260102T000000Z-22222222.tar.gz",
+        "20260103T000000Z-33333333.tar.gz",
+      ];
+      for (const key of expired) {
+        await fs.writeFile(path.join(fixture.namespaceDir, key), Buffer.alloc(200));
+      }
+      const deleted: string[] = [];
+      let nextMarker = false;
+      let displaced = false;
+      fixture.intercept((backend) => {
+        const get = backend.getObject;
+        const remove = backend.deleteObject;
+        backend.getObject = async (key, opts) => {
+          if (key === "openclaw-storage.json" && nextMarker) {
+            nextMarker = false;
+            displaced = true;
+            await fixture.takeOver();
+          }
+          const body = await get(key, opts);
+          if (key.endsWith("/owner.json") && deleted.length === 1 && !displaced) {
+            // Let the early claim read finish, then take over during the delete's marker check.
+            nextMarker = true;
+          }
+          return body;
+        };
+        backend.deleteObject = async (key, opts) => {
+          await remove(key, opts);
+          if (key.endsWith(".tar.gz")) {
+            deleted.push(path.basename(key));
+          }
+        };
+      });
+      await expect(
+        fixture.run(
+          "backup",
+          "create",
+          "--to",
+          "archive",
+          "--namespace",
+          "test-host",
+          "--only-config",
+          "--keep-daily",
+          "0",
+        ),
+      ).rejects.toThrow("CLI exit 1");
+      expect(displaced).toBe(true);
+      expect(deleted).toHaveLength(1);
+      expect(await fs.readdir(fixture.namespaceDir)).toEqual(
+        expect.arrayContaining(expired.filter((key) => !deleted.includes(key))),
+      );
+      expect((await readBackupRuns(process.env))[0]).toMatchObject({
+        status: "failed",
+        namespace: "test-host",
+        error: expect.stringContaining("belongs to another OpenClaw installation"),
+      });
+      expect(await fs.readdir(fixture.scratchRoot)).toEqual([]);
+    });
+  });
+
   it("refuses uninitialized storage, then uploads, lists, verifies and stages an encrypted archive", async () => {
     await withOpenClawTestState({ layout: "state-only" }, async (state) => {
       const destination = state.path("offsite");
@@ -46,20 +248,7 @@ describe("offsite backup CLI", () => {
         path.join(state.workspaceDir, "workspace-note.txt"),
         "excluded workspace\n",
       );
-      const writeJson = vi.spyOn(defaultRuntime, "writeJson").mockImplementation(() => {});
-      vi.spyOn(defaultRuntime, "log").mockImplementation(() => {});
-      const errors = vi.spyOn(defaultRuntime, "error").mockImplementation(() => {});
-      vi.spyOn(defaultRuntime, "exit").mockImplementation((code) => {
-        throw new Error(`CLI exit ${code}`);
-      });
-      const run = async (...argv: string[]) => {
-        writeJson.mockClear();
-        const program = new Command().exitOverride();
-        registerBackupCommand(program);
-        registerStorageCommand(program);
-        await program.parseAsync([...argv, "--json"], { from: "user" });
-        return writeJson.mock.calls.at(-1)?.[0];
-      };
+      const { run, errors } = createCliHarness();
       openOpenClawStateDatabase();
       await closeOpenClawStateDatabaseAsync();
       expect((await fs.stat(resolveOpenClawStateSqlitePath())).isFile()).toBe(true);
