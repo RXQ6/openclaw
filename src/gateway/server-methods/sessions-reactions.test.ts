@@ -118,9 +118,12 @@ async function appendMessage(
   return (await appendTranscriptMessage(scope, { message })).messageId;
 }
 
-function registerReactionChannel(supportsReactions = true) {
+function registerReactionChannel(supportsReactions = true, reactionSlots?: "single" | "multiple") {
   const plugin: ChannelPlugin = {
-    ...createChannelTestPluginBase({ id: "testchat" }),
+    ...createChannelTestPluginBase({
+      id: "testchat",
+      capabilities: { chatTypes: ["direct"], reactionSlots },
+    }),
     actions: {
       describeMessageTool: () => ({ actions: supportsReactions ? ["react"] : ["read"] }),
     },
@@ -600,6 +603,103 @@ describe("session reaction handlers", () => {
           }),
         );
       }
+    });
+  });
+
+  it.each(["single", "multiple", undefined] as const)(
+    "preserves remaining reactions for channel reaction slots: %s",
+    async (reactionSlots) => {
+      await withOpenClawTestState({ scenario: "minimal" }, async () => {
+        registerReactionChannel(true, reactionSlots);
+        const { messageId, config } = await seedChannelMessage();
+        const requestContext = context(config);
+        const set = (emoji: string, remove = false) =>
+          call(
+            "session.reactions.set",
+            { sessionKey, messageId, emoji, remove },
+            client("alice"),
+            requestContext,
+          );
+        for (const emoji of ["🎉", "👍", "🚀"]) {
+          expect((await set(emoji))[1]).toMatchObject({ mirror: { status: "delivered" } });
+          expect(runMessageAction).toHaveBeenLastCalledWith(
+            expect.objectContaining({ params: expect.objectContaining({ emoji, remove: false }) }),
+          );
+        }
+        for (const [emoji, remaining, replacement] of [
+          ["🎉", ["👍", "🚀"], "🚀"],
+          ["🚀", ["👍"], "👍"],
+          ["👍", [], undefined],
+        ] as const) {
+          expect((await set(emoji, true))[1]).toMatchObject({
+            reactions: remaining.map((value) => ({ emoji: value, count: 1 })),
+            mirror: { status: "delivered" },
+          });
+          expect(runMessageAction).toHaveBeenLastCalledWith(
+            expect.objectContaining({
+              params: expect.objectContaining({
+                emoji: reactionSlots === "single" ? (replacement ?? emoji) : emoji,
+                remove: reactionSlots !== "single" || replacement === undefined,
+              }),
+            }),
+          );
+        }
+      });
+    },
+  );
+
+  it("serializes different emoji in a single channel slot without blocking other messages", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      registerReactionChannel(true, "single");
+      const { messageId, config, conversationRef } = await seedChannelMessage();
+      const otherMessageId = await appendMessage({
+        role: "user",
+        content: "Other channel prompt",
+        __openclaw: {
+          transport: { channel: "testchat", conversationRef, messageId: "channel-message-10" },
+        },
+      });
+      const requestContext = context(config);
+      const firstEntered = createDeferredCore();
+      const releaseFirst = createDeferredCore();
+      const secondCommitted = createDeferredCore();
+      const delivered: unknown[] = [];
+      vi.mocked(requestContext.broadcast).mockImplementation((_event, payload) => {
+        if ((payload as { emoji: string }).emoji === "👍") {
+          secondCommitted.resolve();
+        }
+      });
+      runMessageAction.mockImplementation(async (input: MessageActionInput) => {
+        await input.onPlatformSendDispatch?.();
+        input.assertDirectAdapterHandoff?.();
+        if (input.params.emoji === "🎉") {
+          firstEntered.resolve();
+          await releaseFirst.promise;
+        }
+        delivered.push(input.params.emoji);
+        return { kind: "action", payload: { ok: true } };
+      });
+      const set = (id: string, emoji: string) =>
+        call(
+          "session.reactions.set",
+          { sessionKey, messageId: id, emoji },
+          client("alice"),
+          requestContext,
+        );
+      const first = set(messageId, "🎉");
+      await firstEntered.promise;
+      const second = set(messageId, "👍");
+      try {
+        await secondCommitted.promise;
+        expect((await set(otherMessageId, "🚀"))[1]).toMatchObject({
+          mirror: { status: "delivered" },
+        });
+        expect(delivered).toEqual(["🚀"]);
+      } finally {
+        releaseFirst.resolve();
+        await Promise.all([first, second]);
+      }
+      expect(delivered).toEqual(["🚀", "🎉", "👍"]);
     });
   });
 

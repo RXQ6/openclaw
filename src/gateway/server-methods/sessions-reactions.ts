@@ -74,9 +74,9 @@ function reactionScope(target: ReactionTarget) {
   return { agentId: target.agentId, sessionKey: target.storeKey, storePath: target.storePath };
 }
 
-// A channel holds one bot reaction per emoji for all Control UI reactors. Mirrors
-// for one message and emoji run in local commit order, so an older add can never
-// land after a newer remove and leave the channel out of step with the store.
+// Mirrors run in local commit order per message and channel reaction slot, so
+// an older add can never land after a newer remove and leave the channel out of
+// step with the store. Single-slot channels share the queue across all emoji.
 const mirrorQueues = new Map<string, Promise<SessionReactionMirror>>();
 
 function enqueueMirror(
@@ -137,29 +137,33 @@ async function mirrorReaction(params: {
   context: GatewayRequestContext;
   target: ReactionTarget;
   transport: MirrorTransport;
+  reactions: MessageReactionSummary[];
   emoji: string;
   remove: boolean;
   assertCurrent: () => void;
 }): Promise<SessionReactionMirror> {
-  const { transport } = params;
-  const scope = { ...reactionScope(params.target), sessionId: params.target.entry.sessionId };
-  const cfg = params.context.getRuntimeConfig();
-  // Start capture now and reserve commit order before yielding to another mutation.
-  const captured = readSessionConversationBindingAsync(scope, transport.conversationRef).then(
-    (conversation) => ({ ok: true as const, conversation }),
-    (error: unknown) => ({ ok: false as const, error }),
-  );
-  return enqueueMirror(
-    [
-      params.target.agentId,
-      params.target.storeKey,
-      params.target.entry.sessionId,
-      transport.conversationRef,
-      transport.messageId,
-      params.emoji,
-    ].join("\0"),
-    async () => {
-      try {
+  try {
+    const { transport } = params;
+    const plugin = getRuntimeVisibleChannelPlugin(transport.channel);
+    const singleSlot = plugin?.capabilities.reactionSlots === "single";
+    const replacement = singleSlot && params.remove ? params.reactions.at(-1) : undefined;
+    const scope = { ...reactionScope(params.target), sessionId: params.target.entry.sessionId };
+    const cfg = params.context.getRuntimeConfig();
+    // Start capture now and reserve commit order before yielding to another mutation.
+    const captured = readSessionConversationBindingAsync(scope, transport.conversationRef).then(
+      (conversation) => ({ ok: true as const, conversation }),
+      (error: unknown) => ({ ok: false as const, error }),
+    );
+    return await enqueueMirror(
+      [
+        params.target.agentId,
+        params.target.storeKey,
+        params.target.entry.sessionId,
+        transport.conversationRef,
+        transport.messageId,
+        singleSlot ? "" : params.emoji,
+      ].join("\0"),
+      async () => {
         const resolved = await captured;
         if (!resolved.ok) {
           throw resolved.error;
@@ -198,7 +202,6 @@ async function mirrorReaction(params: {
         ) {
           return { status: "skipped", reason: "source channel does not support reactions" };
         }
-        const plugin = getRuntimeVisibleChannelPlugin(channel);
         if (!plugin) {
           return { status: "skipped", reason: "source channel is unavailable" };
         }
@@ -257,8 +260,8 @@ async function mirrorReaction(params: {
               accountId: conversation.accountId,
               ...(conversation.threadId ? { threadId: conversation.threadId } : {}),
               messageId: transport.messageId,
-              emoji: params.emoji,
-              remove: params.remove,
+              emoji: replacement?.emoji ?? params.emoji,
+              remove: params.remove && !replacement,
             },
           }),
         );
@@ -266,13 +269,13 @@ async function mirrorReaction(params: {
           throw new Error(outcome.error);
         }
         return { status: "delivered" };
-      } catch (error) {
-        const reason = formatErrorMessage(error);
-        params.context.logGateway.warn(`Control UI reaction mirror failed: ${reason}`);
-        return { status: "failed", reason };
-      }
-    },
-  );
+      },
+    );
+  } catch (error) {
+    const reason = formatErrorMessage(error);
+    params.context.logGateway.warn(`Control UI reaction mirror failed: ${reason}`);
+    return { status: "failed", reason };
+  }
 }
 
 export const sessionReactionHandlers: GatewayRequestHandlers = {
@@ -522,6 +525,7 @@ export const sessionReactionHandlers: GatewayRequestHandlers = {
               context,
               target,
               transport: decision.transport,
+              reactions,
               emoji: params.emoji,
               remove: params.remove === true,
               assertCurrent,
