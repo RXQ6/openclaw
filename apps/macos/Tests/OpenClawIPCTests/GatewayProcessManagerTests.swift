@@ -2425,35 +2425,57 @@ struct GatewayProcessManagerTests {
     func `pause preserves established installation after service removal`(_ managed: Bool) async throws {
         let root = try makeTempDirForTests()
         defer { try? FileManager.default.removeItem(at: root) }
-        let port = try self.availableGatewayPort()
+        let port = try AppProfile.current.isActive ? GatewayEnvironment.gatewayPort() : self.availableGatewayPort()
         let url = try #require(URL(string: "ws://example.invalid"))
         let (_, connection, manager) = self.makeGatewayReadinessFixture(url: url) {
             self.gatewayTask(healthSucceedsAfter: 0)
         }
         defer { manager.setTestingDesiredActive(false) }
-        try await self.withLaunchAgentEnvironment(port: port, homeDirectory: root) {
+        try await self.withLaunchAgentEnvironment(
+            port: port, homeDirectory: root, statusPayload: self.loadedGatewayStatus(port: port))
+        {
+            let previousResume = AppDefaults.standard.object(forKey: GatewayLaunchAgentManager.resumeCommandKey)
+            let previousHosting = AppDefaults.standard.object(forKey: GatewayHosting.defaultsKey)
+            defer {
+                manager.retainedServiceCLI = nil
+                AppDefaults.standard.set(previousResume, forKey: GatewayLaunchAgentManager.resumeCommandKey)
+                AppDefaults.standard.set(previousHosting, forKey: GatewayHosting.defaultsKey)
+            }
             let plist = GatewayLaunchAgentManager.plistURL(homeDirectory: root, profile: .current)
             if managed {
                 try FileManager.default.createDirectory(
                     at: plist.deletingLastPathComponent(), withIntermediateDirectories: true)
+                let node = AppProfile.current.stateDirectoryURL().appendingPathComponent("tools/node")
                 let data = try PropertyListSerialization.data(
-                    fromPropertyList: ["ProgramArguments": [CLIInstaller.managedExecutableLocation(), "gateway"]],
-                    format: .xml, options: 0)
+                    fromPropertyList: ["ProgramArguments": [
+                        node.appendingPathComponent("bin/node").path,
+                        node.appendingPathComponent("lib/node_modules/openclaw/openclaw.mjs").path,
+                        "gateway",
+                    ]], format: .xml, options: 0)
                 try data.write(to: plist)
             }
-            #expect(await manager._testAttachExistingGatewayIfAvailable(port: port))
-            #expect(manager.installation == (managed ? .managed : .external))
-            manager.stop()
-            _ = await manager._testAttachExistingGatewayAfterPendingDisable(port: port)
-            #expect(GatewayLaunchAgentManager.testingDaemonCommandCallsSnapshot().contains(["uninstall"]))
-            if managed {
-                // Match uninstallLaunchAgent's filesystem effect without touching launchd.
-                try FileManager.default.moveItem(at: plist, to: root.appendingPathComponent("uninstalled.plist"))
+            await PortGuardian.shared.setTestingDescriptor(self.gatewayDescriptor(pid: 4242), forPort: port)
+            do {
+                #expect(await manager._testAttachExistingGatewayIfAvailable(port: port))
+                #expect(manager.installation == (managed ? .managed : .external))
+                manager.stop()
+                _ = await manager._testAttachExistingGatewayAfterPendingDisable(port: port)
+                #expect(GatewayLaunchAgentManager.testingDaemonCommandCallsSnapshot()
+                    .contains(["uninstall"]) == managed)
+                if managed {
+                    // Match uninstallLaunchAgent's filesystem effect without touching launchd.
+                    try FileManager.default.moveItem(at: plist, to: root.appendingPathComponent("uninstalled.plist"))
+                }
+                #expect(!FileManager.default.fileExists(atPath: plist.path))
+                #expect(manager.status == .stopped)
+                #expect(manager.installation == (managed ? .managed : .external))
+            } catch {
+                await connection.shutdown()
+                await PortGuardian.shared.setTestingDescriptor(nil, forPort: port)
+                throw error
             }
-            #expect(!FileManager.default.fileExists(atPath: plist.path))
-            #expect(manager.status == .stopped)
-            #expect(manager.installation == (managed ? .managed : .external))
             await connection.shutdown()
+            await PortGuardian.shared.setTestingDescriptor(nil, forPort: port)
         }
     }
 
