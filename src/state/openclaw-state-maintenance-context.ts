@@ -60,6 +60,18 @@ export function allowsMaintenanceLiveAuthorityReads(
   return false;
 }
 
+/** Raw source descriptor closes are safe only before maintenance admits native source reads. */
+export function maintenanceOwnerMayCopySourcesInProcess(
+  scope: OpenClawDatabaseMaintenanceScope | undefined,
+  pathname: string,
+): boolean {
+  if (!scope?.ownsSchemaMaintenance) {
+    return false;
+  }
+  scope.assertReadAdmission();
+  return !allowsMaintenanceLiveAuthorityReads(scope, pathname);
+}
+
 export const maintenanceResources = resolveGlobalSingleton(
   Symbol.for("openclaw.databaseMaintenanceResources"),
   () => ({

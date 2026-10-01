@@ -52,8 +52,12 @@ import {
   runUpdateStateInspectionWorker,
 } from "./update-candidate-state.inspection.js";
 import { finishStateInspection } from "./update-candidate-state.process.js";
-import { readUpdateStateDatabaseSizes } from "./update-candidate-state.sizes.js";
+import {
+  readUpdateStateDatabaseSizes,
+  readUpdateStateDatabaseSizesInProcess,
+} from "./update-candidate-state.sizes.js";
 import type { UpdateDatabaseGenerations } from "./update-database-generations.js";
+import type { UpdateRecoveryCaptureAcquisition } from "./update-recovery-baseline-capture.js";
 
 const UpdateStateSchemaVersionsSchema = z.array(
   z.object({
@@ -481,6 +485,7 @@ export async function readUpdateDatabaseGenerationsIsolated(
     root?: string;
     timeoutMs?: number;
     signal?: AbortSignal;
+    acquisition?: UpdateRecoveryCaptureAcquisition;
   } = {},
 ): Promise<UpdateDatabaseGenerations> {
   const sourceEnv = options.env ?? process.env;
@@ -507,21 +512,21 @@ export async function readUpdateDatabaseGenerationsIsolated(
         await runUpdateStateInspectionWorker({
           ...worker,
           root: options.root,
+          ...(options.acquisition?.mode === "maintenance-owner"
+            ? { ioBudget: "deadline" as const }
+            : {}),
           input: {
             mode: "database-generations",
             paths,
             stateDir: resolveStateDir(sourceEnv),
             config: {},
           },
-          databases: await readUpdateStateDatabaseSizes(paths, worker),
+          databases:
+            options.acquisition?.mode === "maintenance-owner"
+              ? await readUpdateStateDatabaseSizesInProcess(paths)
+              : await readUpdateStateDatabaseSizes(paths, worker),
         }),
-        z.record(
-          z.string(),
-          z
-            .string()
-            .regex(/^[a-f0-9]{64}$/u)
-            .nullable(),
-        ),
+        z.record(z.string(), z.nullable(z.string().regex(/^[a-f0-9]{64}$/u))),
       );
       if (
         Object.keys(generations).length !== new Set(paths).size ||

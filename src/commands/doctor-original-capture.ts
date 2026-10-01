@@ -81,6 +81,7 @@ export async function preserveDoctorOriginalState(params: {
           drivers: [driver],
           assertCurrent,
           signal: params.signal,
+          acquisition: { mode: "maintenance-owner" },
         }),
     );
     assertCurrent();

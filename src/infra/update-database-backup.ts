@@ -24,11 +24,16 @@ import {
   runUpdateStateInspectionWorker,
 } from "./update-candidate-state.inspection.js";
 import {
+  collectStateDatabasePaths,
   discoverUpdateStateSchemaInspectionInProcess,
   UpdateStateSchemaInspectionPlanSchema,
 } from "./update-candidate-state.js";
-import { readUpdateStateDatabaseSizes } from "./update-candidate-state.sizes.js";
+import {
+  readUpdateStateDatabaseSizes,
+  readUpdateStateDatabaseSizesInProcess,
+} from "./update-candidate-state.sizes.js";
 import { readUpdateDatabaseGenerations } from "./update-database-generations.js";
+import type { UpdateRecoveryCaptureAcquisition } from "./update-recovery-baseline-capture.js";
 
 const UpdateDatabaseBackupSchema = z.object({
   directory: z.string(),
@@ -217,18 +222,18 @@ async function canonicalDatabaseInventory(
 export async function createUpdateDatabaseBackupInProcess(
   input: BackupInput & {
     stagingRoot: string;
-    inspectionPlan: InspectionPlan;
+    inspectionPlan?: InspectionPlan;
     onProgress?: (progress: UpdateStateInspectionProgress) => void;
   },
 ): Promise<UpdateDatabaseBackup> {
   const directory = await fs.realpath(`${input.backupRoot}.databases`);
   // Older parents strip owners from discovery before calling the candidate worker.
   // Compare the same admitted dialect; absent metadata must not become an inventory change.
-  const includeOwners = input.inspectionPlan.files.some(
-    ([, database]) => database.owners !== undefined,
-  );
+  const inspectionPlan =
+    input.inspectionPlan ?? (await discoverUpdateStateSchemaInspectionInProcess(input));
+  const includeOwners = inspectionPlan.files.some(([, database]) => database.owners !== undefined);
   const inventory = await canonicalDatabaseInventory(
-    input.inspectionPlan,
+    inspectionPlan,
     includeOwners,
     input.additionalPaths,
     input.additionalFiles,
@@ -312,11 +317,13 @@ export async function createUpdateDatabaseBackupInProcess(
 
 /** Retain raw, verified database files separately from the old package fingerprint. */
 export async function createUpdateDatabaseBackup({
+  acquisition,
   nodeRunner = process.execPath,
   timeoutMs,
   signal: callerSignal,
   ...input
 }: BackupInput & {
+  acquisition?: UpdateRecoveryCaptureAcquisition;
   nodeRunner?: string;
   timeoutMs?: number;
   signal?: AbortSignal;
@@ -345,24 +352,36 @@ export async function createUpdateDatabaseBackup({
         stagingRoot: directory,
       };
       const shared = path.resolve(input.stateDir, "state", "openclaw.sqlite");
-      const inspectionPlan = parseUpdateStateInspectionWorker(
-        await runUpdateStateInspectionWorker({
-          ...worker,
-          input: { ...workerInput, mode: "discover" },
-          databases: await readUpdateStateDatabaseSizes([shared], worker),
-        }),
-        UpdateStateSchemaInspectionPlanSchema,
-      );
+      const maintenanceOwner = acquisition?.mode === "maintenance-owner";
+      const inspectionPlan = maintenanceOwner
+        ? undefined
+        : parseUpdateStateInspectionWorker(
+            await runUpdateStateInspectionWorker({
+              ...worker,
+              input: { ...workerInput, mode: "discover" },
+              databases: await readUpdateStateDatabaseSizes([shared], worker),
+            }),
+            UpdateStateSchemaInspectionPlanSchema,
+          );
       const files = [
-        ...inspectionPlan.files.flatMap(([, database]) => database.spellings),
+        ...[...(inspectionPlan?.files ?? (await collectStateDatabasePaths(input)))].flatMap(
+          ([, database]) => database.spellings,
+        ),
         ...(additionalPaths ?? []),
         ...(additionalFiles ?? []),
       ];
       const backup = parseUpdateStateInspectionWorker(
         await runUpdateStateInspectionWorker({
           ...worker,
-          input: { ...workerInput, mode: "database-backup", inspectionPlan },
-          databases: await readUpdateStateDatabaseSizes(files, worker),
+          input: {
+            ...workerInput,
+            mode: "database-backup",
+            ...(inspectionPlan ? { inspectionPlan } : {}),
+          },
+          ...(maintenanceOwner ? { ioBudget: "deadline" as const } : {}),
+          databases: maintenanceOwner
+            ? await readUpdateStateDatabaseSizesInProcess(files)
+            : await readUpdateStateDatabaseSizes(files, worker),
         }),
         UpdateDatabaseBackupSchema,
       );

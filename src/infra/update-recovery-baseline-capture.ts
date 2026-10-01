@@ -13,10 +13,17 @@ import { resolveConfigPath, resolveStateDir } from "../config/paths.js";
 import type { PluginDoctorMigrationBackupWarning } from "../plugins/doctor-contract-module.js";
 import { preparePluginDoctorMigrationBackupResources } from "../plugins/doctor-contract-registry.js";
 import { ensurePrivateSnapshotRepositoryRoot } from "../snapshot/local-repository.js";
+import { isOpenClawAgentDatabaseOpen } from "../state/openclaw-agent-db.js";
+import { openClawStateDatabaseCache } from "../state/openclaw-state-db-cache.js";
 import {
   withArtifactPreservingStateReads,
   withOpenClawStateDatabaseReadSnapshot,
 } from "../state/openclaw-state-db-readonly.js";
+import { resolveOpenClawStateSqlitePath } from "../state/openclaw-state-db.paths.js";
+import {
+  getOpenClawDatabaseMaintenanceScope,
+  maintenanceOwnerMayCopySourcesInProcess,
+} from "../state/openclaw-state-maintenance-context.js";
 import { resolveBackupConfigCapture } from "./backup-config-capture.js";
 import { resolvePathViaExistingAncestorSync } from "./boundary-path.js";
 import { sha256Hex } from "./crypto-digest.js";
@@ -39,6 +46,7 @@ import {
   UPDATE_CAPTURE_PRIVACY_MARKER_CONTENT,
 } from "./update-capture-privacy-marker.js";
 import { createUpdateDatabaseBackup } from "./update-database-backup.js";
+import { readUpdateDatabaseGenerations } from "./update-database-generations.js";
 import { readUpdateRunDriver, type UpdateRunDriver } from "./update-run-driver.js";
 
 declare const SEALED_RUNTIME_BUILD: boolean;
@@ -52,6 +60,10 @@ export type UpdateRecoveryBaselineRef = {
   manifestPath: string;
   manifestSha256: string;
 };
+
+export type UpdateRecoveryCaptureAcquisition =
+  | { mode: "isolated-steps" }
+  | { mode: "maintenance-owner" };
 
 function within(candidate: string, root: string): boolean {
   const relative = path.relative(root, candidate);
@@ -101,6 +113,23 @@ async function markPrivateCapture(directory: string): Promise<void> {
   requireDirectorySync(await syncDirectory(directory), "Private update capture marker");
 }
 
+function maintenanceOwnerMayReadGenerationsInProcess(
+  sharedStatePath: string,
+  databasePaths: ReadonlySet<string>,
+): boolean {
+  const scope = getOpenClawDatabaseMaintenanceScope();
+  // An open process-local source handle requires a child: a raw close here could release its POSIX locks.
+  return (
+    maintenanceOwnerMayCopySourcesInProcess(scope, sharedStatePath) &&
+    !openClawStateDatabaseCache.isOpenClawStateDatabaseOpen(sharedStatePath) &&
+    [...databasePaths].every(
+      (pathname) =>
+        maintenanceOwnerMayCopySourcesInProcess(scope, pathname) &&
+        !isOpenClawAgentDatabaseOpen(pathname),
+    )
+  );
+}
+
 /** Capture for manual recovery under the original invocation's live custody.
  * Sources may remain active; final revalidation is not authority to restore them. */
 export function captureUpdateRecoveryBaseline(params: {
@@ -112,6 +141,7 @@ export function captureUpdateRecoveryBaseline(params: {
   signal?: AbortSignal;
   nodeRunner?: string;
   timeoutMs?: number;
+  acquisition?: UpdateRecoveryCaptureAcquisition;
 }) {
   // Sealed helpers consume retained evidence; the installed CLI owns fresh capture.
   if (typeof SEALED_RUNTIME_BUILD === "boolean" && SEALED_RUNTIME_BUILD) {
@@ -123,6 +153,7 @@ export function captureUpdateRecoveryBaseline(params: {
       throw new Error("Invalid original update capture run identity.");
     }
     const env = { ...params.env };
+    const sharedStatePath = resolveOpenClawStateSqlitePath(env);
     const assertCaller = params.assertCurrent;
     const assertCurrent = () => {
       params.signal?.throwIfAborted();
@@ -316,6 +347,7 @@ export function captureUpdateRecoveryBaseline(params: {
         signal: params.signal,
         nodeRunner: params.nodeRunner,
         timeoutMs: params.timeoutMs,
+        acquisition: params.acquisition,
         preserveSourceArtifacts: true,
         additionalPaths: [...forcedSqlite],
         additionalFiles: [...files.keys()].filter((pathname) => !configPaths.has(pathname)),
@@ -389,9 +421,13 @@ export function captureUpdateRecoveryBaseline(params: {
         }
         assertCurrent();
         await pin.assertCurrent();
-        const source = await (
-          await safeRoot(path.dirname(pathname))
-        ).open(path.basename(pathname), { symlinks: "reject", hardlinks: "allow" });
+        assertCurrent();
+        const sourceRoot = await safeRoot(path.dirname(pathname));
+        assertCurrent();
+        const source = await sourceRoot.open(path.basename(pathname), {
+          symlinks: "reject",
+          hardlinks: "allow",
+        });
         const archivePath = `payload/${payloadIndex++}`;
         await using handle = source.handle;
         const opened = await handle.stat({ bigint: true });
@@ -420,11 +456,17 @@ export function captureUpdateRecoveryBaseline(params: {
       if (!isDeepStrictEqual(await collectResources(), declared)) {
         throw new Error("Original update migration resource inventory changed during capture.");
       }
-      const generations = await readUpdateDatabaseGenerationsIsolated([...databasePaths], {
-        env,
-        signal: params.signal,
-        timeoutMs: params.timeoutMs,
-      });
+      assertCurrent();
+      const generations =
+        params.acquisition?.mode === "maintenance-owner" &&
+        maintenanceOwnerMayReadGenerationsInProcess(sharedStatePath, databasePaths)
+          ? readUpdateDatabaseGenerations([...databasePaths])
+          : await readUpdateDatabaseGenerationsIsolated([...databasePaths], {
+              env,
+              signal: params.signal,
+              timeoutMs: params.timeoutMs,
+              acquisition: params.acquisition,
+            });
       if (
         [...databasePaths].some(
           (pathname) =>
