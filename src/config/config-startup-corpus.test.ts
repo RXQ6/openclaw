@@ -7,6 +7,7 @@ import { listAgentIds } from "../agents/agent-scope-config.js";
 import { acquireReadOnlyPreparedModelRuntime } from "../agents/prepared-model-runtime.js";
 import { applyLegacyCompatibilityStep } from "../commands/doctor/shared/config-flow-steps.js";
 import { normalizeCompatibilityConfigValues } from "../commands/doctor/shared/legacy-config-core-migrate.js";
+import { migrateLegacyConfig } from "../commands/doctor/shared/legacy-config-migrate.js";
 import { loadGatewayStartupConfigSnapshot } from "../gateway/server-startup-config-helpers.js";
 import { resolveBundledDirFromPackageRoot } from "../plugins/bundled-dir.js";
 import { resolveProviderChannelLoginChoice } from "../plugins/provider-login-options.js";
@@ -16,6 +17,7 @@ import {
 } from "./config-corpus.test-support.js";
 import { createConfigIO } from "./io.js";
 import type { OpenClawConfig } from "./types.js";
+import { validateConfigObjectWithPlugins } from "./validation.js";
 
 const bundledPluginsDir = resolveBundledDirFromPackageRoot(
   fileURLToPath(new URL("../../", import.meta.url)),
@@ -117,14 +119,27 @@ describe("operator config startup corpus", () => {
       OPENCLAW_DISABLE_BUNDLED_PLUGINS: "0",
       OPENCLAW_BUNDLED_PLUGINS_DIR: bundledPluginsDir,
     };
+    for (const key of [
+      "OPENCLAW_STATE_DIR",
+      "DISCORD_BOT_TOKEN",
+      "OPENCLAW_DISABLE_BUNDLED_PLUGINS",
+      "OPENCLAW_BUNDLED_PLUGINS_DIR",
+    ] as const) {
+      vi.stubEnv(key, env[key]);
+    }
     const snapshot = await createConfigIO({
       configPath,
       env,
       homedir: () => home,
       observe: false,
     }).readConfigFileSnapshot();
-    expect(snapshot.valid, JSON.stringify(snapshot.issues)).toBe(true);
-    expect(snapshot.config.bindings).toContainEqual({
+    expect(snapshot.valid).toBe(false);
+    const migrated = migrateLegacyConfig(snapshot.sourceConfig, {
+      sourceConfigBeforeMigrations: snapshot.sourceConfigBeforeMigrations,
+    });
+    const validated = validateConfigObjectWithPlugins(migrated.config, { env });
+    expect(validated.ok).toBe(true);
+    expect(validated.ok && validated.config.bindings).toContainEqual({
       agentId: "worker",
       match: { channel: "discord", accountId: "*" },
     });
