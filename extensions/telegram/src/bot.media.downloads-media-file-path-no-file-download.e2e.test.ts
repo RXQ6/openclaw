@@ -1,6 +1,9 @@
 import { createRequireRecord } from "openclaw/plugin-sdk/test-fixtures";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { holdTelegramMediaTimeouts } from "./bot-media-timers.test-support.js";
+import {
+  holdTelegramMediaTimeouts,
+  runHeldTelegramBufferTimers,
+} from "./bot-media-timers.test-support.js";
 import {
   readRemoteMediaBufferSpy,
   setNextSavedMediaPath,
@@ -103,8 +106,8 @@ async function flushActiveScheduledTimersForDelay(params: {
   expect(timers).toHaveLength(params.expectedCount);
   for (const timer of timers) {
     clearTimeout(timer.handle);
-    await timer.callback();
   }
+  await Promise.all(runHeldTelegramBufferTimers(timers.map((timer) => timer.callback)));
 }
 describe("telegram inbound media", () => {
   it("captures pin and venue location payload fields", async () => {
@@ -246,17 +249,10 @@ describe("telegram media groups", () => {
           delayMs: TELEGRAM_TEST_TIMINGS.mediaGroupFlushMs,
           expectedCount: 1,
         });
-        await vi.waitFor(() => expect(replySpy).toHaveBeenCalledTimes(1));
+        expect(replySpy).toHaveBeenCalledTimes(1);
         expect(replyPayload(replySpy).Body).toContain("First album details 💙");
         expect(replyPayload(replySpy).Body).toContain(laterCaption);
       } finally {
-        for (const timer of resolveActiveScheduledTimersForDelay(
-          setTimeoutSpy,
-          clearTimeoutSpy,
-          TELEGRAM_TEST_TIMINGS.mediaGroupFlushMs,
-        )) {
-          clearTimeout(timer.handle);
-        }
         setTimeoutSpy.mockRestore();
         clearTimeoutSpy.mockRestore();
         telegramBotDepsForTest.getRuntimeConfig = originalLoadConfig;
@@ -334,7 +330,7 @@ describe("telegram media groups", () => {
           delayMs: TELEGRAM_TEST_TIMINGS.mediaGroupFlushMs,
           expectedCount: 1,
         });
-        await vi.waitFor(() => expect(replySpy).toHaveBeenCalledTimes(1));
+        expect(replySpy).toHaveBeenCalledTimes(1);
 
         expect(runtimeError).not.toHaveBeenCalled();
         const payload = replyPayload(replySpy);
@@ -409,7 +405,7 @@ describe("telegram media groups", () => {
           delayMs: TELEGRAM_TEST_TIMINGS.mediaGroupFlushMs,
           expectedCount: 2,
         });
-        await vi.waitFor(() => expect(replySpy).toHaveBeenCalledTimes(2));
+        expect(replySpy).toHaveBeenCalledTimes(2);
         expect(runtimeError).not.toHaveBeenCalled();
       } finally {
         setTimeoutSpy.mockRestore();
@@ -500,7 +496,7 @@ describe("telegram media groups", () => {
           delayMs: TELEGRAM_TEST_TIMINGS.mediaGroupFlushMs,
           expectedCount: 1,
         });
-        await vi.waitFor(() => expect(replySpy).toHaveBeenCalledTimes(1));
+        expect(replySpy).toHaveBeenCalledTimes(1);
 
         expect(runtimeError).not.toHaveBeenCalled();
         const payload = replyPayload(replySpy);
@@ -586,17 +582,13 @@ describe("telegram media groups", () => {
           }),
         ]);
 
-        const timers = resolveActiveScheduledTimersForDelay(
+        await flushActiveScheduledTimersForDelay({
           setTimeoutSpy,
           clearTimeoutSpy,
-          TELEGRAM_TEST_TIMINGS.mediaGroupFlushMs,
-        );
-        expect(timers).toHaveLength(2);
-        for (const timer of timers) {
-          clearTimeout(timer.handle);
-          await timer.callback();
-        }
-        await vi.waitFor(() => expect(replySpy).toHaveBeenCalledTimes(2));
+          delayMs: TELEGRAM_TEST_TIMINGS.mediaGroupFlushMs,
+          expectedCount: 2,
+        });
+        expect(replySpy).toHaveBeenCalledTimes(2);
         const firstPayload = replyPayload(replySpy, 0);
         const secondPayload = replyPayload(replySpy, 1);
         expect([firstPayload.Body, secondPayload.Body]).toEqual(
