@@ -25,11 +25,13 @@ import {
   recordUpdateRunRepairContinuation,
   recordUpdateRunStep,
 } from "../../infra/update-run-ledger.js";
+import { updateRunStepsFromResultStep } from "../../infra/update-run-step.js";
 import {
   UPDATE_RUN_HEARTBEAT_MS,
   UPDATE_RUNNER_TIMEOUT_MS,
 } from "../../infra/update-run-timeouts.js";
 import type { UpdateRunResult } from "../../infra/update-runner-types.js";
+import type { UpdateStepResult } from "../../infra/update-step-result.js";
 import { redactSupportDiagnosticLine } from "../../logging/diagnostic-support-redaction.js";
 import { hasCommandProcessCleanupError } from "../../process/exec-result.js";
 import { resolveCommandProcessSignal, withCommandProcessScope } from "../../process/exec-spawn.js";
@@ -180,6 +182,20 @@ export class UpdateFinalizationLifecycle {
     warnings.forEach((detail, index) => {
       this.record(`warning:finalize:${phase}:${index}`, "completed", Date.now(), detail);
     });
+  }
+
+  recordDoctorStep(step: UpdateStepResult): void {
+    const endedAtMs = Date.now();
+    for (const row of updateRunStepsFromResultStep(step)) {
+      this.record(
+        row.step,
+        row.status === "failed" ? "failed" : "completed",
+        endedAtMs,
+        row.detail,
+        row.failureFacts,
+        row.exitCode,
+      );
+    }
   }
 
   budget(phase: DoctorPhase): number | undefined;

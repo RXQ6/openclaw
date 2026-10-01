@@ -11,7 +11,7 @@ import { completePostCorePluginUpdate } from "./update-command-fresh-doctor.js";
 
 export function registerFreshDoctorOutcomeTests(
   mocks: {
-    runExec: Mock<typeof runExec>;
+    command: Mock<typeof runExec>;
     runUtf8: Mock<typeof runUtf8CommandWithTimeout>;
     readConfig: Mock<typeof readConfigFileSnapshot>;
   },
@@ -33,7 +33,7 @@ export function registerFreshDoctorOutcomeTests(
         code,
         message: `Earlier failure ${index}`,
       }));
-      mocks.runExec.mockImplementation(async (_command, args, options) => {
+      mocks.command.mockImplementation(async (_command, args, options) => {
         if (args.includes("--repair")) {
           assert(options && typeof options === "object");
           const resultPath = options.env?.[UPDATE_POST_INSTALL_DOCTOR_RESULT_PATH_ENV];
@@ -89,7 +89,7 @@ export function registerFreshDoctorOutcomeTests(
   );
 
   it("records a failed plugin Doctor process as a warning after config and readiness pass", async () => {
-    mocks.runExec.mockRejectedValueOnce(
+    mocks.command.mockRejectedValueOnce(
       Object.assign(new Error("Doctor exited"), {
         exitCode: 1,
         stderr: "Plugin example: optional repair needs a running Gateway.",
@@ -117,7 +117,7 @@ export function registerFreshDoctorOutcomeTests(
   it.each(["settlement", "startup"])(
     "blocks further work when Doctor %s leaves write custody unsettled",
     async (phase) => {
-      mocks.runExec.mockRejectedValueOnce(
+      mocks.command.mockRejectedValueOnce(
         phase === "settlement"
           ? new CommandProcessCleanupError()
           : Object.assign(new Error("Command timed out during startup"), { cleanup: "uncertain" }),
@@ -126,7 +126,7 @@ export function registerFreshDoctorOutcomeTests(
       await expect(completePostCorePluginUpdate(updateOptions)).rejects.toThrow(
         "Command cleanup could not confirm that owned work stopped",
       );
-      expect(mocks.runExec).toHaveBeenCalledOnce();
+      expect(mocks.command).toHaveBeenCalledOnce();
       expect(mocks.readConfig).not.toHaveBeenCalled();
       expect(mocks.runUtf8).not.toHaveBeenCalled();
     },

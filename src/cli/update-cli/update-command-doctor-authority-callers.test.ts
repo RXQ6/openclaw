@@ -51,6 +51,7 @@ vi.mock("../../process/exec.js", async (importOriginal) => ({
     code: 0,
     signal: null,
     killed: false,
+    cleanup: "normal",
     termination: "exit",
   }),
 }));

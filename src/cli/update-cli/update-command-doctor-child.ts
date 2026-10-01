@@ -1,8 +1,11 @@
 import fs from "node:fs/promises";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { hasErrnoCode } from "../../infra/errors.js";
+import { createUpdateDoctorProcessCustody } from "../../infra/update-doctor-process-custody.js";
+import { UPDATE_POST_INSTALL_DOCTOR_RESULT_PATH_ENV } from "../../infra/update-doctor-result.js";
 import type { UpdateRequester } from "../../infra/update-requester-authority.js";
 import type { UpdateRecoveryFence } from "../../infra/update-run-recovery.js";
+import type { UpdateStepResult } from "../../infra/update-step-result.js";
 import {
   CommandProcessCleanupError,
   createSanitizedCommandError,
@@ -92,7 +95,49 @@ export type UpdateDoctorChildContext = {
   /** The parent mutation fence is suspended while its child owns effects. */
   assertRequesterCurrent: () => void;
   onStateHandoff?: () => void;
+  onProcessSettlement?: (step: UpdateStepResult) => void;
 };
+
+/** Both delegated and standalone update Doctors publish through the same result channel. */
+export async function runUpdateDoctorProcess(
+  context: { runId: string; root: string; onProcessSettlement?: (step: UpdateStepResult) => void },
+  argv: string[],
+  options: CommandOptions,
+): Promise<SpawnResult> {
+  const resultPath = options.env?.[UPDATE_POST_INSTALL_DOCTOR_RESULT_PATH_ENV]?.trim();
+  if (!resultPath) {
+    throw new UpdateCommandRecoveryPendingError(
+      "Doctor process custody requires its result channel.",
+    );
+  }
+  const custody = createUpdateDoctorProcessCustody(context.runId, context.root, resultPath);
+  try {
+    const result = await runUtf8CommandWithTimeout(argv, {
+      ...options,
+      killProcessTree: true,
+      requireProcessTreeExtinction: true,
+    });
+    const settlement = await custody.settle(result);
+    if (settlement) {
+      const error = new CommandProcessCleanupError();
+      error.message = settlement.stderrTail ?? "Doctor process settlement could not be recorded.";
+      try {
+        context.onProcessSettlement?.(settlement);
+      } catch (cause) {
+        if (settlement.exitCode !== 0) {
+          throw new AggregateError([error, cause], error.message);
+        }
+        throw cause;
+      }
+      if (settlement.exitCode !== 0) {
+        throw error;
+      }
+    }
+    return result;
+  } finally {
+    custody.close();
+  }
+}
 
 /** Package and finalization Doctors use the same private-input/native-child owner. */
 export async function withUpdateDoctorChild<T>(
@@ -119,8 +164,8 @@ export async function withUpdateDoctorChild<T>(
         root: params.root,
         requester: context.requester,
       };
-      return await operation(async (argv, options) => {
-        const result = await runUtf8CommandWithTimeout(argv, {
+      return await operation((argv, options) =>
+        runUpdateDoctorProcess({ ...context, root: params.root }, argv, {
           ...options,
           input: JSON.stringify(input),
           beforeInput: (pid, spawnedArgv) => {
@@ -130,14 +175,8 @@ export async function withUpdateDoctorChild<T>(
             // The parent retains identity and native custody, never schema admission.
             context.onStateHandoff?.();
           },
-          killProcessTree: true,
-          requireProcessTreeExtinction: true,
-        });
-        if (result.cleanup === "forced" || result.cleanup === "uncertain") {
-          throw new CommandProcessCleanupError();
-        }
-        return result;
-      });
+        }),
+      );
     },
   );
 }

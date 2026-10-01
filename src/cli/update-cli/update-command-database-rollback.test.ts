@@ -601,7 +601,7 @@ it.each([
           root: packageRoot,
           opts,
           databaseBackup,
-          onDatabaseWriteStep: (step) => executionResult?.steps.push(step),
+          onDoctorStep: (step) => executionResult?.steps.push(step),
           yes: true,
           json: true,
           nodeRunner: process.execPath,

@@ -342,6 +342,7 @@ export async function runPackageUpdateDoctor(params: PackageDoctorOptions) {
     return doctorStep;
   };
   const completedSteps: UpdateStepResult[] = [];
+  let processSettlement: UpdateStepResult | undefined;
   const runDoctor = (runCommand?: Parameters<typeof runUpdateStep>[0]["runCommand"]) =>
     runUpdateStep({
       name: `${CLI_NAME} doctor`,
@@ -369,7 +370,13 @@ export async function runPackageUpdateDoctor(params: PackageDoctorOptions) {
         ? await withUpdateDoctorChild(
             {
               root: params.root,
-              context: { ...context, assertRequesterCurrent: context.assertBoundChildCurrent },
+              context: {
+                ...context,
+                assertRequesterCurrent: context.assertBoundChildCurrent,
+                onProcessSettlement: (step) => {
+                  processSettlement = step;
+                },
+              },
               input: {
                 configInputHash: context.inputHash,
                 repair: doctorPolicy.fix,
@@ -400,7 +407,20 @@ export async function runPackageUpdateDoctor(params: PackageDoctorOptions) {
     }
     return await completeDoctorStep(outcome.step, doctorResult);
   } finally {
+    if (processSettlement) {
+      completedSteps.unshift(processSettlement);
+    }
     params.results?.push(...completedSteps);
+    if (processSettlement) {
+      try {
+        params.progress?.onStepComplete?.({ ...processSettlement, index: 0, total: 0 });
+      } catch (error) {
+        if ("error" in outcome && hasCommandProcessCleanupError(outcome.error)) {
+          throw new AggregateError([outcome.error, error], "Doctor settlement recording failed");
+        }
+        throw error;
+      }
+    }
   }
 }
 
@@ -629,6 +649,7 @@ export async function runPackageInstallUpdate(
     });
 
   const before = pkgRoot ? await readPackageUpdateIdentity(pkgRoot) : { version: null };
+  const doctorSettlements: UpdateStepResult[] = [];
 
   const packageUpdate = await runGlobalPackageUpdateSteps({
     localOverrides: {
@@ -664,8 +685,15 @@ export async function runPackageInstallUpdate(
         ...stepParams,
         progress: params.progress,
       }),
-    postVerifyStep: (root, results) =>
-      runPackageUpdateDoctor({ ...resolveDoctorOptions(), root, results }),
+    postVerifyStep: async (root, results) => {
+      try {
+        return await runPackageUpdateDoctor({ ...resolveDoctorOptions(), root, results });
+      } finally {
+        doctorSettlements.push(
+          ...(results?.filter((result) => result.name === "doctor process settlement") ?? []),
+        );
+      }
+    },
   });
 
   const afterBuildId = packageUpdate.activePackageRoot
@@ -691,7 +719,7 @@ export async function runPackageInstallUpdate(
       version: packageUpdate.afterVersion,
       ...(afterBuildId ? { buildId: afterBuildId } : {}),
     },
-    steps: packageUpdate.steps,
+    steps: [...packageUpdate.steps, ...doctorSettlements],
     failedStep: packageUpdate.failedStep ?? undefined,
     recovery: packageUpdate.recovery,
     localOverrides: packageUpdate.localOverrides,

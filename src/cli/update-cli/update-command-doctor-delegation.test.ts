@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { afterEach, assert, beforeEach, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import { hashConfigRaw } from "../../config/io.read-helpers.js";
+import { resolveRuntimeWorkerUrl } from "../../infra/runtime-worker-url.js";
 import * as tempRoot from "../../infra/tmp-openclaw-dir.js";
 import {
   createDeferredConfiguredPluginRepairDoctorResult,
@@ -16,7 +17,14 @@ import {
 import { UpdateRequesterRevokedError } from "../../infra/update-requester-authority.js";
 import type { UpdateRecoveryFence } from "../../infra/update-run-recovery.js";
 import type { UpdateStepResult } from "../../infra/update-step-result.js";
+import { isChildProcessTreeAlive } from "../../process/child-process-tree.js";
+import {
+  settleCommandProcessGroups,
+  type CommandProcessIdentity,
+} from "../../process/command-process-custody.js";
+import { hasCommandProcessCleanupError } from "../../process/exec-result.js";
 import * as processRunner from "../../process/exec.js";
+import { getFileLockProcessStartTime } from "../../shared/pid-alive.js";
 import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
 import { waitForPidToExit } from "../../test-utils/process-tree.js";
 import type { UpdateCommandOptions } from "./shared.js";
@@ -321,3 +329,136 @@ it("preserves before-input failure after owned child cleanup without input", asy
   expect(fs.existsSync(received)).toBe(false);
   expect(fs.readFileSync(configPath, "utf8")).toBe("{}\n");
 });
+
+it.skipIf(process.platform === "win32").each([true, false])(
+  "settles a CPU-bound Doctor at its deadline or records unresolved writer identity (identity=%s)",
+  async (identityAvailable) => {
+    const runId = randomUUID();
+    const runUtf8 = processRunner.runUtf8CommandWithTimeout;
+    let childPid: number | undefined;
+    let writer: CommandProcessIdentity | undefined;
+    const custodyModule = resolveRuntimeWorkerUrl({
+      currentModuleUrl: import.meta.url,
+      sourceWorkerName: "../../infra/update-doctor-process-custody",
+      distWorkerPath: "infra/update-doctor-process-custody.js",
+    });
+    const spawnModule = resolveRuntimeWorkerUrl({
+      currentModuleUrl: import.meta.url,
+      sourceWorkerName: "../../process/exec-spawn",
+      distWorkerPath: "process/exec-spawn.js",
+    });
+    const steps: UpdateStepResult[] = [];
+    try {
+      const execution = withUpdateCommandExecutor(runId, async (executor) => {
+        const fence = await executor.enter(root);
+        const guards = createUpdateCommandExecutionGuards(
+          { run: { runId, env, executorFence: fence } },
+          root,
+        );
+        vi.spyOn(processRunner, "runUtf8CommandWithTimeout").mockImplementation(
+          async (_argv, options) => {
+            assert(typeof options !== "number");
+            const result = await runUtf8(
+              [
+                process.execPath,
+                ...(custodyModule.pathname.endsWith(".ts")
+                  ? ["--import", import.meta.resolve("tsx")]
+                  : []),
+                "--input-type=module",
+                "-e",
+                `
+                import { once } from 'node:events';
+                import { writeSync } from 'node:fs';
+                import { retainUpdateDoctorProcesses } from ${JSON.stringify(custodyModule.href)};
+                import { withCommandProcessScope, spawnCommand } from ${JSON.stringify(spawnModule.href)};
+                process.on('SIGTERM', () => {});
+                  process.stdin.resume();
+                  process.stdin.on('end', async () => {
+                    const custody = retainUpdateDoctorProcesses();
+                    const reserve = custody.reserve;
+                    if (!${identityAvailable}) custody.reserve = (...args) => {
+                      const slot = reserve(...args);
+                      return { ...slot, spawned: ({ pid }) => slot.spawned({ pid, startedAt: null }) };
+                    };
+                    await withCommandProcessScope(async () => {
+                    const child = spawnCommand([process.execPath, '-e',
+                      "process.on('SIGTERM', () => {}); process.stdout.write('ready'); for (;;) {}"
+                    ], { stdio: ['ignore', 'pipe', 'ignore'], buffer: false, reject: false });
+                    await once(child.stdout, 'data');
+                    writeSync(1, 'Doctor busy ' + child.pid + '\\n');
+                    for (;;) {}
+                    }, undefined, custody);
+                });
+              `,
+              ],
+              {
+                ...options,
+                beforeInput(pid, argv) {
+                  childPid = pid;
+                  options.beforeInput?.(pid, argv);
+                },
+              },
+            );
+            expect(result).toMatchObject({
+              termination: "timeout",
+              cleanup: "forced",
+              signal: "SIGKILL",
+            });
+            const pid = Number(/Doctor busy (\d+)/.exec(result.stdout)?.[1]);
+            assert(pid > 0, result.stderr);
+            writer = { pid, startedAt: getFileLockProcessStartTime(pid) };
+            return result;
+          },
+        );
+        const step = await runPackageUpdateDoctor({
+          ...doctorOptions(runId, fence, guards),
+          results: steps,
+        });
+        expect(step).toMatchObject({
+          termination: "timeout",
+          signal: "SIGKILL",
+          stdoutTail: expect.stringContaining("Doctor busy"),
+          failureFacts: [expect.objectContaining({ code: "timeout" })],
+        });
+        assert(childPid);
+        expect(isChildProcessTreeAlive({ pid: childPid })).toBe(false);
+        assert(writer);
+        expect(isChildProcessTreeAlive(writer)).toBe(false);
+        expect(steps).toContainEqual(
+          expect.objectContaining({
+            name: "doctor process settlement",
+            exitCode: 0,
+            advisory: expect.objectContaining({
+              message: expect.stringContaining("openclaw update repair"),
+            }),
+          }),
+        );
+        fence.assertCurrent();
+      });
+      if (identityAvailable) {
+        await execution;
+      } else {
+        const failure = await execution.catch((error: unknown) => error);
+        expect(hasCommandProcessCleanupError(failure)).toBe(true);
+        assert(writer);
+        expect(isChildProcessTreeAlive(writer)).toBe(true);
+        expect(steps).toContainEqual(
+          expect.objectContaining({
+            name: "doctor process settlement",
+            exitCode: 1,
+            failureFacts: [
+              expect.objectContaining({
+                code: "doctor-processes-unsettled",
+                message: expect.stringContaining(String(writer.pid)),
+              }),
+            ],
+          }),
+        );
+      }
+    } finally {
+      if (writer) {
+        expect(await settleCommandProcessGroups([writer])).toMatchObject({ settled: true });
+      }
+    }
+  },
+);

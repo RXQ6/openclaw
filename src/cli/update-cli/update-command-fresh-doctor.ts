@@ -58,6 +58,7 @@ import { recordUpdateDatabaseWrites } from "./update-command-database-receipts.j
 import {
   assertUpdateDoctorChildSucceeded,
   inspectUpdateDoctorChildSupport,
+  runUpdateDoctorProcess,
   withUpdateDoctorChild,
 } from "./update-command-doctor-child.js";
 import type { PluginUpdateWarning } from "./update-command-plugins-internals.js";
@@ -99,7 +100,7 @@ export async function runUpdateFinalizationDoctorInFreshProcess(params: {
   /** Only local candidate code may supply its known native Doctor contract. */
   doctorConfigWrites?: true;
   databaseBackup?: UpdateDatabaseBackup;
-  onDatabaseWriteStep?: (step: UpdateStepResult) => void;
+  onDoctorStep?: (step: UpdateStepResult) => void;
   yes: boolean;
   json: boolean;
   workspaceSuggestions?: boolean;
@@ -139,6 +140,7 @@ export async function runUpdateFinalizationDoctorInFreshProcess(params: {
   const doctorResultPath = createUpdatePostInstallDoctorResultPath();
   let doctorResult: UpdatePostInstallDoctorResult | null = null;
   let doctorSettled = true;
+  let processSettlement: UpdateStepResult | undefined;
   let result: { stdout?: unknown; stderr?: unknown } | undefined;
   assertCurrent();
   try {
@@ -198,6 +200,9 @@ export async function runUpdateFinalizationDoctorInFreshProcess(params: {
             executorFence,
             requester: requester?.requester,
             assertRequesterCurrent,
+            onProcessSettlement: (step) => {
+              processSettlement = step;
+            },
           },
           input: {
             configInputHash: snapshot.hash,
@@ -225,7 +230,23 @@ export async function runUpdateFinalizationDoctorInFreshProcess(params: {
     } else {
       // A valid legacy target contract retains its shipped CLI Doctor. This is
       // capability selection, never recovery from missing or refused authority.
-      result = await runExec(params.nodeRunner ?? resolveNodeRunner(), args, commandOptions);
+      const child = await runUpdateDoctorProcess(
+        {
+          root: params.root,
+          runId: runId ?? params.runId ?? "",
+          onProcessSettlement: (step) => {
+            processSettlement = step;
+          },
+        },
+        [params.nodeRunner ?? resolveNodeRunner(), ...args],
+        {
+          ...commandOptions,
+          maxOutputBytes: commandOptions.maxBuffer,
+          terminateOnOutputLimit: true,
+        },
+      );
+      result = child;
+      assertUpdateDoctorChildSucceeded(child);
       assertCurrent();
     }
   } catch (error) {
@@ -340,6 +361,16 @@ export async function runUpdateFinalizationDoctorInFreshProcess(params: {
     }
     throw new UpdateDoctorError(message, failureFacts, { cause: error, exitCode });
   } finally {
+    if (processSettlement) {
+      try {
+        params.onDoctorStep?.(processSettlement);
+      } catch (cause) {
+        if (!doctorSettled) {
+          throw new CommandProcessCleanupError({ cause });
+        }
+        throw cause;
+      }
+    }
     if (doctorSettled) {
       doctorResult ??= await consumeUpdatePostInstallDoctorResult(doctorResultPath);
     }
@@ -352,7 +383,7 @@ export async function runUpdateFinalizationDoctorInFreshProcess(params: {
         exitCode: 0,
       };
       recordUpdateDatabaseWrites(params.databaseBackup, doctorResult?.databaseWrites, step);
-      params.onDatabaseWriteStep?.(step);
+      params.onDoctorStep?.(step);
     }
     if (doctorResult?.warnings?.length) {
       params.onWarnings?.(doctorResult.warnings);

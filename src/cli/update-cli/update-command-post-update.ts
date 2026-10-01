@@ -47,7 +47,10 @@ import { rollbackFailedUpdate } from "./update-command-rollback.js";
 import type { UpdateServiceDefinitionRecovery } from "./update-command-service-context-types.js";
 import { withOwnedManagedUpdateEnv } from "./update-command-service-env.js";
 import { GatewayServiceUpdateOwnershipError } from "./update-command-service-plan.js";
-import { admitMigratedGatewayRecovery } from "./update-command-service-recovery.js";
+import {
+  admitMigratedGatewayRecovery,
+  refuseUnsettledDoctorRecovery,
+} from "./update-command-service-recovery.js";
 import {
   maybeRestartService,
   maybeRestartServiceAfterFailedMutableUpdate,
@@ -175,6 +178,9 @@ export async function finishUpdate(
       params.rollbackBlockedReason = "state-migrated-no-rollback";
     }
     let result = initialResult;
+    if (refuseUnsettledDoctorRecovery(result, result.root ?? params.root, assertCurrent)) {
+      return { result, recoverService: false };
+    }
     let recoverService = initialRecoverService && !params.rollbackBlockedReason;
     if (
       result.status === "error" &&
