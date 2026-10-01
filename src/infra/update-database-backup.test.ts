@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -8,12 +8,18 @@ import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
 import { parseUpdateRecoveryBackupManifest } from "../commands/backup-verify-manifest.js";
 import { createOpenClawDatabaseMaintenanceScope } from "../state/openclaw-state-db-async-lifecycle.js";
 import { admitOpenClawMaintenanceLiveAuthorityReads } from "../state/openclaw-state-maintenance-context.js";
+import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import * as diskSpace from "./disk-space.js";
 import * as inspection from "./update-candidate-state.inspection.js";
 import * as candidateState from "./update-candidate-state.js";
 import * as databaseSizes from "./update-candidate-state.sizes.js";
+import { resolveUpdateCaptureRoot } from "./update-capture-paths.js";
 import { createUpdateDatabaseBackupInProcess } from "./update-database-backup.js";
-import type { UpdateRecoveryCaptureAcquisition } from "./update-recovery-baseline-capture.js";
+import {
+  retireExpiredStandaloneDoctorCaptures,
+  type UpdateRecoveryCaptureAcquisition,
+} from "./update-recovery-baseline-capture.js";
+import { getUpdateRunAsync } from "./update-run-reader.js";
 
 const dirs = useAutoCleanupTempDirTracker(afterEach);
 afterEach(() => {
@@ -398,6 +404,68 @@ it("falls back to the isolated generation seal when live source reads were admit
   } finally {
     await scope.close();
   }
+});
+
+it("retires only expired sealed standalone Doctor captures and preserves incomplete or linked copies", async () => {
+  await withOpenClawTestState({ scenario: "minimal" }, async (state) => {
+    const now = Date.parse("2026-09-30T12:00:00.000Z");
+    const day = 24 * 60 * 60_000;
+    const store = resolveUpdateCaptureRoot(state.stateDir);
+    const sealed = async (runId: string, ageDays: number, directory = path.join(store, runId)) => {
+      const manifest = {
+        schemaVersion: 2,
+        kind: "update-recovery",
+        generation: { kind: "baseline" },
+        databases: [],
+        runId,
+        installRoot: state.root,
+        stateDir: state.stateDir,
+        configPath: state.configPath,
+        configPaths: [state.configPath],
+        creator: { host: "fixture", pid: 1, startIdentity: "1" },
+        drivers: [],
+        createdAt: new Date(now - ageDays * day).toISOString(),
+        roots: [state.configPath],
+        excludedRoots: [],
+        protectedPaths: [state.configPath],
+        entries: [
+          { kind: "missing", sourcePath: state.configPath, sqlite: false, directory: false },
+        ],
+      };
+      const raw = JSON.stringify(manifest);
+      parseUpdateRecoveryBackupManifest(raw);
+      await fs.mkdir(directory, { recursive: true });
+      await fs.writeFile(path.join(directory, "manifest.json"), raw);
+      expect(await getUpdateRunAsync(runId)).toBeUndefined();
+      return directory;
+    };
+    const expired = await sealed(`doctor-${randomUUID()}`, 31);
+    const recent = await sealed(`doctor-${randomUUID()}`, 1);
+    const incomplete = path.join(store, `doctor-${randomUUID()}`);
+    await fs.mkdir(incomplete);
+    const update = await sealed(randomUUID(), 40);
+    const linkedId = `doctor-${randomUUID()}`;
+    const linkedTarget = await sealed(linkedId, 31, state.path("linked-capture"));
+    const linked = path.join(store, linkedId);
+    await fs.symlink(linkedTarget, linked, "dir");
+    const assertCurrent = vi.fn();
+
+    const result = await retireExpiredStandaloneDoctorCaptures({
+      stateDir: state.stateDir,
+      keepRunId: path.basename(recent),
+      now,
+      assertCurrent,
+    });
+
+    expect(result).toEqual({ retired: [expired], warnings: [] });
+    expect(assertCurrent).toHaveBeenCalled();
+    await expect(fs.lstat(expired)).rejects.toMatchObject({ code: "ENOENT" });
+    for (const retained of [recent, incomplete, update, linkedTarget]) {
+      expect((await fs.lstat(retained)).isDirectory()).toBe(true);
+    }
+    expect((await fs.lstat(linked)).isSymbolicLink()).toBe(true);
+    expect(await fs.readlink(linked)).toBe(linkedTarget);
+  });
 });
 
 it("retains an unsealed capture when the database changes after its snapshot", async () => {
