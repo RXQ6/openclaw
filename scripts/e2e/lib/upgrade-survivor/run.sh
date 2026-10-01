@@ -2271,17 +2271,17 @@ if [ "$SCENARIO" = "backup-schedule" ]; then
   phase start-backup-baseline start_gateway
   phase seed-backup-schedule node scripts/e2e/lib/upgrade-survivor/backup-schedule.mjs seed "$(package_root)"
   phase stop-backup-baseline stop_gateway
-  phase resolve-candidate resolve_candidate_version
-  phase candidate-package-identity node scripts/e2e/lib/upgrade-survivor/worker-cell-package.mjs \
+  phase resolve-backup-candidate resolve_candidate_version
+  phase backup-candidate-package-identity node scripts/e2e/lib/upgrade-survivor/worker-cell-package.mjs \
     candidate "$(package_root)" "$CANDIDATE_SPEC"
-  phase update-candidate update_candidate
-  phase installed-package-identity node scripts/e2e/lib/upgrade-survivor/worker-cell-package.mjs \
+  phase update-backup-candidate update_candidate
+  phase backup-installed-package-identity node scripts/e2e/lib/upgrade-survivor/worker-cell-package.mjs \
     installed "$(package_root)" "$CANDIDATE_SPEC"
-  phase doctor run_doctor
-  phase validate-post-doctor-config validate_post_doctor_config
+  phase backup-doctor run_doctor
+  phase validate-backup-post-doctor-config validate_post_doctor_config
   phase start-backup-candidate start_gateway
-  phase gateway-probes check_gateway_probes
-  phase gateway-status check_gateway_status
+  phase backup-gateway-probes check_gateway_probes
+  phase backup-gateway-status check_gateway_status
   phase assert-backup-schedule node scripts/e2e/lib/upgrade-survivor/backup-schedule.mjs assert "$(package_root)"
   run_completed="1"
   echo "Backup schedule survivor passed: published ${baseline_version} updater preserved Git declaration, argv, ledger, and health without enabling storage."
