@@ -1243,20 +1243,19 @@ extension MacNodeCodexThreadCatalogTests {
             URL(fileURLWithPath: fake.executable.path + ".descendant-pid"))))
         defer { _ = Darwin.kill(descendantPID, SIGKILL) }
         let shutdown = Task { await client.shutdown() }
-        let watchdog = Task {
-            try? await Task.sleep(for: .seconds(10))
-            guard !Task.isCancelled else { return }
-            Issue.record("timed out waiting for Codex child shutdown")
+        defer { shutdown.cancel() }
+        // A hung shutdown fails at the suite limit; killing the children lets the join finish.
+        await withTaskCancellationHandler {
+            await shutdown.value
+        } onCancel: {
             shutdown.cancel()
             _ = Darwin.kill(pid, SIGKILL)
             _ = Darwin.kill(descendantPID, SIGKILL)
         }
-        defer {
-            watchdog.cancel()
-            shutdown.cancel()
+        guard !Task.isCancelled else {
+            Issue.record("Still waiting for Codex child shutdown")
+            throw CancellationError()
         }
-        await shutdown.value
-        watchdog.cancel()
 
         errno = 0
         #expect(Darwin.kill(pid, 0) == -1)
