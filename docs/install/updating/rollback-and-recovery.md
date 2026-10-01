@@ -233,7 +233,7 @@ failed rollback. Use the printed diagnostics and installation-specific repair
 command before considering an older version. Triage does not rewrite that
 failed update as successful.
 
-If Doctor times out after migration, the updater stops its tracked process groups
+On macOS and Linux, if Doctor times out after migration, the updater stops its tracked process groups
 and waits for each group to disappear before attempting recovery. Once settlement
 is proven, it can start the installed candidate on the preserved migrated state
 and verify Gateway health. The report retains the Doctor failure, records a

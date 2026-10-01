@@ -55,7 +55,10 @@ export async function retainUpdateDoctorProcesses(
   assertCurrent?: () => void,
 ): Promise<(CommandProcessCustody & Disposable) | undefined> {
   const resultPath = process.env[UPDATE_POST_INSTALL_DOCTOR_RESULT_PATH_ENV]?.trim();
-  if (!resultPath) {
+  // The Windows worker retains a Job until exit, but its command owner cannot
+  // publish per-command group extinction. Preserve normal completion without
+  // inventing a receipt that would authorize interrupted recovery.
+  if (!resultPath || process.platform === "win32") {
     return;
   }
   const file = `${resultPath}.processes`;
@@ -168,7 +171,7 @@ export function createUpdateDoctorProcessCustody(
       runId,
       pid: 0,
       slots: [],
-      namespace: pinNamespace(namespace),
+      ...(process.platform === "win32" ? {} : { namespace: pinNamespace(namespace) }),
     }),
     { flag: "wx", mode: 0o600 },
   );
