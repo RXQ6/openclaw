@@ -13,6 +13,7 @@ import { getFollowupCohortOwner, bindFollowupCohortOwner } from "./session-follo
 import type {
   FollowupCohort as Cohort,
   FollowupSettlement,
+  FollowupCompletionOwner,
   FollowupReply,
   FollowupRequest,
   FollowupSuccessor,
@@ -64,7 +65,7 @@ export function withFollowupSuccessor<T>(successor: FollowupSuccessor, run: () =
   return successor.owner.request.custody.run(() => state.successors.run(successor, run));
 }
 
-export class SessionFollowupCompletion {
+export class SessionFollowupCompletion implements FollowupCompletionOwner {
   readonly request: FollowupRequest;
   private readonly lifetime = new AbortController();
   readonly signal = this.lifetime.signal;
