@@ -21,9 +21,10 @@ export function readDatabaseIdentityBirthtime(file: BigIntStats): string {
 
 /** Native SQLite namespaces are filesystem locators, not distinct database owners. */
 export function normalizeDatabasePath(location: string): string {
-  const normalized =
-    process.platform === "win32" ? normalizeWindowsPathPreservingCase(location) : location;
-  return process.platform === "win32" && !path.win32.isAbsolute(normalized) ? location : normalized;
+  // Only drive-qualified and UNC locators have Windows filesystem identity.
+  return process.platform === "win32" && /^(?:[a-z]:[\\/]|[\\/]{2})/iu.test(location)
+    ? normalizeWindowsPathPreservingCase(location)
+    : location;
 }
 
 export function readDatabaseFileIdentity(value: unknown): DatabaseFileIdentity {
