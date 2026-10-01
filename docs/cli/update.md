@@ -414,6 +414,12 @@ are labeled explicitly. The final report includes the outcome, recorded phase du
 verification facts, and recovery guidance. `--json` keeps stdout machine-readable and does not
 print progress steps.
 
+Restart verification checks each configured channel account, including runtime
+health failures even when its credential probe succeeds. A channel suppressed by
+the crash-loop breaker cannot count as recovered. Inspect `openclaw health --json`
+and address the recorded failure before retrying; verification does not start
+channels that an operator stopped or disable the breaker.
+
 When no update is active, `openclaw update status` labels the saved outcome
 `Last recorded update` with the recorded start time, so historical results are
 distinct from current update activity.
