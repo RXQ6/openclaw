@@ -5,6 +5,7 @@ import ai.openclaw.app.gateway.MessageReactionSummary
 import android.icu.lang.UCharacter
 import android.icu.lang.UProperty
 import android.icu.text.BreakIterator
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.util.Locale
@@ -120,7 +121,7 @@ internal fun MessageReactionSummary.toChatReactionSummary(): ChatReactionSummary
     identities = identities.map { ChatReactionIdentity(it.id, it.label) },
   )
 
-/** Called under the controller's publication lock; events outrank older RPC snapshots. */
+/** State changes run under the controller's publication lock; queued writes wait outside it. */
 internal class ChatReactions {
   private val mutableReactions = MutableStateFlow<Map<String, List<ChatReactionSummary>>>(emptyMap())
   val reactions = mutableReactions.asStateFlow()
@@ -128,13 +129,22 @@ internal class ChatReactions {
   private var readGeneration = 0L
   private var readUpdates: MutableMap<String, List<ChatReactionSummary>>? = null
   private val revisions = mutableMapOf<String, Long>()
-  private val writes = mutableMapOf<String, Write>()
+  private val writes = mutableMapOf<Pair<String, String>, Write>()
+  private val writeTails = mutableMapOf<String, Write>()
 
   class Write(
     val messageId: String,
+    val emoji: String,
     val generation: Long,
-    val revision: Long,
-  )
+    private val previous: CompletableDeferred<Unit>?,
+  ) {
+    val completion = CompletableDeferred<Unit>()
+    var revision = 0L
+
+    suspend fun awaitTurn() {
+      previous?.await()
+    }
+  }
 
   fun reset() {
     generation += 1
@@ -142,6 +152,7 @@ internal class ChatReactions {
     readUpdates = null
     revisions.clear()
     writes.clear()
+    writeTails.clear()
     mutableReactions.value = emptyMap()
   }
 
@@ -158,6 +169,9 @@ internal class ChatReactions {
     reactions: Map<String, List<ChatReactionSummary>>,
   ) {
     if (!isCurrentRead(expectedGeneration)) return
+    for (messageId in revisions.keys + reactions.keys) {
+      revisions[messageId] = (revisions[messageId] ?: 0) + 1
+    }
     mutableReactions.value = reactions + readUpdates.orEmpty()
   }
 
@@ -173,9 +187,23 @@ internal class ChatReactions {
     publish(messageId, reactions)
   }
 
-  fun beginWrite(messageId: String): Write = Write(messageId, generation, revisions[messageId] ?: 0).also { writes[messageId] = it }
+  fun beginWrite(
+    messageId: String,
+    emoji: String,
+  ): Write =
+    Write(messageId, emoji, generation, writeTails[messageId]?.completion).also {
+      writes[messageId to emoji] = it
+      writeTails[messageId] = it
+    }
 
-  fun isCurrent(write: Write): Boolean = write.generation == generation && writes[write.messageId] === write
+  fun isCurrent(write: Write): Boolean = write.generation == generation && writes[write.messageId to write.emoji] === write
+
+  fun prepareWrite(write: Write): Boolean {
+    if (write.generation != generation) return false
+    // Earlier queued requests can publish events or refreshes before this request reaches the socket.
+    write.revision = revisions.getOrPut(write.messageId) { 0 }
+    return true
+  }
 
   fun applyWrite(
     write: Write,
@@ -185,7 +213,9 @@ internal class ChatReactions {
   }
 
   fun finishWrite(write: Write) {
-    if (isCurrent(write)) writes.remove(write.messageId)
+    if (isCurrent(write)) writes.remove(write.messageId to write.emoji)
+    if (writeTails[write.messageId] === write) writeTails.remove(write.messageId)
+    write.completion.complete(Unit)
   }
 
   private fun publish(

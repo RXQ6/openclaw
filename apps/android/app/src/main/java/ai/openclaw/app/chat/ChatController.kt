@@ -7010,45 +7010,47 @@ class ChatController internal constructor(
       synchronized(gatewayScopeApplyLock) {
         if (!_canReact.value || _messages.value.none { it.entryId == messageId && it.role in setOf("user", "assistant") }) return
         val target = reactionTarget ?: return
-        target to reactionState.beginWrite(messageId)
+        target to reactionState.beginWrite(messageId, emoji)
       }
-    scope.launch {
-      val lease = captureRequestLease(target.selection.gatewayScope) ?: return@launch
+    scope
+      .launch {
+        write.awaitTurn()
+        val lease = captureRequestLease(target.selection.gatewayScope) ?: return@launch
 
-      fun isCurrent(): Boolean = isCurrentReactionTarget(target) && reactionState.isCurrent(write)
+        fun isCurrent(): Boolean = isCurrentReactionTarget(target) && reactionState.isCurrent(write)
 
-      fun publishIfCurrent(block: () -> Unit) {
-        lease.commitIfCurrent { synchronized(gatewayScopeApplyLock) { if (isCurrent()) block() } }
-      }
-      try {
-        val params =
-          SessionReactionsSetParams(
-            sessionKey = target.selection.sessionKey,
-            agentId = target.selection.ownerAgentId,
-            messageId = messageId,
-            emoji = emoji,
-            remove = remove,
-          )
-        val response =
-          lease.request("session.reactions.set", json.encodeToString(params)) { enqueue ->
-            synchronized(gatewayScopeApplyLock) {
-              publishReactionAccess()
-              if (!isCurrent() || !_canReact.value) throw CancellationException("Reaction authority changed")
-              enqueue()
+        fun publishIfCurrent(block: () -> Unit) {
+          lease.commitIfCurrent { synchronized(gatewayScopeApplyLock) { if (isCurrent()) block() } }
+        }
+        try {
+          val params =
+            SessionReactionsSetParams(
+              sessionKey = target.selection.sessionKey,
+              agentId = target.selection.ownerAgentId,
+              messageId = messageId,
+              emoji = emoji,
+              remove = remove,
+            )
+          val response =
+            lease.request("session.reactions.set", json.encodeToString(params)) { enqueue ->
+              synchronized(gatewayScopeApplyLock) {
+                publishReactionAccess()
+                if (!isCurrentReactionTarget(target) || !_canReact.value || !reactionState.prepareWrite(write)) throw CancellationException("Reaction authority changed")
+                enqueue()
+              }
             }
-          }
-        val result = json.decodeFromString<SessionReactionsSetResult>(response)
-        check(result.messageId == messageId) { "Reaction response belongs to another message" }
-        val reactions = result.reactions.map { it.toChatReactionSummary() }
-        publishIfCurrent { reactionState.applyWrite(write, reactions) }
-      } catch (err: CancellationException) {
-        throw err
-      } catch (err: Throwable) {
-        publishIfCurrent { updateErrorText(err.message) }
-      } finally {
-        publishIfCurrent { reactionState.finishWrite(write) }
+          val result = json.decodeFromString<SessionReactionsSetResult>(response)
+          check(result.messageId == messageId) { "Reaction response belongs to another message" }
+          val reactions = result.reactions.map { it.toChatReactionSummary() }
+          publishIfCurrent { reactionState.applyWrite(write, reactions) }
+        } catch (err: CancellationException) {
+          throw err
+        } catch (err: Throwable) {
+          publishIfCurrent { updateErrorText(err.message) }
+        }
+      }.invokeOnCompletion {
+        synchronized(gatewayScopeApplyLock) { reactionState.finishWrite(write) }
       }
-    }
   }
 
   private fun handleSessionReactionEvent(payloadJson: String) {

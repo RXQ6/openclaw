@@ -221,6 +221,79 @@ class ChatControllerReactionsTest {
     }
 
   @Test
+  fun queuesDifferentEmojiRemovalsInMessageOrder() =
+    runTest {
+      val gateway = gateway()
+      val firstResponse = CompletableDeferred<String>()
+      gateway.respondWith(
+        "session.reactions.list",
+        """{"sessionId":"session-main","reactions":{"prompt":[{"emoji":"👍","count":1,"identities":[{"id":"riley"}]},{"emoji":"👀","count":1,"identities":[{"id":"riley"}]}]}}""",
+      )
+      gateway.respond("session.reactions.set") { params ->
+        val emoji =
+          chatControllerTestJson
+            .parseToJsonElement(requireNotNull(params))
+            .jsonObject
+            .getValue("emoji")
+            .jsonPrimitive.content
+        if (emoji == "👍") firstResponse.await() else """{"messageId":"prompt","reactions":[]}"""
+      }
+      val controller = controller(gateway)
+      controller.load("main")
+      runCurrent()
+
+      fun removals(): List<String> =
+        gateway.calls.filter { it.method == "session.reactions.set" }.map {
+          val params = chatControllerTestJson.parseToJsonElement(requireNotNull(it.paramsJson)).jsonObject
+          assertEquals("prompt", params.getValue("messageId").jsonPrimitive.content)
+          assertEquals(JsonPrimitive(true), params["remove"])
+          params.getValue("emoji").jsonPrimitive.content
+        }
+
+      controller.setMessageReaction("prompt", "👍", true)
+      controller.setMessageReaction("prompt", "👀", true)
+      runCurrent()
+      assertEquals(listOf("👍"), removals())
+
+      controller.handleGatewayEvent(
+        "session.reaction",
+        """{"sessionKey":"main","agentId":"main","sessionId":"session-main","messageId":"prompt","emoji":"👍","action":"removed","actor":{"type":"human","id":"riley"},"reactions":[{"emoji":"👀","count":1,"identities":[{"id":"riley"}]}]}""",
+      )
+      firstResponse.complete("""{"messageId":"prompt","reactions":[{"emoji":"👀","count":1,"identities":[{"id":"riley"}]}]}""")
+      runCurrent()
+      assertEquals(listOf("👍", "👀"), removals())
+      assertTrue(
+        controller.messageReactions.value
+          .getValue("prompt")
+          .isEmpty(),
+      )
+    }
+
+  @Test
+  fun refreshedListOutranksAnInflightSetResponse() =
+    runTest {
+      val gateway = gateway()
+      val pendingSet = CompletableDeferred<String>()
+      gateway.respond("session.reactions.set") { pendingSet.await() }
+      val controller = controller(gateway)
+      controller.load("main")
+      runCurrent()
+      controller.setMessageReaction("prompt", "👍", true)
+      runCurrent()
+      assertEquals(1, gateway.callCount("session.reactions.set"))
+
+      gateway.respondWith("session.reactions.list", """{"sessionId":"session-main","reactions":{}}""")
+      controller.handleGatewayEvent("seqGap", null)
+      runCurrent()
+      assertEquals(2, gateway.callCount("session.reactions.list"))
+      assertTrue(controller.messageReactions.value.isEmpty())
+
+      pendingSet.complete("""{"messageId":"prompt","reactions":${reactions(2)}}""")
+      runCurrent()
+      assertTrue(controller.messageReactions.value.isEmpty())
+    }
+
+  @Test
   fun ignoresDelayedSetAndListAfterSwitchingSessions() =
     runTest {
       val gateway = gateway()
