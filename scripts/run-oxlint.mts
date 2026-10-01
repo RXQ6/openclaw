@@ -660,13 +660,11 @@ export async function runOxlint(
     return { status: 0 };
   }
 
+  const root = process.cwd();
   const run = async (ownedDirectory?: string) => {
-    if (
-      !focusedConfig &&
-      finalArgs.includes("--type-aware") &&
-      !finalArgs.some((arg) => OXLINT_PREPARE_SKIP_FLAGS.has(arg))
-    ) {
-      await ensureKyselyTypes(process.cwd());
+    if (!focusedConfig) {
+      // Type-aware rules resolve Kysely schema projections, which are generated, not tracked.
+      await ensureKyselyTypes(root);
     }
     if (needsArtifactPreparation) {
       // Declaration compilation owns its Go policy; lint limits belong to the oxlint child.
@@ -681,7 +679,6 @@ export async function runOxlint(
   };
   // Skip-prepare callers still consume shared declarations. Hold one owner across
   // preparation and lint; source-only lint acquires it only for transient config.
-  const root = process.cwd();
   return !focusedConfig && shouldPrepareExtensionPackageBoundaryArtifacts(argv)
     ? await withDistArtifactOwnership(root, () => run(resolveDistArtifactLockPath(root)))
     : await run();
