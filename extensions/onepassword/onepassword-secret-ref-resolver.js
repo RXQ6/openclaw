@@ -3,7 +3,7 @@
 import fsSync from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { text } from "node:stream/consumers";
+import { text as consumeText } from "node:stream/consumers";
 import { runTasksWithConcurrency } from "openclaw/plugin-sdk/concurrency-runtime";
 import { coerceErrorMessage as errorMessage } from "openclaw/plugin-sdk/error-runtime";
 import { runCommandBuffered } from "openclaw/plugin-sdk/process-runtime";
@@ -229,7 +229,7 @@ async function resolveFromOnePassword(ids) {
 }
 
 async function main() {
-  const input = await text(process.stdin.setEncoding("utf8"));
+  const input = await consumeText(process.stdin.setEncoding("utf8"));
   const request = parseRequest(input);
   writeResponse(await resolveFromOnePassword(request.ids));
 }

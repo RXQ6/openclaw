@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { text } from "node:stream/consumers";
+import { text as consumeText } from "node:stream/consumers";
 import { readSecretFileSync } from "@openclaw/fs-safe/secret";
 import { parseVaultSecretId } from "./vault-secret-id.js";
 
@@ -405,7 +405,7 @@ async function resolveFromVault(ids) {
 }
 
 async function main() {
-  const input = await text(process.stdin.setEncoding("utf8"));
+  const input = await consumeText(process.stdin.setEncoding("utf8"));
   const request = parseRequest(input);
   writeResponse(await resolveFromVault(request.ids));
 }
