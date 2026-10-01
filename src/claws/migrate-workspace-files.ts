@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { resolve } from "node:path";
 import { root as fsSafeRoot } from "../infra/fs-safe.js";
 import { ClawMigrationError } from "./migrate-errors.js";
-import { lstatIfExists } from "./migrate-package.js";
+import { lstatMigrationPathIfExists } from "./migrate-package.js";
 import type { CapturedWorkspaceFile } from "./migrate-package.js";
 import { containsPotentialSecret } from "./migrate-validation.js";
 import { MAX_MANAGED_FILE_BYTES, MAX_MANAGED_WORKSPACE_BYTES } from "./source-limits.js";
@@ -25,7 +25,7 @@ export async function readSelectedWorkspaceFiles(
   const captured: CapturedWorkspaceFile[] = [];
   let totalBytes = 0;
   for (const name of PROMPT_FILE_NAMES) {
-    const info = await lstatIfExists(resolve(workspace, name));
+    const info = await lstatMigrationPathIfExists(resolve(workspace, name));
     if (!info) {
       continue;
     }

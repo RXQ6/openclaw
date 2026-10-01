@@ -16,7 +16,7 @@ import {
   createGeneratedPackage,
   createPackagePreview,
   generatedPackage,
-  lstatIfExists,
+  lstatMigrationPathIfExists,
   packageIdentityDigest,
   removeGeneratedPackageIfUnchanged,
   removePackagePreview,
@@ -224,7 +224,7 @@ export async function buildClawMigrationPlan(params: {
   const packageRoot = resolveIdentityPathViaExistingAncestorSync(
     resolve(resolveStateDir(options.env), "claws", "local", agentId),
   );
-  if (await lstatIfExists(packageRoot)) {
+  if (await lstatMigrationPathIfExists(packageRoot)) {
     throw new ClawMigrationError(
       "package_destination_exists",
       `Local Claw package destination ${JSON.stringify(packageRoot)} already exists. Move or inspect it before migrating.`,
@@ -483,7 +483,7 @@ export async function applyClawMigrationPlan(params: {
     config: params.config,
     env: options.env,
   });
-  if (await lstatIfExists(root)) {
+  if (await lstatMigrationPathIfExists(root)) {
     throw new ClawMigrationError(
       "package_destination_exists",
       `Generated package destination ${JSON.stringify(root)} appeared after planning; rerun migrate to review a fresh plan.`,

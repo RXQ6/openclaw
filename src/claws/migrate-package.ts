@@ -18,7 +18,7 @@ export type CapturedWorkspaceFile = {
   digest: string;
 };
 
-export function lstatIfExists(path: string) {
+export function lstatMigrationPathIfExists(path: string) {
   return lstat(path).catch((error: unknown) => {
     if (typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT") {
       return undefined;
@@ -116,7 +116,7 @@ export async function createGeneratedPackage(
 ): Promise<void> {
   const parent = dirname(root);
   let existingAncestor = parent;
-  while (!(await lstatIfExists(existingAncestor))) {
+  while (!(await lstatMigrationPathIfExists(existingAncestor))) {
     const next = dirname(existingAncestor);
     if (next === existingAncestor) {
       throw new ClawMigrationError(
@@ -181,7 +181,7 @@ export async function removeGeneratedPackageIfUnchanged(
 ): Promise<void> {
   for (const [path, expected] of [...packageFiles.entries()].toReversed()) {
     const target = resolve(root, path);
-    const info = await lstatIfExists(target);
+    const info = await lstatMigrationPathIfExists(target);
     if (!info || !info.isFile() || info.isSymbolicLink() || info.nlink !== 1) {
       continue;
     }
