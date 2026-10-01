@@ -14,16 +14,20 @@ import { observeOutboxRecoveryOwner } from "./outbox-payload-store.runtime.ts";
 import {
   MAX_STORED_SESSIONS,
   normalizeStoredSession,
+  type StoredComposerRecovery,
   type StoredComposerSession,
+  type StoredComposerState,
 } from "./outbox-store-codec.ts";
 import { observeDraftRevision, rememberDraftRevision } from "./outbox-store-draft-state.ts";
 import { retireRemovedOutboxPayloads } from "./outbox-store-payload-retirement.ts";
 import {
   storedChatOutboxScopeKey,
   UNRESOLVED_GLOBAL_AGENT_SCOPE,
+  type ComposerStorageTarget,
   type StoredChatOutboxScope,
 } from "./outbox-store-scope.ts";
 
+export type { StoredComposerRecovery, StoredComposerState } from "./outbox-store-codec.ts";
 export { storedChatOutboxScopeKey } from "./outbox-store-scope.ts";
 
 const LEGACY_STORAGE_KEY_PREFIX = "openclaw.control.chatComposer.v1:";
@@ -41,33 +45,6 @@ export type ChatComposerScope = {
   assistantAgentId?: string | null;
   agentsList?: { defaultId?: string | null; mainKey?: string | null; scope?: string | null } | null;
   hello?: { snapshot?: unknown } | null;
-};
-
-type ComposerStorageTarget = {
-  key: string;
-  legacyKey: string;
-  previousKey: string;
-  blobKey: string;
-  gatewayOwner: string;
-  legacyOwnerIsUnambiguous: boolean;
-  recoveryScope?: string;
-  unscopedKey: string;
-  unavailable?: boolean;
-};
-
-export type StoredComposerState = {
-  version: 4;
-  gatewayOwner: string;
-  sessions: Record<string, StoredComposerSession>;
-  recovery: Record<string, StoredComposerRecovery>;
-  legacyReceipts?: Partial<Record<"1" | "2" | "3", string>>;
-  recoveryBlocked?: true;
-};
-
-export type StoredComposerRecovery = {
-  sourceVersion: 1 | 2 | 3 | 4;
-  sourceScopeKey: string;
-  session: StoredComposerSession;
 };
 
 /** Sidebar draft presence for a tab row; attachments exist only in durable drafts. */

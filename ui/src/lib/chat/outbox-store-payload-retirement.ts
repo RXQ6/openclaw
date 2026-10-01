@@ -1,11 +1,12 @@
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { removeOutboxPayloads } from "./outbox-payload-store.runtime.ts";
-import type { storageTargetForGateway, StoredComposerState } from "./outbox-store.ts";
+import type { StoredComposerState } from "./outbox-store-codec.ts";
+import type { ComposerStorageTarget } from "./outbox-store-scope.ts";
 
 // Cleanup follows a verified metadata commit, never a credential-filtered view.
 export function retireRemovedOutboxPayloads(
   storage: Storage,
-  target: ReturnType<typeof storageTargetForGateway>,
+  target: ComposerStorageTarget,
   previous: string | null,
   current: StoredComposerState | null,
 ): void {
@@ -69,11 +70,15 @@ export function retireRemovedOutboxPayloads(
       });
     };
     const remaining = new Set(references(current).map((ref) => ref.key));
-    // Explicit legacy recovery first commits an account-scoped destination. Its
-    // reference still owns the Blob when the unowned source is then retired.
+    // Explicit recovery commits the destination before retiring the source. Both
+    // unscoped and account buckets can still own bytes after a partial transfer.
     for (let index = 0; index < storage.length; index += 1) {
       const key = storage.key(index);
-      if (key && key !== target.key && key.startsWith(target.unscopedKey + ":account:")) {
+      if (
+        key &&
+        key !== target.key &&
+        (key === target.unscopedKey || key.startsWith(target.unscopedKey + ":account:"))
+      ) {
         const raw = storage.getItem(key);
         if (raw) {
           for (const ref of references(JSON.parse(raw))) {

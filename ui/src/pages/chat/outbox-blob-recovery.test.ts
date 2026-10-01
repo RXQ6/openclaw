@@ -306,6 +306,125 @@ describe("Blob-preserving metadata migration", () => {
     },
   );
 
+  it.each(["noop-write", "failed-write", "noop-remove", "failed-remove"])(
+    "retains shared bytes after a destination commit and %s of the unscoped source",
+    async (failure) => {
+      const host = hostFor();
+      const foreign = hostFor("principal-b");
+      const item = await prepare(host, "partial-transfer");
+      const unrelated = await prepare(host, "destination-only", host.sessionKey);
+      const source = seed([item], "global", 4);
+      if (failure.endsWith("write")) {
+        // A retained row makes source retirement write instead of remove the bucket.
+        const store = readStoredOutboxStore(sessionStorage, target);
+        store.sessions[storedChatOutboxScopeKey({ sessionKey: "agent:main:other" })] = {
+          draft: "unrelated legacy draft",
+          updatedAt: 10,
+        };
+        writeStoredOutboxStore(sessionStorage, target, store);
+      }
+      const sourceBefore = sessionStorage.getItem(source.key);
+      const entry = expectDefined(
+        readChatOutboxRecovery(host).entries.find(
+          (candidate) => candidate.session.queue?.[0]?.id === item.id,
+        ),
+        "unscoped source",
+      );
+      const scope = { sessionKey: host.sessionKey, agentId: "main" };
+      const capture = () =>
+        expectDefined(captureChatOutboxRecoveryDestination(host, scope), "destination");
+      const set = sessionStorage.setItem.bind(sessionStorage);
+      const remove = sessionStorage.removeItem.bind(sessionStorage);
+      const fail = () => {
+        if (failure.startsWith("failed")) {
+          throw new Error("source retirement blocked");
+        }
+      };
+      const write = vi.spyOn(sessionStorage, "setItem").mockImplementation((key, value) => {
+        if (key === target.key && failure.endsWith("write")) {
+          fail();
+          return;
+        }
+        set(key, value);
+      });
+      const removal = vi.spyOn(sessionStorage, "removeItem").mockImplementation((key) => {
+        if (key === target.key && failure.endsWith("remove")) {
+          fail();
+          return;
+        }
+        remove(key);
+      });
+      const cleanup = vi.spyOn(payloadStore, "removeOutboxPayloads");
+      const ownedTarget = storageTargetForComposer(host);
+      const destinationKey = storedChatOutboxScopeKey(scope);
+      const clearDestination = () => {
+        const store = readStoredOutboxStore(sessionStorage, ownedTarget);
+        store.sessions = {};
+        writeStoredOutboxStore(sessionStorage, ownedTarget, store);
+      };
+      const settleCleanup = async () => {
+        await Promise.all(
+          cleanup.mock.results.flatMap((result) =>
+            result.type === "return" ? [result.value] : [],
+          ),
+        );
+      };
+
+      expect(restoreChatOutboxRecovery(host, entry, capture())).toBe("storage-failed");
+      expect(sessionStorage.getItem(source.key)).toBe(sourceBefore);
+      const committed = readStoredOutboxStore(sessionStorage, ownedTarget);
+      expect(committed.sessions[destinationKey]?.queue?.[0]?.attachmentPayload).toEqual(
+        item.attachmentPayload,
+      );
+      committed.sessions[destinationKey]!.queue!.push(unrelated);
+      writeStoredOutboxStore(sessionStorage, ownedTarget, committed);
+      clearDestination();
+      await settleCleanup();
+      await expectBytes(host, item);
+      expect(cleanup).toHaveBeenCalledExactlyOnceWith([unrelated.attachmentPayload]);
+      expect(await prepareOutboxPayload(host, unrelated, "handoff")).toEqual({
+        status: "failed",
+        reason: "missing",
+      });
+      expect(
+        readChatOutboxRecovery(foreign).entries.every(
+          (candidate) => !candidate.session.queue?.length,
+        ),
+      ).toBe(true);
+      expect(listStoredChatOutboxes(foreign)).toEqual([]);
+      const foreignDestination = expectDefined(
+        captureChatOutboxRecoveryDestination(foreign, scope),
+        "foreign destination",
+      );
+      expect(restoreChatOutboxRecovery(foreign, entry, foreignDestination)).toBe("conflict");
+
+      // Another failed recovery/deletion must preserve the same source bytes too.
+      expect(restoreChatOutboxRecovery(host, entry, capture())).toBe("storage-failed");
+      clearDestination();
+      await settleCleanup();
+      await expectBytes(host, item);
+      expect(cleanup).toHaveBeenCalledTimes(1);
+      expect(sessionStorage.getItem(source.key)).toBe(sourceBefore);
+      write.mockRestore();
+      removal.mockRestore();
+
+      // Once source retirement succeeds, the destination is the last owner.
+      expect(restoreChatOutboxRecovery(host, entry, capture())).toBe("restored");
+      expect(
+        readChatOutboxRecovery(host).entries.every((candidate) => !candidate.session.queue?.length),
+      ).toBe(true);
+      await expectBytes(host, item);
+      clearDestination();
+      await settleCleanup();
+      expect(cleanup).toHaveBeenLastCalledWith([item.attachmentPayload]);
+      expect(cleanup).toHaveBeenCalledTimes(2);
+      expect(await prepareOutboxPayload(host, item, "handoff")).toEqual({
+        status: "failed",
+        reason: "missing",
+      });
+    },
+  );
+
   it("partitions a mixed-principal v3 bucket while retaining foreign recovery across unrelated retirement", async () => {
     const a = hostFor();
     const b = hostFor("principal-b");
