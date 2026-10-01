@@ -117,46 +117,6 @@ describe("CronService failure repair", () => {
     });
   });
 
-  it("gives an owned no-delivery job one repair request per incident and never alerts", async () => {
-    await withFailureAlertCron(
-      { scheduler: createTestGatewayScheduler() },
-      async ({
-        cron,
-        sendCronFailureAlert,
-        runCronFailureRepair,
-        runIsolatedAgentJob,
-        enqueueSystemEvent,
-        addJob,
-      }) => {
-        runCronFailureRepair.mockRejectedValueOnce(new Error("owner turn failed"));
-        const job = await addJob("owned report", {
-          delivery: { mode: "none" },
-          owner: owned.owner,
-        });
-        const unowned = await addJob("unowned report", { delivery: { mode: "none" } });
-        for (let attempt = 0; attempt < 5; attempt += 1) {
-          await cron.run(job.id, "force");
-          await cron.run(unowned.id, "force");
-        }
-        // A failed repair turn neither retries the repair nor falls back to a chat alert.
-        expect(runCronFailureRepair).toHaveBeenCalledOnce();
-        expect(runCronFailureRepair.mock.calls[0]?.[0]).toMatchObject({
-          jobId: job.id,
-          sessionKey: ownerSessionKey,
-        });
-        expect(sendCronFailureAlert).not.toHaveBeenCalled();
-        expect(enqueueSystemEvent).not.toHaveBeenCalled();
-
-        runIsolatedAgentJob.mockResolvedValueOnce({ status: "ok" });
-        await cron.run(job.id, "force");
-        await cron.run(job.id, "force");
-        await cron.run(job.id, "force");
-        expect(runCronFailureRepair).toHaveBeenCalledTimes(2);
-        expect(sendCronFailureAlert).not.toHaveBeenCalled();
-      },
-    );
-  });
-
   it.each([
     { name: "agentTurn", payload: { kind: "agentTurn", message: "sync" }, repairs: true },
     { name: "systemEvent", payload: { kind: "systemEvent", text: "check" }, repairs: true },

@@ -84,8 +84,6 @@ export type ResolvedFailureAlert = CronFailureAlertRoute & {
   after: number;
   cooldownMs: number;
   includeSkipped: boolean;
-  /** An owned job with no alert route: its owner conversation gets a repair request, never an alert. */
-  repairOnly?: true;
 };
 
 export type CronNotificationIntent = { routing?: CronNotificationRouting } & (

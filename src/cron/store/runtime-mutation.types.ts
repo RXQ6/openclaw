@@ -18,7 +18,7 @@ type CronScheduleOwnershipFacts = {
 export type CronRuntimeMutationContracts = {
   "cron.recordSkippedRuns": {
     input: CronRuntimeMutationInputs["cron.recordSkippedRuns"];
-    facts: { jobs: Array<Pick<CronJob, "id" | "delivery" | "failureAlert" | "owner">> };
+    facts: { jobs: Array<Pick<CronJob, "id" | "delivery" | "failureAlert">> };
     preparation: {
       nowMs: number;
       defaultAgentId?: string;
@@ -54,7 +54,7 @@ export type CronRuntimeMutationContracts = {
   };
   "cron.mutateExternalState": {
     input: CronRuntimeMutationInputs["cron.mutateExternalState"];
-    facts: Pick<CronJob, "id" | "delivery" | "failureAlert" | "owner">;
+    facts: Pick<CronJob, "id" | "delivery" | "failureAlert">;
     preparation: Pick<CronRunRecoveryPreparation, "nowMs" | "cronConfig" | "failureAlert">;
     outcome: {
       job?: CronJob;
@@ -161,7 +161,7 @@ export type CronRuntimeMutationContracts = {
   };
   "cron.repairRun": {
     input: CronRuntimeMutationInputs["cron.repairRun"];
-    facts: Pick<CronJob, "id" | "delivery" | "failureAlert" | "owner">;
+    facts: Pick<CronJob, "id" | "delivery" | "failureAlert">;
     preparation: CronRunRecoveryPreparation;
     outcome: CronRunRecoveryOutcome;
   };

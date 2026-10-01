@@ -87,7 +87,7 @@ export function resolveFailureAlert(
     deps: Pick<CronJobPolicyContext["deps"], "cronConfig">;
     preparedFailureAlert?: CronJobPolicyContext["preparedFailureAlert"];
   },
-  job: Pick<CronJob, "delivery" | "failureAlert"> & Partial<Pick<CronJob, "id" | "owner">>,
+  job: Pick<CronJob, "delivery" | "failureAlert"> & Partial<Pick<CronJob, "id">>,
 ): ResolvedFailureAlert | null {
   const prepared = state.preparedFailureAlert;
   if (prepared) {
@@ -122,18 +122,7 @@ export function resolveFailureAlert(
     primaryRoute.mode === "announce" && primaryRoute.requested ? primaryRoute : undefined;
   const explicitlyConfigured = jobConfig !== undefined || globalConfig !== undefined;
   if (!alternateRoute && !primaryAnnounceRoute && !explicitlyConfigured) {
-    // A routeless job stays silent; an owned one only asks its owner conversation to repair it.
-    return normalizeOptionalString(job.owner?.sessionKey)
-      ? {
-          after: DEFAULT_FAILURE_ALERT_AFTER,
-          cooldownMs: DEFAULT_FAILURE_ALERT_COOLDOWN_MS,
-          channel: "last",
-          mode: "announce",
-          includeSkipped: false,
-          alternateRoute: false,
-          repairOnly: true,
-        }
-      : null;
+    return null;
   }
   const configuredMode =
     jobConfig?.mode ?? (jobConfig?.channel ? "announce" : undefined) ?? globalConfig?.mode;
@@ -364,29 +353,27 @@ export function maybeEmitFailureAlert(
   if (params.job.delivery?.bestEffort === true && !params.job.failureAlert) {
     return;
   }
-  // Command jobs and on-exit or stream schedules are operator-only, so they alert as before.
-  const repairable =
-    alertConfig.mode === "announce" &&
-    params.status === "error" &&
-    params.job.owner?.sessionKey?.trim() &&
-    params.job.payload.kind !== "command" &&
-    params.job.schedule.kind !== "on-exit" &&
-    params.job.schedule.kind !== "stream";
+  const incident = failureIncident({ ...params, route: alertConfig });
+  const now = state.deps.nowMs();
   // The repair request took this incident's alert and cooldown slot; if the job still
   // fails, the user gets the alert once, and the streak is never repaired twice.
   const repairRequested = params.job.state.failureAlertIncident?.repair !== undefined;
-  if (alertConfig.repairOnly && (repairRequested || !repairable)) {
-    return;
-  }
-  const incident = failureIncident({ ...params, route: alertConfig });
-  const now = state.deps.nowMs();
   if (repairRequested) {
     startFailureAlertCycle(params.job, incident, now);
   } else if (!requestFailureNotification(state, params.job, alertConfig, incident)) {
     return;
   }
   const job = cronNotificationJob(params.job);
-  if (!repairRequested && repairable) {
+  if (
+    !repairRequested &&
+    alertConfig.mode === "announce" &&
+    params.status === "error" &&
+    params.job.owner?.sessionKey?.trim() &&
+    // Command jobs and on-exit or stream schedules are operator-only, so they alert as before.
+    params.job.payload.kind !== "command" &&
+    params.job.schedule.kind !== "on-exit" &&
+    params.job.schedule.kind !== "stream"
+  ) {
     const opened = params.job.state.failureAlertIncident ?? incident;
     params.job.state.failureAlertIncident = { ...opened, repair: { atMs: now } };
     // No alert is sent for this cycle; the repair conversation owns any messaging.

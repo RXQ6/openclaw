@@ -7,15 +7,12 @@ const QA_CRON_BLOCKED_REASON = "Unable to run the report: this run has no shell 
 /**
  * Scripts the cron blocked-outcome QA flow: a scheduled turn that cannot do its task reports
  * the failure on its first line, a turn that merely quotes the token and an intentionally
- * quiet turn stay successful, and the owner conversation acknowledges the repair request.
+ * quiet turn stay successful.
  */
 export function planCronBlockedOutcomeTurn(prompt: string): StreamEvent[] | null {
   const testCase = QA_CRON_BLOCKED_PROMPT_RE.exec(prompt)?.[1];
   if (!testCase) {
     return null;
-  }
-  if (prompt.includes("Automation repair request from the scheduler")) {
-    return buildAssistantEvents("QA-CRON-BLOCKED-REPAIR-SEEN");
   }
   if (testCase === "silent") {
     return buildAssistantEvents("NO_REPLY");

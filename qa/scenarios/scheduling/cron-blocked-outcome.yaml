@@ -8,9 +8,9 @@ scenario:
     secondary:
       - automation.failure-destinations
       - automation.run-history-cron
-  objective: Verify a scheduled turn that reports AUTOMATION_FAILED records a failed run that feeds failure alerts and owner repair, while quiet runs and replies that only quote the token stay successful.
+  objective: Verify a scheduled turn that reports AUTOMATION_FAILED records a failed run that feeds the existing failure alerts, while no-delivery jobs stay silent and quiet or quoting replies stay successful.
   successCriteria:
-    - An owned no-delivery run whose reply starts with AUTOMATION_FAILED is recorded as an error with the reported reason; two such runs send exactly one repair request to the owner conversation, and further failures send no alert and no second repair.
+    - An owned no-delivery run whose reply starts with AUTOMATION_FAILED is recorded as an error with the reported reason, and repeated failures send no alert and no repair request.
     - An unowned announce run with the same reply delivers the reason, is recorded as an error, and two such runs send the failure alert.
     - A reply that only quotes AUTOMATION_FAILED mid-text stays ok.
     - NO_REPLY runs stay ok with and without announce delivery.
@@ -35,13 +35,12 @@ scenario:
       conversationId: qa-cron-blocked-outcome
       controlConversationId: qa-cron-blocked-outcome-control
       ownerMarker: QA-CRON-BLOCKED-OWNER-READY
-      repairMarker: QA-CRON-BLOCKED-REPAIR-SEEN
       blockedReason: "Unable to run the report: this run has no shell tool."
       repairBriefNeedle: "Automation repair request from the scheduler"
 
 flow:
   steps:
-    - name: an owned no-delivery run that reports AUTOMATION_FAILED reaches the owner conversation
+    - name: an owned no-delivery run that reports AUTOMATION_FAILED records the error and stays silent
       actions:
         - assert:
             expr: "env.providerMode === config.requiredProviderMode"
@@ -87,38 +86,22 @@ flow:
             expr: "await addJob('blocked', { owner: { agentId: 'qa', sessionKey: ownerSessionKey } })"
         - set: ownedRuns
           value:
-            expr: "[await runJob(ownedJob.id), await runJob(ownedJob.id)]"
+            expr: "[await runJob(ownedJob.id), await runJob(ownedJob.id), await runJob(ownedJob.id)]"
         - assert:
             expr: "ownedRuns.every((run) => run.status === 'error' && run.error === config.blockedReason && run.deliveryStatus === 'not-requested')"
             message:
               expr: "`reported failures were not recorded as errors: ${JSON.stringify(ownedRuns)}`"
-        - call: waitForCondition
-          saveAs: repairReplies
-          args:
-            - lambda:
-                expr: "(() => { const matches = state.getSnapshot().messages.filter((message) => message.direction === 'outbound' && !message.deleted && message.conversation.id === config.conversationId && message.text.includes(config.repairMarker)); return matches.length > 0 ? matches : undefined; })()"
-            - expr: "liveTurnTimeoutMs(env, 120000)"
-            - 250
         - set: repairRequests
           value:
-            expr: "(await fetchJson(`${env.mock.baseUrl}/debug/requests?after=${requestCursorBefore}`)).filter((request) => String(request.prompt ?? '').includes(config.repairBriefNeedle) && String(request.prompt ?? '').includes(ownedJob.id))"
+            expr: "(await fetchJson(`${env.mock.baseUrl}/debug/requests?after=${requestCursorBefore}`)).filter((request) => String(request.prompt ?? '').includes(config.repairBriefNeedle))"
+        - set: ownerOutbound
+          value:
+            expr: "state.getSnapshot().messages.filter((message) => message.direction === 'outbound' && message.conversation.id === config.conversationId && !message.text.includes(config.ownerMarker))"
         - assert:
-            expr: "repairRequests.length > 0 && String(repairRequests[0].prompt).includes(config.blockedReason)"
-            message: the owner conversation did not receive a repair request carrying the reported reason
-        - set: laterRuns
-          value:
-            expr: "[await runJob(ownedJob.id), await runJob(ownedJob.id)]"
-        - set: laterRepairRequests
-          value:
-            expr: "(await fetchJson(`${env.mock.baseUrl}/debug/requests?after=${requestCursorBefore}`)).filter((request) => String(request.prompt ?? '').includes(config.repairBriefNeedle) && String(request.prompt ?? '').includes(ownedJob.id))"
-        - set: ownerAlerts
-          value:
-            expr: 'state.getSnapshot().messages.filter((message) => message.direction === ''outbound'' && message.text.includes(`Automation "${ownedJob.name}"`))'
-        - assert:
-            expr: "laterRuns.every((run) => run.status === 'error') && laterRepairRequests.length === repairRequests.length && ownerAlerts.length === 0"
+            expr: "repairRequests.length === 0 && ownerOutbound.length === 0"
             message:
-              expr: "`a still-failing no-delivery job alerted or repaired again: ${JSON.stringify({ repairs: laterRepairRequests.length, alerts: ownerAlerts.map((message) => message.text) })}`"
-      detailsExpr: "`runs=${JSON.stringify([...ownedRuns, ...laterRuns].map((run) => ({ status: run.status, error: run.error, delivery: run.deliveryStatus })))} repairRequests=${laterRepairRequests.length} reply=${JSON.stringify(repairReplies[0].text)} alerts=${ownerAlerts.length}`"
+              expr: "`a no-delivery job notified: ${JSON.stringify({ repairs: repairRequests.length, outbound: ownerOutbound.map((message) => message.text) })}`"
+      detailsExpr: "`runs=${JSON.stringify(ownedRuns.map((run) => ({ status: run.status, error: run.error, delivery: run.deliveryStatus })))} repairRequests=${repairRequests.length} ownerOutbound=${ownerOutbound.length}`"
 
     - name: an unowned announce run that reports AUTOMATION_FAILED delivers the reason and alerts
       actions:
