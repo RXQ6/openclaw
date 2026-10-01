@@ -6,6 +6,7 @@ import { resolveUpdateCaptureRoot } from "../infra/update-capture-paths.js";
 import { captureUpdateRecoveryBaseline } from "../infra/update-recovery-baseline-capture.js";
 import { buildUpdateRehearsalPathEnv } from "../infra/update-rehearsal-paths.js";
 import * as pluginResources from "../plugins/doctor-contract-registry.js";
+import type { RuntimeEnv } from "../runtime.js";
 import {
   closeOpenClawAgentDatabasesAsync,
   openOpenClawAgentDatabase,
@@ -95,9 +96,13 @@ it("keeps config and declared plugin/Workshop resources while excluding disposab
           { path: workshop, kind: "directory" },
         ]);
         const messages: string[] = [];
-        const runtime = {
-          log: (message: string) => messages.push(message),
-          error: (message: string) => messages.push(message),
+        const runtime: RuntimeEnv = {
+          log: (...args) => {
+            messages.push(args.map(String).join(" "));
+          },
+          error: (...args) => {
+            messages.push(args.map(String).join(" "));
+          },
           exit: () => {
             throw new Error("Doctor exited unexpectedly");
           },
