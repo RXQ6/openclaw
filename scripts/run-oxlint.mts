@@ -666,10 +666,11 @@ export async function runOxlint(
     return { status: 0 };
   }
 
+  const root = process.cwd();
   const run = async (ownedDirectory?: string) => {
     if (shouldPrepareOxlintArtifacts(argv) && env.OPENCLAW_OXLINT_SKIP_PREPARE !== "1") {
       // Source-backed core lint skips plugin declarations, not generated schema types.
-      await ensureKyselyTypes(process.cwd());
+      await ensureKyselyTypes(root);
     }
     if (needsArtifactPreparation) {
       // Declaration compilation owns its Go policy; lint limits belong to the oxlint child.
@@ -684,7 +685,6 @@ export async function runOxlint(
   };
   // Skip-prepare callers still consume shared declarations. Hold one owner across
   // generation and lint; syntax-only guards need it only for transient config.
-  const root = process.cwd();
   return shouldPrepareOxlintArtifacts(argv)
     ? await withDistArtifactOwnership(root, () => run(resolveDistArtifactLockPath(root)))
     : await run();
