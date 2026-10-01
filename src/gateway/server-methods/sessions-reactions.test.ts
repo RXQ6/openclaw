@@ -5,6 +5,7 @@ import { registerConversationAddresses } from "../../config/sessions/conversatio
 import { upsertSessionEntryCore } from "../../config/sessions/session-accessor.sqlite-entry.js";
 import { loadTranscriptEventsSync } from "../../config/sessions/session-accessor.sqlite-read.js";
 import { appendTranscriptMessage } from "../../config/sessions/session-accessor.sqlite-transcript-write.js";
+import * as reactionStore from "../../config/sessions/session-reaction-store.js";
 import { addSessionMember } from "../../config/sessions/session-sharing-store.native.js";
 import { publishSystemEventStoreConfig } from "../../config/sessions/session-store-path.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
@@ -647,6 +648,63 @@ describe("session reaction handlers", () => {
       });
     },
   );
+
+  it("uses the kernel's newest surviving emoji for a single-slot replacement", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      registerReactionChannel(true, "single");
+      const { messageId, config } = await seedChannelMessage();
+      runOpenClawAgentWriteTransaction(
+        (database) => {
+          executeSqliteQuerySync(
+            database.db,
+            getNodeSqliteKysely<Pick<DB, "session_reactions">>(database.db)
+              .insertInto("session_reactions")
+              .values(
+                [
+                  { emoji: "👍", identity_id: "alice", created_at: 100 },
+                  { emoji: "🎉", identity_id: "alice", created_at: 200 },
+                  { emoji: "👍", identity_id: "bob", created_at: 300 },
+                  { emoji: "🚀", identity_id: "alice", created_at: 400 },
+                ].map(({ emoji, identity_id, created_at }) => ({
+                  emoji,
+                  identity_id,
+                  created_at,
+                  session_key: sessionKey,
+                  session_id: sessionId,
+                  message_id: messageId,
+                  identity_label: null,
+                })),
+              ),
+          );
+        },
+        { agentId: "main" },
+      );
+      const write = vi.spyOn(reactionStore, "setSessionReactionAsync");
+      const response = await call(
+        "session.reactions.set",
+        { sessionKey, messageId, emoji: "🚀", remove: true },
+        client("alice"),
+        context(config),
+      );
+      expect(response).toMatchObject([
+        true,
+        {
+          reactions: [
+            { emoji: "👍", count: 2 },
+            { emoji: "🎉", count: 1 },
+          ],
+          mirror: { status: "delivered" },
+        },
+      ]);
+      expect(runMessageAction).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          params: expect.objectContaining({ emoji: "👍", remove: false }),
+        }),
+      );
+      expect(await write.mock.results[0]?.value).toMatchObject({ newestRemainingEmoji: "👍" });
+      expect(response[1]).not.toHaveProperty("newestRemainingEmoji");
+    });
+  });
 
   it("serializes different emoji in a single channel slot without blocking other messages", async () => {
     await withOpenClawTestState({ scenario: "minimal" }, async () => {

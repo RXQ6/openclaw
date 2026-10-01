@@ -68,6 +68,21 @@ async function seedMessages(sessionId: string, messageIds: readonly string[]) {
   ]);
 }
 
+function stampReaction(emoji: string, identityId: string, createdAt: number) {
+  runOpenClawAgentWriteTransaction((database) => {
+    executeSqliteQuerySync(
+      database.db,
+      getNodeSqliteKysely<Pick<DB, "session_reactions">>(database.db)
+        .updateTable("session_reactions")
+        .set({ created_at: createdAt })
+        .where("session_key", "=", scope.sessionKey)
+        .where("message_id", "=", reaction.messageId)
+        .where("emoji", "=", emoji)
+        .where("identity_id", "=", identityId),
+    );
+  }, scope);
+}
+
 beforeEach(async () => {
   scope = {
     agentId: "main",
@@ -104,6 +119,7 @@ describe("session reaction store", () => {
       try {
         expect(await setSessionReactionAsync(scope, reaction)).toEqual({
           reactions: [{ emoji: "👍", count: 1, identities: [{ id: "alice", label: "Alice" }] }],
+          newestRemainingEmoji: "👍",
           changed: true,
         });
         for (const method of methods) {
@@ -160,23 +176,11 @@ describe("session reaction store", () => {
   });
 
   it("toggles idempotently and summarizes emoji and identities in first-created order", async () => {
-    const stampReaction = (emoji: string, identityId: string, createdAt: number) => {
-      runOpenClawAgentWriteTransaction((database) => {
-        executeSqliteQuerySync(
-          database.db,
-          getNodeSqliteKysely<Pick<DB, "session_reactions">>(database.db)
-            .updateTable("session_reactions")
-            .set({ created_at: createdAt })
-            .where("session_key", "=", scope.sessionKey)
-            .where("emoji", "=", emoji)
-            .where("identity_id", "=", identityId),
-        );
-      }, scope);
-    };
     expect(listSessionReactions(scope, { sessionId: "session-a" })).toEqual({});
     const first = await setSessionReactionAsync(scope, reaction);
     expect(first).toEqual({
       reactions: [{ emoji: "👍", count: 1, identities: [{ id: "alice", label: "Alice" }] }],
+      newestRemainingEmoji: "👍",
       changed: true,
     });
     expect(await setSessionReactionAsync(scope, reaction)).toEqual({ ...first, changed: false });
@@ -207,9 +211,53 @@ describe("session reaction store", () => {
     ]);
     expect(await setSessionReactionAsync(scope, { ...reaction, remove: true })).toEqual({
       reactions: removed,
+      newestRemainingEmoji: "👍",
       changed: false,
     });
     expect(listSessionReactions(scope, { sessionId: "session-b" })).toEqual({});
+  });
+
+  it.each([
+    {
+      name: "removing 🚀 after Alice 👍, Alice 🎉, Bob 👍, then 🚀",
+      rocket: true,
+      emoji: "🚀",
+      identityId: "alice",
+      expected: "👍",
+    },
+    {
+      name: "removing Bob's newest 👍 while Alice's older 👍 remains",
+      rocket: false,
+      emoji: "👍",
+      identityId: "bob",
+      expected: "🎉",
+    },
+  ])("returns the newest surviving emoji after $name", async (scenario) => {
+    for (const [emoji, identityId, createdAt] of [
+      ["👍", "alice", 100],
+      ["🎉", "alice", 200],
+      ["👍", "bob", 300],
+    ] as const) {
+      await setSessionReactionAsync(scope, { ...reaction, emoji, identityId });
+      stampReaction(emoji, identityId, createdAt);
+    }
+    if (scenario.rocket) {
+      await setSessionReactionAsync(scope, { ...reaction, emoji: "🚀" });
+      stampReaction("🚀", "alice", 400);
+    }
+    const removal = {
+      ...reaction,
+      emoji: scenario.emoji,
+      identityId: scenario.identityId,
+      remove: true,
+    };
+    const result = await setSessionReactionAsync(scope, removal);
+    expect(result).toMatchObject({ changed: true, newestRemainingEmoji: scenario.expected });
+    expect(result.reactions.map(({ emoji }) => emoji)).toEqual(["👍", "🎉"]);
+    expect(await setSessionReactionAsync(scope, removal)).toMatchObject({
+      changed: false,
+      newestRemainingEmoji: scenario.expected,
+    });
   });
 
   it("caps distinct emoji per identity and message while allowing no-ops and removal", async () => {
@@ -372,6 +420,7 @@ describe("session reaction store", () => {
     );
     expect(await setSessionReactionAsync(scope, { ...reaction, remove: true })).toEqual({
       reactions: [],
+      newestRemainingEmoji: undefined,
       changed: false,
     });
     expect(listSessionReactions(scope, { sessionId: "session-a" })).toEqual({

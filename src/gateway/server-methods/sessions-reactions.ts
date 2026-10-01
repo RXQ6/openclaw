@@ -6,7 +6,6 @@ import {
   isReactionEmoji,
   validateSessionReactionsListParams,
   validateSessionReactionsSetParams,
-  type MessageReactionSummary,
   type SessionReactionMirror,
 } from "../../../packages/gateway-protocol/src/index.js";
 import { resolveChannelAccount } from "../../channels/account-resolution.js";
@@ -20,6 +19,7 @@ import {
   SessionReactionLimitError,
   SessionReactionMessageMissingError,
 } from "../../config/sessions/session-reaction-store.js";
+import type { SessionReactionWrite } from "../../config/sessions/session-reaction-store.types.js";
 import { formatErrorMessage } from "../../infra/errors.js";
 import { isConfiguredChannel } from "../../infra/outbound/channel-selection.js";
 import { resolveMessageActionOutcome } from "../../infra/outbound/message-action-contracts.js";
@@ -136,7 +136,7 @@ async function mirrorReaction(params: {
   context: GatewayRequestContext;
   target: ReactionTarget;
   transport: MirrorTransport;
-  reactions: MessageReactionSummary[];
+  newestRemainingEmoji: string | undefined;
   emoji: string;
   remove: boolean;
   assertCurrent: () => void;
@@ -145,7 +145,7 @@ async function mirrorReaction(params: {
     const { transport } = params;
     const plugin = getRuntimeVisibleChannelPlugin(transport.channel);
     const singleSlot = plugin?.capabilities.reactionSlots === "single";
-    const replacement = singleSlot && params.remove ? params.reactions.at(-1) : undefined;
+    const replacement = singleSlot && params.remove ? params.newestRemainingEmoji : undefined;
     const scope = { ...reactionScope(params.target), sessionId: params.target.entry.sessionId };
     const cfg = params.context.getRuntimeConfig();
     // Start capture now and reserve commit order before yielding to another mutation.
@@ -259,7 +259,7 @@ async function mirrorReaction(params: {
               accountId: conversation.accountId,
               ...(conversation.threadId ? { threadId: conversation.threadId } : {}),
               messageId: transport.messageId,
-              emoji: replacement?.emoji ?? params.emoji,
+              emoji: replacement ?? params.emoji,
               remove: params.remove && !replacement,
             },
           }),
@@ -433,7 +433,7 @@ export const sessionReactionHandlers: GatewayRequestHandlers = {
           throw new Error("reaction author or session authority changed");
         }
       };
-      let write: { reactions: MessageReactionSummary[]; changed: boolean };
+      let write: SessionReactionWrite;
       try {
         assertCurrent();
         write = await setSessionReactionAsync(scope, {
@@ -524,7 +524,7 @@ export const sessionReactionHandlers: GatewayRequestHandlers = {
               context,
               target,
               transport: decision.transport,
-              reactions,
+              newestRemainingEmoji: write.newestRemainingEmoji,
               emoji: params.emoji,
               remove: params.remove === true,
               assertCurrent,
