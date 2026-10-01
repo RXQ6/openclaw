@@ -435,7 +435,7 @@ vi.mock("../agents/agent-bundle-mcp-tools.js", () => ({
   reloadSessionMcpRuntimes: hoisted.reloadSessionMcpRuntimes,
 }));
 
-vi.mock("../plugins/installed-plugin-index-records.js", () => ({
+vi.mock("../plugins/installed-plugin-index-record-reader.js", () => ({
   clearLoadInstalledPluginIndexInstallRecordsCache: vi.fn(),
   loadInstalledPluginIndexInstallRecords: vi.fn(async () => ({})),
   loadInstalledPluginIndexInstallRecordsSync: vi.fn(() => ({})),
