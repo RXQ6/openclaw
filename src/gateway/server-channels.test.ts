@@ -1,6 +1,7 @@
 /**
  * Server channel lifecycle tests.
  */
+import { getEventListeners } from "node:events";
 import fs from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import path from "node:path";
@@ -116,9 +117,7 @@ const createdManagers: Array<{ manager: ChannelManager; channelIds: ChannelId[] 
 const channelTempDirs = useAutoCleanupTempDirTracker(afterEach);
 
 function waitForAbort(signal: AbortSignal): Promise<void> {
-  return new Promise<void>((resolve) => {
-    signal.addEventListener("abort", () => resolve(), { once: true });
-  });
+  return new Promise((done) => signal.addEventListener("abort", () => done(), { once: true }));
 }
 
 async function flushMicrotasks(times = 8): Promise<void> {
@@ -3259,10 +3258,10 @@ describe("server-channels auto restart", () => {
   it("injects a narrow Gateway approval resolver into the channel task runtime", async () => {
     const request = vi.fn(async () => ({ applied: true, approval: {} }));
     const { promise: accountStartReady, resolve: releaseAccountStart } = createDeferred();
-    const nativeApprovalRuntime = {
-      current: undefined as GatewayNativeApprovalRuntime | undefined,
-    };
+    let nativeApprovalRuntime: GatewayNativeApprovalRuntime | undefined;
+    let observerCount: number | undefined;
     const startAccount = vi.fn(async (ctx: ChannelGatewayContext<TestAccount>) => {
+      observerCount = getEventListeners(ctx.abortSignal, "abort").length;
       const approvalRuntime =
         ctx.channelRuntime?.runtimeContexts.get<ApprovalGatewayRequestRuntime>({
           channelId: "discord",
@@ -3283,15 +3282,16 @@ describe("server-channels auto restart", () => {
     const manager = createManager({
       channelRuntime: createRuntimeChannel(),
       deferStartupAccountStartsUntil: accountStartReady,
-      getNativeApprovalRuntime: () => nativeApprovalRuntime.current,
+      getNativeApprovalRuntime: () => nativeApprovalRuntime,
     });
 
     await manager.startChannels();
     expect(startAccount).not.toHaveBeenCalled();
-    nativeApprovalRuntime.current = { request } as unknown as GatewayNativeApprovalRuntime;
+    nativeApprovalRuntime = { request } as unknown as GatewayNativeApprovalRuntime;
     releaseAccountStart();
     await flushMicrotasks();
 
+    expect(observerCount).toBe(1); // Approval disposal owns the remaining listener.
     expect(request).toHaveBeenCalledWith(
       "approval.resolve",
       { id: "approval-1", kind: "exec", decision: "deny" },
