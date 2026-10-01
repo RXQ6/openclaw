@@ -26,6 +26,7 @@ import {
   applyAnthropicContextManagementToRequest,
   isDirectAnthropicModel,
   resolveAnthropicRequestBetaHeader,
+  supportsAnthropicServerSideFallback,
 } from "../transports/anthropic-payload-policy.js";
 import { consumeAnthropicStream } from "../transports/anthropic-stream-reducer.js";
 import { createAssistantOutput } from "../transports/assistant-output.js";
@@ -60,10 +61,8 @@ import {
   resolveAnthropicThinkingEffort,
   resolveClaudeOpus5ModelIdentity,
   resolveClaudeSonnet5ModelIdentity,
-  resolveClaudeSonnet55ModelIdentity,
   requiresClaudeAdaptiveThinking,
   supportsClaudeAdaptiveThinking,
-  usesClaudeFable5MessagesContract,
   usesClaudeStreamingRefusalContract,
 } from "./anthropic-model-contract.js";
 import { ANTHROPIC_SERVER_SIDE_FALLBACKS } from "./anthropic-server-fallback.js";
@@ -374,23 +373,6 @@ export const streamSimpleAnthropic: StreamFunction<
   } satisfies AnthropicCompactionOptions);
 };
 
-/**
- * Server-side refusal fallback is a first-party Claude API beta: proxies and
- * Bedrock/Vertex/Foundry reject the `fallbacks` param, and OAuth (Claude Code
- * identity) requests are excluded until the beta is verified there.
- */
-function supportsAnthropicServerSideFallback(model: Model<"anthropic-messages">): boolean {
-  if (
-    (!usesClaudeFable5MessagesContract(model) &&
-      resolveClaudeOpus5ModelIdentity(model) === undefined &&
-      resolveClaudeSonnet55ModelIdentity(model) === undefined) ||
-    model.provider !== "anthropic"
-  ) {
-    return false;
-  }
-  return isDirectAnthropicModel(model);
-}
-
 function createClient(
   model: Model<"anthropic-messages">,
   apiKey: string,
@@ -502,7 +484,8 @@ function createClient(
   }
 
   // API key auth
-  const serverSideFallback = supportsAnthropicServerSideFallback(model);
+  const serverSideFallback =
+    model.provider === "anthropic" && supportsAnthropicServerSideFallback(model);
   const sessionAffinityHeaders: Record<string, string | null> =
     sessionId && getAnthropicCompat(model).sendSessionAffinityHeaders
       ? { "x-session-affinity": sessionId }

@@ -14,10 +14,7 @@ import {
   buildAnthropicClaudeCodeIdentity,
   prepareClaudeNoPrefillRequestContext,
   requiresClaudeAdaptiveThinking,
-  resolveClaudeOpus5ModelIdentity,
-  resolveClaudeSonnet55ModelIdentity,
   supportsClaudeAdaptiveThinking,
-  usesClaudeFable5MessagesContract,
   usesClaudeStreamingRefusalContract,
 } from "../providers/anthropic-model-contract.js";
 import { ANTHROPIC_SERVER_SIDE_FALLBACKS } from "../providers/anthropic-server-fallback.js";
@@ -45,6 +42,7 @@ import {
   isDirectAnthropicModel,
   resolveAnthropicRequestBetaHeader,
   resolveAnthropicCacheOptions,
+  supportsAnthropicServerSideFallback,
 } from "./anthropic-payload-policy.js";
 import { consumeAnthropicStream, type AnthropicStreamBlock } from "./anthropic-stream-reducer.js";
 import {
@@ -75,10 +73,7 @@ const ANTHROPIC_MESSAGES_ERROR_BODY_READ_IDLE_TIMEOUT_MS = 10_000;
 // Mirror the fetch sanitizer cap here because compatible routes such as Kimi
 // bypass that layer; without a parser-local guard, partial frames grow forever.
 const ANTHROPIC_MESSAGES_SSE_PENDING_BUFFER_MAX_CHARS = 16 * 1024 * 1024;
-type AnthropicTransportModel = Model<"anthropic-messages"> & {
-  headers?: Record<string, string>;
-  provider: string;
-};
+type AnthropicTransportModel = Model<"anthropic-messages">;
 
 function resolveAnthropicRequestModelId(model: AnthropicTransportModel): string {
   if (isDirectAnthropicModel(model) && /^anthropic\//i.test(model.id)) {
@@ -91,20 +86,6 @@ const EMPTY_ANTHROPIC_MESSAGES_FALLBACK_TEXT = ".";
 
 function isKimiAnthropicProvider(provider: string | undefined): boolean {
   return /^kimi(?:-|$)/.test(normalizeLowercaseStringOrEmpty(provider ?? ""));
-}
-
-/**
- * Server-side refusal fallback is a first-party Claude API beta: proxies and
- * Bedrock/Vertex/Foundry reject the `fallbacks` param, and OAuth (Claude Code
- * identity) requests are excluded until the beta is verified there.
- */
-function useAnthropicServerSideFallback(model: AnthropicTransportModel): boolean {
-  return (
-    (usesClaudeFable5MessagesContract(model) ||
-      resolveClaudeOpus5ModelIdentity(model) !== undefined ||
-      resolveClaudeSonnet55ModelIdentity(model) !== undefined) &&
-    isDirectAnthropicModel(model)
-  );
 }
 
 function supportsReasoningContentReplay(
@@ -507,7 +488,7 @@ async function buildAnthropicParams(
   // Fable 5, Opus 5, and Sonnet 5.5 safety classifiers can decline benign-adjacent work.
   // Anthropic owns the per-category fallback recommendation so routing can
   // evolve without a client release.
-  if (!isOAuthToken && useAnthropicServerSideFallback(model)) {
+  if (!isOAuthToken && supportsAnthropicServerSideFallback(model)) {
     params.fallbacks = ANTHROPIC_SERVER_SIDE_FALLBACKS;
   }
   const system = buildAnthropicSystemBlocks(
