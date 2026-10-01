@@ -175,6 +175,14 @@ export async function applyClawUpdatePlan(
   if (!currentInstall) {
     throw new ClawUpdateMutationError("update_changed", "The Claw install record disappeared.");
   }
+  const adoptedAgentConfigDigest =
+    currentInstall.agentOrigin === "adopted"
+      ? fresh.actions.find((action) => action.kind === "agent")?.desiredDigest
+      : undefined;
+  const installPersistenceOptions = {
+    ...options,
+    ...(adoptedAgentConfigDigest ? { agentConfigDigest: adoptedAgentConfigDigest } : {}),
+  };
   const partialMutation = (
     message: string,
     errorOptions?: ErrorOptions,
@@ -511,7 +519,7 @@ export async function applyClawUpdatePlan(
     if (error instanceof ClawCronUpdateError && error.partial) {
       try {
         persistInstall(targetAddPlan, {
-          ...options,
+          ...installPersistenceOptions,
           expectedClaw: fresh.currentClaw,
           status: "partial",
         });
@@ -535,7 +543,7 @@ export async function applyClawUpdatePlan(
   let installRecord: PersistedClawInstall;
   try {
     installRecord = persistInstall(targetAddPlan, {
-      ...options,
+      ...installPersistenceOptions,
       expectedClaw: fresh.currentClaw,
     });
   } catch (error) {
