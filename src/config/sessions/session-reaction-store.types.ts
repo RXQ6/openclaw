@@ -6,3 +6,18 @@ export type StoredMessageReactionSummary = {
   count: number;
   identities: Array<{ id: string; label?: string }>;
 };
+
+export type SetSessionReactionParams = {
+  messageId: string;
+  emoji: string;
+  identityId: string;
+  identityLabel?: string;
+  remove?: boolean;
+  expectedSessionId: string;
+};
+
+/** `changed` is false for an add that already exists or a remove with nothing to remove. */
+export type SessionReactionWrite = {
+  reactions: StoredMessageReactionSummary[];
+  changed: boolean;
+};

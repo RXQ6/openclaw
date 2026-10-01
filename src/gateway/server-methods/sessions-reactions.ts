@@ -16,7 +16,7 @@ import {
   resolveMessageActionDiscoveryForPlugin,
 } from "../../channels/plugins/message-action-discovery.js";
 import {
-  setSessionReaction,
+  setSessionReactionAsync,
   SessionReactionLimitError,
   SessionReactionMessageMissingError,
 } from "../../config/sessions/session-reaction-store.js";
@@ -431,13 +431,14 @@ export const sessionReactionHandlers: GatewayRequestHandlers = {
       let write: { reactions: MessageReactionSummary[]; changed: boolean };
       try {
         assertCurrent();
-        write = setSessionReaction(scope, {
+        write = await setSessionReactionAsync(scope, {
           messageId: params.messageId,
           emoji: params.emoji,
           identityId: actor.id,
           identityLabel: actor.label,
           remove: params.remove,
           expectedSessionId: target.entry.sessionId,
+          assertCurrent,
         });
         assertCurrent();
       } catch (error) {
