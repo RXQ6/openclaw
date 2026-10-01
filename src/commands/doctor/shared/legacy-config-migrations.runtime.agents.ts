@@ -950,10 +950,9 @@ export const LEGACY_CONFIG_MIGRATIONS_RUNTIME_AGENTS: LegacyConfigMigrationSpec[
               ? undefined
               : inheritedScope;
         if (canonicalScope === undefined) {
-          sandbox.scope = sandbox.perSession ? "session" : "shared";
-          changes.push(
-            `Moved ${path}.sandbox.perSession → ${path}.sandbox.scope (${sandbox.scope}).`,
-          );
+          const scope = sandbox.perSession ? "session" : "shared";
+          sandbox.scope = scope;
+          changes.push(`Moved ${path}.sandbox.perSession → ${path}.sandbox.scope (${scope}).`);
         } else {
           changes.push(`Removed ${path}.sandbox.perSession (canonical sandbox.scope already set).`);
         }
