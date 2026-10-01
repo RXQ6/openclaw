@@ -33,17 +33,20 @@ export function collectControlUiBootAssets(
   const routes = { chat: new Set(initial), new: new Set(initial) };
   const login = new Set(initial);
   for (const chunk of chunks) {
-    const owner = chunk.facadeModuleId ? controlUiBootEntryRoute(chunk.facadeModuleId) : undefined;
+    // Optimized dynamic imports can live inside a shared chunk without a facade.
+    const entries = chunk.facadeModuleId ? [chunk.facadeModuleId] : Object.keys(chunk.modules);
     // Forgetting local sign-in or rejecting cached admission must show the real
     // gate offline, not fail while downloading its optional component.
-    if (
-      chunk.facadeModuleId &&
-      controlUiBootManifestKey(chunk.facadeModuleId) === "ui/src/components/login-gate.ts"
-    ) {
+    if (entries.some((id) => controlUiBootManifestKey(id) === "ui/src/components/login-gate.ts")) {
       collect(chunk.fileName, login);
     }
     for (const route of ["chat", "new"] as const) {
-      if (owner === "shared" || owner === route) {
+      if (
+        entries.some((id) => {
+          const owner = controlUiBootEntryRoute(id);
+          return owner === "shared" || owner === route;
+        })
+      ) {
         collect(chunk.fileName, routes[route]);
       }
     }
