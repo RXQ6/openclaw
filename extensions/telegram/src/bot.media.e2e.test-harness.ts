@@ -13,7 +13,11 @@ import {
 } from "openclaw/plugin-sdk/plugin-test-runtime";
 import { finalizeInboundContext, resetInboundDedupe } from "openclaw/plugin-sdk/reply-runtime";
 import type { GetReplyOptions, MsgContext } from "openclaw/plugin-sdk/reply-runtime";
-import { useSessionStoreTempDirs } from "openclaw/plugin-sdk/sqlite-runtime-testing";
+import {
+  closeOpenClawAgentDatabasesAsync,
+  closeOpenClawStateDatabaseAsync,
+  useSessionStoreTempDirs,
+} from "openclaw/plugin-sdk/sqlite-runtime-testing";
 import { afterAll, afterEach, beforeEach, vi, type Mock } from "vitest";
 import type { TelegramBotDeps } from "./bot-deps.js";
 import { runTelegramChannelInboundEventWithHarness } from "./bot.test-helpers.js";
@@ -256,10 +260,16 @@ beforeEach(() => {
   resetReadRemoteMediaBufferMock();
 });
 
-afterEach(() => {
+afterEach(async () => {
+  const caseRoot = mediaHarnessStoreRoot;
   mediaHarnessStoreRoot = undefined;
   resetPluginRuntimeStateForTest();
-  resetPluginStateStoreForTests({ closeDatabase: false });
+  // Album timing is wall-clock sensitive; retire this case's Workers before the next case.
+  if (caseRoot) {
+    await closeOpenClawAgentDatabasesAsync(caseRoot);
+  }
+  await closeOpenClawStateDatabaseAsync();
+  resetPluginStateStoreForTests();
   if (originalStateDir === undefined) {
     delete process.env.OPENCLAW_STATE_DIR;
   } else {
