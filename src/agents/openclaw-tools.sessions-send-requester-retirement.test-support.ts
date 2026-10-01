@@ -179,15 +179,15 @@ export function registerSessionsSendRequesterRetirementTests({
                 owner,
                 {
                   ...options,
-                  onCommitted: () => {
+                  onCommitted: (committedRunIds) => {
                     if (
                       retirement === "before publication" &&
                       !requesterRetired &&
-                      runIds.includes(runId)
+                      committedRunIds.includes(runId)
                     ) {
                       retireRequester();
                     }
-                    options.onCommitted?.();
+                    options.onCommitted?.(committedRunIds);
                   },
                 },
                 ...runIds,
