@@ -9434,6 +9434,16 @@ public struct ModelsProbeTargetResult: Codable, Sendable {
     }
 }
 
+public struct NodeCommandFeaturesPayload: Codable, Sendable {
+    public let features: [String: AnyCodable]
+
+    public init(
+        features: [String: AnyCodable])
+    {
+        self.features = features
+    }
+}
+
 public struct NodeDescribeParams: Codable, Sendable {
     public let nodeid: String
 

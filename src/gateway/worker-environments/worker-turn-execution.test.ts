@@ -303,122 +303,141 @@ describe("worker turn execution", () => {
     },
   );
 
-  it("settles the committed terminal result when execution is cancelled during hydration", async () => {
-    await seedActivePlacement();
-    const abort = new AbortController();
-    const revoke = vi.fn(async () => {});
-    const github = vi.spyOn(workerGitHub, "prepareWorkerGitHubBindingGrant").mockResolvedValue({
-      binding: { token: "synthetic-token", login: "fixture", branch: "fixture" },
-      revoke,
-    });
-    const input = turn("terminal-hydration");
-    const entered = createDeferred();
-    const release = createDeferred();
-    const open = SessionManager.openAsync.bind(SessionManager);
-    let reads = 0;
-    const hydration = vi.spyOn(SessionManager, "openAsync").mockImplementation(async (...args) => {
-      const manager = await open(...args);
-      if (++reads === 2) {
-        entered.resolve();
-        await release.promise;
+  it.each(["cancel", "revoke failure"] as const)(
+    "settles the committed terminal result after %s during finalization",
+    async (failure) => {
+      await seedActivePlacement();
+      const abort = new AbortController();
+      const revoke = vi.fn(async () => {});
+      const grantAbort = new AbortController();
+      if (failure === "revoke failure") {
+        revoke.mockImplementationOnce(async () => {
+          grantAbort.abort();
+          throw new Error("synthetic remote revoke failure");
+        });
       }
-      return manager;
-    });
-    const launchTurn = vi.fn<NonNullable<WorkerTunnelHandle["launchTurn"]>>(async (request) => {
-      request.onDispatchReady?.();
-      const leafId = openSessionManager().appendMessage(
-        makeAgentAssistantMessage({
-          content: [{ type: "text", text: "Committed reply 🦞" }],
-          timestamp: 2,
-        }),
-      );
-      createWorkerSessionPlacementGate(placements).updateAckCursors({
-        claim: request.turnClaim,
-        transcriptSeq: 2,
-        liveSeq: 1,
+      const github = vi.spyOn(workerGitHub, "prepareWorkerGitHubBindingGrant").mockResolvedValue({
+        binding: { token: "synthetic-token", login: "fixture", branch: "fixture" },
+        signal: grantAbort.signal,
+        revoke,
       });
-      return {
-        code: 0,
-        signal: null,
-        killed: false,
-        termination: "exit",
-        stderr: "",
-        stdout: JSON.stringify({
-          status: "completed",
-          transcriptLeafId: leafId,
-          transcriptNextSeq: 3,
-        }),
-      };
-    });
-    const tunnel: WorkerTunnelHandle = {
-      environmentId: ENVIRONMENT_ID,
-      ownerEpoch: OWNER_EPOCH,
-      launchTurn,
-      measureLaunchTurn,
-      readLaunchToolNames,
-      runWorkspaceCommand: vi.fn(),
-      syncWorkspace: vi.fn(),
-      stop: vi.fn(),
-      quiesceWorkspace: async () => ({ assertActive: async () => {}, resume: async () => {} }),
-      reconcileWorkspace: async (request) => {
-        expect(revoke).toHaveBeenCalled();
-        assert(request.source.kind === "local", "expected local workspace");
-        await request.source.journal.commit(MANIFEST_REF);
+      const input = turn("terminal-hydration");
+      const entered = createDeferred();
+      const release = createDeferred();
+      const open = SessionManager.openAsync.bind(SessionManager);
+      let reads = 0;
+      const hydration = vi
+        .spyOn(SessionManager, "openAsync")
+        .mockImplementation(async (...args) => {
+          const manager = await open(...args);
+          if (++reads === 2) {
+            entered.resolve();
+            await release.promise;
+          }
+          return manager;
+        });
+      const launchTurn = vi.fn<NonNullable<WorkerTunnelHandle["launchTurn"]>>(async (request) => {
+        request.onDispatchReady?.();
+        const leafId = openSessionManager().appendMessage(
+          makeAgentAssistantMessage({
+            content: [{ type: "text", text: "Committed reply 🦞" }],
+            timestamp: 2,
+          }),
+        );
+        createWorkerSessionPlacementGate(placements).updateAckCursors({
+          claim: request.turnClaim,
+          transcriptSeq: 2,
+          liveSeq: 1,
+        });
         return {
-          manifestRef: MANIFEST_REF,
-          changed: false,
-          verifyStable: async () => {},
-          verifyLocalStable: async () => {},
-          publishStagedResult: async () => {},
-          discardPreparedStagedResult: async () => {},
+          code: 0,
+          signal: null,
+          killed: false,
+          termination: "exit",
+          stderr: "",
+          stdout: JSON.stringify({
+            status: "completed",
+            transcriptLeafId: leafId,
+            transcriptNextSeq: 3,
+          }),
         };
-      },
-    };
-    const provider = createWorkerSessionTurnPlacementProvider({
-      reconcileActivePlacement: async () => {},
-      placements,
-      environments: {
-        ...unusedEnvironments(),
-        get: attachedEnvironment,
-        acquireTurnCredential: async () => credential(),
-        acknowledgeCredentialDelivery: async () => true,
-        startTunnel: async () => tunnel,
-      },
-    });
-    const runLocal = vi.fn();
-    const operation = provider.executeTurn(
-      { ...sessionTarget, runId: input.runId },
-      { ...input, abortSignal: abort.signal },
-      runLocal,
-    );
-    const settled = operation.then(
-      (value) => ({ value }),
-      (error: unknown) => ({ error }),
-    );
-    try {
-      expect(await Promise.race([entered.promise.then(() => "hydrated"), settled])).toBe(
-        "hydrated",
+      });
+      const tunnel: WorkerTunnelHandle = {
+        environmentId: ENVIRONMENT_ID,
+        ownerEpoch: OWNER_EPOCH,
+        launchTurn,
+        measureLaunchTurn,
+        readLaunchToolNames,
+        runWorkspaceCommand: vi.fn(),
+        syncWorkspace: vi.fn(),
+        stop: vi.fn(),
+        quiesceWorkspace: async () => ({ assertActive: async () => {}, resume: async () => {} }),
+        reconcileWorkspace: async (request) => {
+          expect(revoke).toHaveBeenCalled();
+          assert(request.source.kind === "local", "expected local workspace");
+          await request.source.journal.commit(MANIFEST_REF);
+          return {
+            manifestRef: MANIFEST_REF,
+            changed: false,
+            verifyStable: async () => {},
+            verifyLocalStable: async () => {},
+            publishStagedResult: async () => {},
+            discardPreparedStagedResult: async () => {},
+          };
+        },
+      };
+      const provider = createWorkerSessionTurnPlacementProvider({
+        reconcileActivePlacement: async () => {},
+        placements,
+        environments: {
+          ...unusedEnvironments(),
+          get: attachedEnvironment,
+          acquireTurnCredential: async () => credential(),
+          acknowledgeCredentialDelivery: async () => true,
+          startTunnel: async () => tunnel,
+        },
+      });
+      const runLocal = vi.fn();
+      const operation = provider.executeTurn(
+        { ...sessionTarget, runId: input.runId },
+        { ...input, abortSignal: abort.signal },
+        runLocal,
       );
-      const committed = openSessionManager().getPersistedEntries();
-      const committedRows = readWorkerTurnTranscriptStorageRows();
-      expect(placements.listPendingWorkspaceResults()).toHaveLength(1);
-      abort.abort(new Error("cancel after terminal acknowledgement"));
-      release.resolve();
-      expect(await operation).toMatchObject({ payloads: [{ text: "Committed reply 🦞" }] });
-      expect(openSessionManager().getPersistedEntries()).toEqual(committed);
-      expect(readWorkerTurnTranscriptStorageRows()).toEqual(committedRows);
-      expect(placements.listPendingWorkspaceResults()).toEqual([]);
-      expect(placements.get(SESSION_ID)?.turnClaim).toBeNull();
-      expect(launchTurn).toHaveBeenCalledOnce();
-      expect(runLocal).not.toHaveBeenCalled();
-    } finally {
-      release.resolve();
-      await settled;
-      hydration.mockRestore();
-      github.mockRestore();
-      input.preparedRunAdmission.close();
-    }
-  });
+      const settled = operation.then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error }),
+      );
+      try {
+        expect(await Promise.race([entered.promise.then(() => "hydrated"), settled])).toBe(
+          "hydrated",
+        );
+        const committed = openSessionManager().getPersistedEntries();
+        const committedRows = readWorkerTurnTranscriptStorageRows();
+        expect(placements.listPendingWorkspaceResults()).toHaveLength(1);
+        if (failure === "cancel") {
+          abort.abort(new Error("cancel after terminal acknowledgement"));
+        }
+        release.resolve();
+        expect(await operation).toMatchObject({ payloads: [{ text: "Committed reply 🦞" }] });
+        if (failure === "revoke failure") {
+          expect(revoke).toHaveBeenCalledTimes(2);
+          expect(grantAbort.signal.aborted).toBe(true);
+        }
+        expect(openSessionManager().getPersistedEntries()).toEqual(committed);
+        expect(readWorkerTurnTranscriptStorageRows()).toEqual(committedRows);
+        expect(placements.listPendingWorkspaceResults()).toEqual([]);
+        expect(placements.get(SESSION_ID)?.turnClaim).toBeNull();
+        expect(launchTurn).toHaveBeenCalledOnce();
+        expect(runLocal).not.toHaveBeenCalled();
+      } finally {
+        release.resolve();
+        await settled;
+        hydration.mockRestore();
+        github.mockRestore();
+        input.preparedRunAdmission.close();
+      }
+    },
+  );
 
   it.each(["current", "cancel", "claim", "session"] as const)(
     "revalidates %s authority after node context preparation before measuring a launch",

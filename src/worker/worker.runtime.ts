@@ -153,9 +153,45 @@ export async function runWorkerDescriptor(
     return { ready, settled: Promise.allSettled(operations) };
   }
   let runtimePreparation: ReturnType<typeof prepareRuntime> | undefined;
+  let githubGeneration: number | undefined;
+  let githubRefresh: Awaited<
+    ReturnType<typeof import("./github-binding.runtime.js").prepareWorkerGitHubEnvironment>
+  >;
   const connection = createWorkerConnection({
     endpoint: descriptor.connectionEndpoint,
     connectParams: buildWorkerConnectParams(descriptor),
+    heartbeatParams: () => (githubGeneration === undefined ? {} : { githubGeneration }),
+    onHeartbeat: async (result, assertCurrent) => {
+      if (
+        resultFenceAcked ||
+        !result.github ||
+        !githubRefresh ||
+        result.github.generation <= (githubGeneration ?? 0)
+      ) {
+        return;
+      }
+      const retired = new Error("Worker GitHub refresh retired after terminal acknowledgment");
+      const assertRefreshCurrent = () => {
+        assertCurrent();
+        if (resultFenceAcked) {
+          throw retired;
+        }
+      };
+      try {
+        await githubRefresh.refresh(result.github, assertRefreshCurrent);
+      } catch (error) {
+        // Terminal retirement stops credential publication without failing accepted work.
+        assertCurrent();
+        if (error === retired) {
+          return;
+        }
+        throw error;
+      }
+      assertCurrent();
+      if (!resultFenceAcked) {
+        githubGeneration = result.github.generation;
+      }
+    },
     onAdmissionRequestSent: () => {
       if (!abortController.signal.aborted) {
         runtimePreparation ??= prepareRuntime();
@@ -247,6 +283,10 @@ export async function runWorkerDescriptor(
           }),
         )
       : undefined;
+    githubRefresh = github;
+    if (github) {
+      githubGeneration = 0;
+    }
     try {
       turnStarted = true;
       await runWorkerEmbeddedTurn({
@@ -298,6 +338,7 @@ export async function runWorkerDescriptor(
           emitTerminal: async (event) => {
             await live.emitTerminal(descriptor.assignment.runId, event);
             resultFenceAcked = true;
+            githubGeneration = undefined;
           },
         },
         gatewayTools: connection,
@@ -340,6 +381,7 @@ export async function runWorkerDescriptor(
     if (forcedStopTimer) {
       clearTimeout(forcedStopTimer);
     }
+    githubRefresh = undefined;
     unsubscribeState();
     options.signal?.removeEventListener("abort", abortFromCaller);
     inference.dispose();
