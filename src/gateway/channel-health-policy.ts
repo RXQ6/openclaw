@@ -54,6 +54,18 @@ type ChannelRestartReason =
   | "disconnected"
   | "ingress-unavailable";
 
+/** The restart owner has another attempt scheduled; this is not exhausted recovery. */
+export function isChannelHealthRestartHandoff(
+  snapshot: Pick<ChannelHealthSnapshot, "restartPending" | "running">,
+  reason: ChannelHealthEvaluation["reason"],
+): boolean {
+  return (
+    (reason === "not-running" || reason === "ingress-unavailable") &&
+    snapshot.restartPending === true &&
+    snapshot.running !== true
+  );
+}
+
 function isManagedAccount(snapshot: ChannelHealthSnapshot): boolean {
   return snapshot.enabled !== false && snapshot.configured !== false && snapshot.linked !== false;
 }
