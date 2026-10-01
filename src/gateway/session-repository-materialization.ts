@@ -1,4 +1,5 @@
 import os from "node:os";
+import { resolveConfiguredGitHubHost } from "../agents/github-host.js";
 import { patchSessionEntryCore } from "../config/sessions/session-accessor.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { gitNullConfigPath } from "../infra/git-exec.js";
@@ -50,9 +51,12 @@ export async function materializeSessionRepositoryWorkspaceOnGateway(params: {
   ) {
     throw new Error("Repository workspace has no pinned source; retry its cloud preparation");
   }
-  const remote = parseGitHubRemoteUrl(repository.url);
+  const githubHost = resolveConfiguredGitHubHost(params.cfg);
+  const remote = parseGitHubRemoteUrl(repository.url, githubHost);
   if (!remote) {
-    throw new Error("Repository workspace has no GitHub source");
+    throw new Error(
+      `Repository workspace does not match the configured GitHub host (${githubHost}); restore its GitHub configuration before retrying the Gateway move`,
+    );
   }
   const branch = () =>
     readRepositoryGitHubPublicationBranch({

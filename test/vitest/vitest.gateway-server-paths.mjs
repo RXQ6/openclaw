@@ -11,6 +11,7 @@ export const gatewayPluginTestFiles = [
 
 // Native database consumers retain lifecycle cleanup within each forked process.
 export const gatewayDatabaseWorkerTestFiles = [
+  "src/gateway/worker-environments/prepared-pool-presence-effects.test.ts",
   "src/gateway/approval-fixture.test.ts",
   "src/gateway/board-http.test.ts",
   "src/gateway/board-store.test.ts",
@@ -22,6 +23,7 @@ export const gatewayDatabaseWorkerTestFiles = [
   "src/gateway/config-reload.transcripts.test.ts",
   "src/gateway/control-ui-assistant-media-policy.test.ts",
   "src/gateway/control-ui-session-pr-access.test.ts",
+  "src/gateway/control-ui-session-prs-host.test.ts",
   "src/gateway/control-ui-session-prs-branch.test.ts",
   "src/gateway/control-ui-session-prs-retention.test.ts",
   "src/gateway/control-ui-session-prs-staleness.test.ts",

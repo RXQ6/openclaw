@@ -203,8 +203,11 @@ export function restoreDraftPlacePreferences(params: {
     browser.selectProject({ kind: "remote", project: preferredRemoteProject });
     setFreshWorkspace(false);
     setFolderSelectedByUser(false);
-    if (!repositoryState.baseRef && preferredRemoteProject.defaultBranch) {
-      repositoryState.setBaseRef(preferredRemoteProject.defaultBranch, false);
+    if (
+      (selectingConfiguredRemoteProject && !restoringConfiguredRemoteProject) ||
+      (!repositoryState.baseRef && preferredRemoteProject.defaultBranch)
+    ) {
+      repositoryState.setBaseRef(preferredRemoteProject.defaultBranch ?? "", false);
     }
     state.preferredRemoteProjectRestore = null;
     changed = true;

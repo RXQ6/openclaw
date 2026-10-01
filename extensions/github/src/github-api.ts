@@ -61,6 +61,8 @@ const GITHUB_QUOTA_RETRY_MS = 60_000;
 // Normal Gateway callers share global fetch; injected transports own separate
 // API environments and release their cooldown state with that transport.
 const transportCooldowns = new WeakMap<typeof fetch, Map<string, ControlUiGitHubError>>();
+// Body-reported quotas belong to the admitted request even after API configuration changes.
+const responseCredentialScopes = new WeakMap<Response, string>();
 
 export class ControlUiGitHubError extends Error {
   private readonly retryAtMs?: number;
@@ -340,6 +342,7 @@ export async function fetchGitHubApi(
       throw retained;
     }
     if (!isGitHubApiRedirect(response.status)) {
+      responseCredentialScopes.set(response, credentialScope);
       return response;
     }
 
@@ -434,6 +437,9 @@ export async function readGitHubGraphQLResponse(
   token: string,
   maxBytes?: number,
 ): Promise<unknown> {
+  const credentialScope =
+    responseCredentialScopes.get(response) ??
+    `${DEFAULT_GITHUB_API_BASE_URL}:${githubApiCredentialCacheScope(token)}`;
   const value =
     response.status === 403 && !isGitHubRateLimitResponse(response)
       ? await readGitHubJsonBody(response, maxBytes)
@@ -450,7 +456,7 @@ export async function readGitHubGraphQLResponse(
     ) {
       throw retainGitHubCooldown(
         fetchImpl,
-        githubApiCredentialCacheScope(token),
+        credentialScope,
         "graphql",
         response,
         githubResponseError(response, true),

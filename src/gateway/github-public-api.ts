@@ -1,4 +1,7 @@
-import { resolveConfiguredGitHubHost } from "../agents/github-host.js";
+import {
+  resolveConfiguredGitHubApiBaseUrl,
+  resolveConfiguredGitHubHost,
+} from "../agents/github-host.js";
 import { getRuntimeConfigSnapshot } from "../config/runtime-snapshot.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
@@ -58,9 +61,13 @@ type GitHubPublicApi = {
     retryable: boolean;
     retryAfterMs?: number;
   };
-  resolveGitHubApiCredentialScope: (env?: NodeJS.ProcessEnv) => {
+  resolveGitHubApiCredentialScope: (
+    env?: NodeJS.ProcessEnv,
+    host?: string,
+  ) => {
     token: string | undefined;
     cacheScope: string;
+    apiBaseUrl: string;
   };
   githubApiCredentialCacheScope: (token: string | undefined) => string;
   isRecord: (value: unknown) => value is Record<string, unknown>;
@@ -176,11 +183,25 @@ export const gitHubPublicApi = createLazyFacadeObjectValue<GitHubPublicApi>(() =
   });
   const configure = () =>
     library.configureGitHubApi(getRuntimeConfigSnapshot()?.gateway?.github?.apiBaseUrl);
-  const resolveScope = (env: NodeJS.ProcessEnv = process.env) => {
-    const token = githubApiToken(env);
+  const resolveScope = (env: NodeJS.ProcessEnv = process.env, host?: string) => {
+    const config = getRuntimeConfigSnapshot();
+    const configuredHost = resolveConfiguredGitHubHost(config);
+    const selectedHost = host ?? configuredHost;
+    if (selectedHost !== configuredHost && selectedHost !== "github.com") {
+      throw new library.ControlUiGitHubError(
+        409,
+        "Repository GitHub host changed; restore its configuration and retry",
+      );
+    }
+    const apiBaseUrl =
+      selectedHost === configuredHost
+        ? resolveConfiguredGitHubApiBaseUrl(config)
+        : "https://api.github.com";
+    const token = selectedHost === configuredHost ? githubApiToken(env, config) : undefined;
     return {
       token,
-      cacheScope: `${resolveConfiguredGitHubHost(getRuntimeConfigSnapshot())}:${library.githubApiCredentialCacheScope(token)}`,
+      apiBaseUrl,
+      cacheScope: `${selectedHost}:${apiBaseUrl}:${library.githubApiCredentialCacheScope(token)}`,
     };
   };
   const resolvePublicScope = () =>

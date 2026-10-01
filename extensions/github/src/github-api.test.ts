@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.resetModules();
 });
 
@@ -47,6 +48,47 @@ describe("GitHub API base URL", () => {
     await expect(
       fetchGitHubApi("https://ghe.example.test/settings", fetchImpl, "synthetic-token"),
     ).rejects.toThrow("Invalid GitHub API URL");
+  });
+
+  it("retains GraphQL quota on its admitted API when configuration changes before body parsing", async () => {
+    const api = await import("./github-api.js");
+    vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
+    const enterpriseBase = "https://ghe.example.test/api/v3";
+    const token = "synthetic-quota-token";
+    api.configureGitHubApi(enterpriseBase);
+    const fetchImpl = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ errors: [{ type: "RATE_LIMITED" }] }), { status: 403 }),
+      )
+      .mockImplementation(async () => new Response("{}"));
+    const response = await api.fetchGitHubApi(
+      api.GITHUB_GRAPHQL_URL,
+      fetchImpl,
+      token,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { query: "query { viewer { login } }", variables: {} },
+    );
+    api.configureGitHubApi(undefined);
+    await expect(api.readGitHubGraphQLResponse(response, fetchImpl, token)).rejects.toMatchObject({
+      statusCode: 429,
+      retryAfterMs: 60_000,
+    });
+    await expect(
+      api.fetchGitHubApi("https://api.github.com/repos/acme/repo", fetchImpl, token),
+    ).resolves.toBeInstanceOf(Response);
+    api.configureGitHubApi(enterpriseBase);
+    await expect(
+      api.fetchGitHubApi(`${enterpriseBase}/repos/acme/repo`, fetchImpl, token),
+    ).rejects.toMatchObject({ statusCode: 429, retryAfterMs: 60_000 });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    await expect(
+      api.fetchGitHubApi(`${enterpriseBase}/repos/acme/repo`, fetchImpl, "synthetic-rotated-token"),
+    ).resolves.toBeInstanceOf(Response);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
 
   it("keeps a configured HTTPS API port on Enterprise requests", async () => {
