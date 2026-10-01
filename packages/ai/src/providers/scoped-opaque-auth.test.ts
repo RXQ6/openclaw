@@ -1,5 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { configureAiTransportHost, getDefaultAiTransportHost } from "../host.js";
+import {
+  configureAiTransportHost,
+  getDefaultAiTransportHost,
+  type AiTransportHost,
+} from "../host.js";
 import { createNodeLlmRuntime } from "../stream.js";
 import type { Model } from "../types.js";
 import { registerBuiltInApiProviders } from "./register-builtins.js";
@@ -70,8 +74,8 @@ function model(api: string, provider: string): Model {
     maxTokens: 1024,
   };
 }
-function runtime() {
-  const value = createNodeLlmRuntime();
+function runtime(transportHost: Partial<AiTransportHost> = {}) {
+  const value = createNodeLlmRuntime(undefined, transportHost);
   registerBuiltInApiProviders(value.registry);
   return value;
 }
@@ -96,6 +100,28 @@ describe("scoped native auth at provider boundaries", () => {
         httpOptions: { headers: { "X-Provider-Token": opaque } },
       });
       expect(gatewayResolve).not.toHaveBeenCalled();
+      expect(gatewayFetch).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["google-generative-ai", "google-vertex"])(
+    "retains each runtime's managed fetch in the %s SDK",
+    async (api) => {
+      const fetchers = [vi.fn(), vi.fn()];
+      for (const fetcher of fetchers) {
+        const result = await runtime({
+          buildModelFetch: () => fetcher as typeof fetch,
+          requiresManagedTransport: () => true,
+        }).completeSimple(
+          model(api, api === "google-vertex" ? "google-vertex" : "google"),
+          context,
+          { apiKey: opaque },
+        );
+        expect(result.errorMessage).toContain("fixture constructor reached");
+      }
+
+      expect(captured.google).toHaveLength(2);
+      expect(captured.google[0]).toMatchObject({ httpOptions: { fetch: fetchers[0] } });
+      expect(captured.google[1]).toMatchObject({ httpOptions: { fetch: fetchers[1] } });
       expect(gatewayFetch).not.toHaveBeenCalled();
     },
   );

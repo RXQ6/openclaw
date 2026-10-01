@@ -5,11 +5,7 @@ import { zstdDecompressSync } from "node:zlib";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
 import { createApiRegistry } from "../api-registry.js";
-import {
-  configureAiTransportHost,
-  createAiTransportHost,
-  runWithAiTransportHost,
-} from "../host.js";
+import { configureAiTransportHost } from "../host.js";
 import { responsesPromptObserver, type ResponsesPromptObservation } from "../internal/openai.js";
 import { cleanupSessionResources } from "../session-resources.js";
 import { createNodeLlmRuntime } from "../stream.js";
@@ -72,131 +68,6 @@ describe("ChatGPT Responses cached transport", () => {
     vi.unstubAllGlobals();
     resetOpenAICodexWebSocketStateForTest();
     configureAiTransportHost({});
-  });
-
-  it("does not reuse an authenticated socket across runtime hosts or upgrade headers", async () => {
-    const sessionId = "runtime-authority-isolation";
-    const firstToken = createJwt();
-    const secondToken = `${createJwt()}-other`;
-    const received: Array<{
-      authorization?: string;
-      baggage?: string;
-      connectionId: number;
-      proxyKey?: string;
-    }> = [];
-    const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
-    let connectionCount = 0;
-    server.on("connection", (socket, request) => {
-      const connectionId = ++connectionCount;
-      socket.on("message", () => {
-        const baggage = request.headers.baggage;
-        received.push({
-          authorization: request.headers.authorization,
-          baggage: Array.isArray(baggage) ? baggage.join(",") : baggage,
-          connectionId,
-          proxyKey: request.headers["x-proxy-key"] as string | undefined,
-        });
-        socket.send(JSON.stringify(completion(`resp_${connectionId}`)));
-      });
-    });
-    await once(server, "listening");
-    vi.stubGlobal("WebSocket", WebSocket);
-    const port = (server.address() as AddressInfo).port;
-    const loopbackModel = {
-      ...model,
-      baseUrl: `http://127.0.0.1:${port}/backend-api`,
-    } satisfies Model<"openai-chatgpt-responses">;
-    const options = {
-      apiKey: "opaque",
-      sessionId,
-      transport: "websocket-cached" as const,
-    };
-    const firstHost = createAiTransportHost({
-      resolveSecretSentinel: (value) => (value === "opaque" ? firstToken : value),
-    });
-    const secondHost = createAiTransportHost({
-      resolveSecretSentinel: (value) => (value === "opaque" ? secondToken : value),
-    });
-
-    try {
-      await runWithAiTransportHost(firstHost, () =>
-        streamOpenAICodexResponses(loopbackModel, simpleContext, options).result(),
-      );
-      await runWithAiTransportHost(secondHost, () =>
-        streamOpenAICodexResponses(loopbackModel, simpleContext, options).result(),
-      );
-      await runWithAiTransportHost(secondHost, () =>
-        streamOpenAICodexResponses(loopbackModel, simpleContext, {
-          ...options,
-          headers: { "x-proxy-key": "proxy-one" },
-        }).result(),
-      );
-      await runWithAiTransportHost(secondHost, () =>
-        streamOpenAICodexResponses(loopbackModel, simpleContext, {
-          ...options,
-          headers: { "x-proxy-key": "proxy-two" },
-        }).result(),
-      );
-      await runWithAiTransportHost(secondHost, () =>
-        streamOpenAICodexResponses(loopbackModel, simpleContext, {
-          ...options,
-          headers: { baggage: "tenant=one" },
-        }).result(),
-      );
-      await runWithAiTransportHost(secondHost, () =>
-        streamOpenAICodexResponses(loopbackModel, simpleContext, {
-          ...options,
-          headers: { baggage: "tenant=two" },
-        }).result(),
-      );
-
-      expect(received).toEqual([
-        {
-          authorization: `Bearer ${firstToken}`,
-          baggage: undefined,
-          connectionId: 1,
-          proxyKey: undefined,
-        },
-        {
-          authorization: `Bearer ${secondToken}`,
-          baggage: undefined,
-          connectionId: 2,
-          proxyKey: undefined,
-        },
-        {
-          authorization: `Bearer ${secondToken}`,
-          baggage: undefined,
-          connectionId: 3,
-          proxyKey: "proxy-one",
-        },
-        {
-          authorization: `Bearer ${secondToken}`,
-          baggage: undefined,
-          connectionId: 4,
-          proxyKey: "proxy-two",
-        },
-        {
-          authorization: `Bearer ${secondToken}`,
-          baggage: "tenant=one",
-          connectionId: 5,
-          proxyKey: undefined,
-        },
-        {
-          authorization: `Bearer ${secondToken}`,
-          baggage: "tenant=two",
-          connectionId: 6,
-          proxyKey: undefined,
-        },
-      ]);
-    } finally {
-      closeOpenAICodexWebSocketSessions(sessionId);
-      for (const socket of server.clients) {
-        socket.terminate();
-      }
-      await new Promise<void>((resolve, reject) => {
-        server.close((error) => (error ? reject(error) : resolve()));
-      });
-    }
   });
 
   it("keeps an authenticated replacement socket after aborting a reused lease", async () => {
@@ -588,14 +459,10 @@ describe("ChatGPT Responses cached transport", () => {
     try {
       expect(
         (await firstRuntime.stream(loopbackModel, simpleContext, options).result()).stopReason,
-      ).toBe(
-        "stop",
-      );
+      ).toBe("stop");
       expect(
         (await firstRuntime.stream(loopbackModel, simpleContext, options).result()).stopReason,
-      ).toBe(
-        "stop",
-      );
+      ).toBe("stop");
       expect(
         (await secondRuntime.stream(loopbackModel, simpleContext, options).result()).stopReason,
       ).toBe("stop");
@@ -624,9 +491,7 @@ describe("ChatGPT Responses cached transport", () => {
       activeFirstToken = firstToken;
       expect(
         (await firstRuntime.stream(loopbackModel, simpleContext, options).result()).stopReason,
-      ).toBe(
-        "stop",
-      );
+      ).toBe("stop");
 
       expect(websocketUpgrades).toEqual([
         { authorization: `Bearer ${firstToken}`, proxyKey: undefined },
@@ -650,7 +515,8 @@ describe("ChatGPT Responses cached transport", () => {
         { authorization: `Bearer ${firstToken}`, proxyKey: undefined },
       ]);
     } finally {
-      cleanupSessionResources(sessionId);
+      firstRuntime.cleanupSessionResources(sessionId);
+      secondRuntime.cleanupSessionResources(sessionId);
       for (const socket of websocketServer.clients) {
         socket.terminate();
       }

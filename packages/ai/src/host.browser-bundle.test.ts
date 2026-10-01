@@ -57,7 +57,7 @@ it("keeps the default transport host usable in browser bundles", async () => {
   registry.registerApiProvider({
     api: "browser-test",
     // The provider belongs to this test realm, not the browser VM realm.
-    stream: async () => source,
+    stream: () => source,
     streamSimple: () => source,
   });
   const runtime = browserHost.createLlmRuntime(registry);

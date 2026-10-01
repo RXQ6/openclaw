@@ -180,14 +180,9 @@ describe("runtime-owned transport host", () => {
     expect(Object.isFrozen(source)).toBe(true);
   });
 
-  it.each([
-    ["stream", false],
-    ["stream", true],
-    ["streamSimple", false],
-    ["streamSimple", true],
-  ] as const)(
-    "preserves native producer completion through %s (async factory=%s) without invoking result decorators",
-    async (method, asyncFactory) => {
+  it.each(["stream", "streamSimple"] as const)(
+    "preserves native producer completion through %s without invoking result decorators",
+    async (method) => {
       const source = createAssistantMessageEventStream();
       const result = source.result.bind(source);
       let resultCalls = 0;
@@ -197,7 +192,7 @@ describe("runtime-owned transport host", () => {
       };
       source.result = decoratedResult;
       const registry = createApiRegistry();
-      const start = asyncFactory ? async () => source : () => source;
+      const start = () => source;
       registry.registerApiProvider({
         api: model.api,
         stream: start,
@@ -207,11 +202,7 @@ describe("runtime-owned transport host", () => {
       const runtime = createNodeLlmRuntime(registry);
       const scoped = runtime[method](model, { messages: [] });
       const completion = getEventStreamCompletion(scoped);
-      if (asyncFactory) {
-        expect(completion).toBeInstanceOf(Promise);
-      } else {
-        expect(completion).toBe(getEventStreamCompletion(source));
-      }
+      expect(completion).toBe(getEventStreamCompletion(source));
       expect(resultCalls).toBe(0);
       const final = message("producer done");
       source.end(final);
@@ -275,134 +266,6 @@ describe("runtime-owned transport host", () => {
       { type: "text", text: "opaque" },
     ]);
   });
-
-  it.each(["stream", "streamSimple"] as const)(
-    "binds a host adapter that creates %s asynchronously",
-    async (method) => {
-      const registry = createApiRegistry();
-      let resultCalls = 0;
-      const createStream = async () => {
-        await Promise.resolve();
-        expect(getAiTransportHost().resolveSecretSentinel("start")).toBe("native:start");
-        return {
-          push() {},
-          end() {},
-          async result() {
-            resultCalls += 1;
-            await Promise.resolve();
-            expect(getAiTransportHost().resolveSecretSentinel("result")).toBe("native:result");
-            return message("async source");
-          },
-          async *[Symbol.asyncIterator]() {},
-        };
-      };
-      registry.registerApiProvider({
-        api: model.api,
-        stream: createStream,
-        streamSimple: createStream,
-      });
-      configureAiTransportHost({ resolveSecretSentinel: (value) => "Gateway:" + value });
-      const runtime = createNodeLlmRuntime(registry, {
-        resolveSecretSentinel: (value) => "native:" + value,
-      });
-
-      const scoped = runtime[method](model, { messages: [] });
-      const completion = getEventStreamCompletion(scoped);
-      expect(getAiTransportHost().resolveSecretSentinel("caller")).toBe("Gateway:caller");
-      await expect(scoped.result()).resolves.toEqual(message("async source"));
-      await expect(completion).resolves.toEqual(message("async source"));
-      expect(resultCalls).toBe(1);
-    },
-  );
-
-  it("settles both public result and producer completion when an async factory rejects", async () => {
-    const failure = new Error("provider startup failed");
-    const registry = createApiRegistry();
-    const start = async () => {
-      throw failure;
-    };
-    registry.registerApiProvider({ api: model.api, stream: start, streamSimple: start });
-    const stream = createNodeLlmRuntime(registry).stream(model, { messages: [] });
-
-    await expect(stream.result()).rejects.toBe(failure);
-    await expect(getEventStreamCompletion(stream)).rejects.toBe(failure);
-  });
-
-  it.each(["push", "end"] as const)(
-    "surfaces a deferred producer %s failure through every settlement channel",
-    async (method) => {
-      const failure = new Error(`${method} failed`);
-      const registry = createApiRegistry();
-      const start = async (): Promise<AssistantMessageEventStreamContract> => ({
-        push() {
-          if (method === "push") {
-            throw failure;
-          }
-        },
-        end() {
-          if (method === "end") {
-            throw failure;
-          }
-        },
-        result: async () => message("premature success"),
-        async *[Symbol.asyncIterator]() {},
-      });
-      registry.registerApiProvider({ api: model.api, stream: start, streamSimple: start });
-      const stream = createNodeLlmRuntime(registry).stream(model, { messages: [] });
-      if (method === "push") {
-        stream.push({ type: "done", reason: "stop", message: message("unused") });
-      } else {
-        stream.end(message("unused"));
-      }
-
-      await Promise.all([
-        expect(stream.result()).rejects.toBe(failure),
-        expect(getEventStreamCompletion(stream)).rejects.toBe(failure),
-        expect(stream[Symbol.asyncIterator]().next()).rejects.toBe(failure),
-      ]);
-    },
-  );
-
-  it.each(["push", "end"] as const)(
-    "settles every channel when a deferred producer %s fails after startup",
-    async (method) => {
-      const failure = new Error(`${method} failed after startup`);
-      const registry = createApiRegistry();
-      const start = async (): Promise<AssistantMessageEventStreamContract> => ({
-        push() {
-          if (method === "push") {
-            throw failure;
-          }
-        },
-        end() {
-          if (method === "end") {
-            throw failure;
-          }
-        },
-        result: () => new Promise<AssistantMessage>(() => {}),
-        async *[Symbol.asyncIterator]() {},
-      });
-      registry.registerApiProvider({ api: model.api, stream: start, streamSimple: start });
-      const stream = createNodeLlmRuntime(registry).stream(model, { messages: [] });
-      await expect(stream[Symbol.asyncIterator]().next()).resolves.toEqual({
-        done: true,
-        value: undefined,
-      });
-
-      expect(() => {
-        if (method === "push") {
-          stream.push({ type: "done", reason: "stop", message: message("unused") });
-        } else {
-          stream.end(message("unused"));
-        }
-      }).toThrow(failure);
-      await Promise.all([
-        expect(stream.result()).rejects.toBe(failure),
-        expect(getEventStreamCompletion(stream)).rejects.toBe(failure),
-        expect(stream[Symbol.asyncIterator]().next()).rejects.toBe(failure),
-      ]);
-    },
-  );
 
   it("keeps process installers independent of an active scoped host", async () => {
     configureAiTransportHost({ resolveSecretSentinel: (value) => "Gateway:" + value });

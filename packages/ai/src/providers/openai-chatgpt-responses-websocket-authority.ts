@@ -62,25 +62,27 @@ export function matchesCodexWebSocketAuthority(
 }
 
 const MAX_SSE_FALLBACK_AUTHORITIES_PER_SESSION = 8;
-const sseFallbackAuthorities = new Map<string, CodexWebSocketAuthority[]>();
+export type CodexWebSocketSseFallbacks = Map<string, CodexWebSocketAuthority[]>;
 
 export function hasCodexWebSocketSseFallback(
+  fallbacksBySession: CodexWebSocketSseFallbacks,
   sessionId: string | undefined,
   authority: CodexWebSocketAuthority,
 ): boolean {
   return Boolean(
     sessionId &&
-    sseFallbackAuthorities
+    fallbacksBySession
       .get(sessionId)
       ?.some((fallback) => matchesCodexWebSocketAuthority(fallback, authority)),
   );
 }
 
 export function addCodexWebSocketSseFallback(
+  fallbacksBySession: CodexWebSocketSseFallbacks,
   sessionId: string,
   authority: CodexWebSocketAuthority,
 ): void {
-  const fallbacks = sseFallbackAuthorities.get(sessionId) ?? [];
+  const fallbacks = fallbacksBySession.get(sessionId) ?? [];
   if (fallbacks.some((fallback) => matchesCodexWebSocketAuthority(fallback, authority))) {
     return;
   }
@@ -88,15 +90,18 @@ export function addCodexWebSocketSseFallback(
     fallbacks.shift();
   }
   fallbacks.push(authority);
-  if (!sseFallbackAuthorities.has(sessionId)) {
-    sseFallbackAuthorities.set(sessionId, fallbacks);
+  if (!fallbacksBySession.has(sessionId)) {
+    fallbacksBySession.set(sessionId, fallbacks);
   }
 }
 
-export function clearCodexWebSocketSseFallback(sessionId?: string): void {
+export function clearCodexWebSocketSseFallback(
+  fallbacksBySession: CodexWebSocketSseFallbacks,
+  sessionId?: string,
+): void {
   if (sessionId) {
-    sseFallbackAuthorities.delete(sessionId);
+    fallbacksBySession.delete(sessionId);
     return;
   }
-  sseFallbackAuthorities.clear();
+  fallbacksBySession.clear();
 }

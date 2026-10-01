@@ -17,23 +17,25 @@ import {
   supportsScopedAiTransportHosts,
   type AiTransportHost,
 } from "./host.js";
+import { cleanupSessionResources as cleanupRegisteredSessionResources } from "./session-resources.js";
 
 function createRuntime(registry: ApiRegistry, transportHost?: Partial<AiTransportHost>) {
   const explicitHost =
     transportHost === undefined ? undefined : createAiTransportHost(transportHost);
-  const startStream = (
-    start: () => AssistantMessageEventStreamContract,
-  ): AssistantMessageEventStreamContract => {
+  const runWithRuntimeHost = <T>(operation: () => T): T => {
     // A normal runtime uses its current embedding owner, even when invoked from
     // another runtime's callback. Do not capture the default during construction.
     const host = explicitHost ?? getDefaultAiTransportHost();
-    const run = <T>(operation: () => T): T =>
-      runWithAiTransportHost(
-        explicitHost || supportsScopedAiTransportHosts() ? host : getDefaultAiTransportHost(),
-        operation,
-      );
-    const started = run(start);
-    return bindAssistantMessageEventStream(started, run);
+    return runWithAiTransportHost(
+      explicitHost || supportsScopedAiTransportHosts() ? host : getDefaultAiTransportHost(),
+      operation,
+    );
+  };
+  const startStream = (
+    start: () => AssistantMessageEventStreamContract,
+  ): AssistantMessageEventStreamContract => {
+    const started = runWithRuntimeHost(start);
+    return bindAssistantMessageEventStream(started, runWithRuntimeHost);
   };
   function resolveApiProvider(api: Api) {
     const provider = registry.getApiProvider(api);
@@ -77,7 +79,18 @@ function createRuntime(registry: ApiRegistry, transportHost?: Partial<AiTranspor
     return streamSimple(model, context, options).result();
   }
 
-  return { registry, stream, complete, streamSimple, completeSimple };
+  function cleanupSessionResources(sessionId?: string): void {
+    runWithRuntimeHost(() => cleanupRegisteredSessionResources(sessionId));
+  }
+
+  return {
+    registry,
+    stream,
+    complete,
+    streamSimple,
+    completeSimple,
+    cleanupSessionResources,
+  };
 }
 
 /** Creates an isolated LLM runtime backed by the supplied provider registry. */
