@@ -365,6 +365,7 @@ describe("Claw migration planning", () => {
 
   it.each([
     "Authorization: Bearer bearer-token-value-that-must-not-leak",
+    `Authorization: Basic ${Buffer.from("synthetic-user:synthetic-password").toString("base64")}`,
     "session JWT eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signaturepayloadvalue",
     "AWS_SECRET_ACCESS_KEY=0123456789abcdef0123456789abcdef01234567",
     "GITHUB_TOKEN=ghp_0123456789abcdefghijklmnopqrstuv",

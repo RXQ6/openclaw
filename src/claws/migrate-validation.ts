@@ -17,6 +17,7 @@ export function containsPotentialSecret(value: string): boolean {
     ) ||
     /\bAKIA[0-9A-Z]{16}\b/u.test(value) ||
     /\bBearer\s+[A-Za-z0-9._~+/-]{20,}={0,}/iu.test(value) ||
+    /\b(?:proxy-)?authorization["']?\s*[:=]\s*["']?Basic\s+[A-Za-z0-9+/]{4,}={0,2}/iu.test(value) ||
     /\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b/u.test(value) ||
     /(?:^|[^A-Za-z0-9])(?:[A-Za-z0-9]+[_-])*?(?:api[_-]?key|access[_-]?token|client[_-]?secret|password|secret|token)(?:[_-][A-Za-z0-9]+)*\s*[:=]\s*["']?(?!\$\{|\{\{|<|YOUR_|REPLACE_|EXAMPLE)([A-Za-z0-9/+_=-]{16,})/iu.test(
       value,
