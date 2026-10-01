@@ -4,16 +4,11 @@ import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import type { Result } from "@openclaw/normalization-core/result";
 import type { SessionTranscriptInitializationPublication } from "../config/sessions/session-accessor.sqlite-entry-cache.types.js";
 import { formatErrorMessage } from "../infra/errors.js";
-import {
-  createSqliteLifecycleAggregateError,
-  throwSqliteLifecycleErrors,
-} from "../infra/sqlite-lifecycle-errors.js";
+import { createSqliteLifecycleAggregateError } from "../infra/sqlite-lifecycle-errors.js";
 import { assertTransactionUsable } from "../infra/sqlite-transaction.js";
 import {
-  SQLITE_WORKER_CLOSE_RECEIPT,
   SQLITE_WORKER_OPERATION_CLEANUP,
   SQLITE_WORKER_PREPARE_ADMITTED,
-  type SqliteWorkerCloseReceipt,
   type SqliteWorkerCommand,
   type SqliteWorkerPreparedBackend,
 } from "../infra/sqlite-worker-contract.js";
@@ -46,7 +41,7 @@ import {
   openOpenClawAgentDatabase,
   runOpenClawAgentWriteTransaction,
 } from "./openclaw-agent-db.js";
-import { closeAgentDatabaseExecution } from "./openclaw-agent-execution-close.js";
+import { createAgentDatabaseExecutionCloser } from "./openclaw-agent-execution-close.js";
 import type {
   AgentDatabaseExecutionIdentity,
   AgentDatabaseExecutionOpen,
@@ -388,7 +383,6 @@ function openAgentDatabaseBackend(
     admit: (stage, requestAdmission) => admit(stage, undefined, requestAdmission),
   });
   let closed = false;
-  let closeReceipt: SqliteWorkerCloseReceipt | undefined;
   const assertOpen = () => {
     if (closed) {
       throw new Error("Agent database execution owner is closed");
@@ -555,6 +549,10 @@ function openAgentDatabaseBackend(
     throw new Error("Unknown agent database operation");
   };
   return {
+    ...createAgentDatabaseExecutionCloser(() => {
+      closed = true;
+      return { database, identity, closeDomain: () => domain.close(), releaseBorrow, sharedBorrow };
+    }),
     prepare(command) {
       if (command.type === "session.entry.acp") {
         return import("../acp/runtime/session-meta-entry.worker.js").then((module) => {
@@ -690,43 +688,6 @@ function openAgentDatabaseBackend(
       } finally {
         startupJournalRequested = false;
       }
-    },
-    [SQLITE_WORKER_CLOSE_RECEIPT]() {
-      return closeReceipt;
-    },
-    closeAfterFailedOpen() {
-      closed = true;
-      closeReceipt = undefined;
-      closeReceipt = closeAgentDatabaseExecution({
-        database,
-        identity,
-        closeDomain: () => domain.close(),
-        releaseBorrow,
-        releaseSharedBorrow: () => sharedBorrow?.release(),
-      });
-    },
-    async close() {
-      closed = true;
-      closeReceipt = undefined;
-      await database?.walMaintenance.stop();
-      const errors: unknown[] = [];
-      try {
-        closeReceipt = closeAgentDatabaseExecution({
-          database,
-          identity,
-          closeDomain: () => domain.close(),
-          releaseBorrow,
-          releaseSharedBorrow: () => {},
-        });
-      } catch (error) {
-        errors.push(error);
-      }
-      try {
-        await sharedBorrow?.releaseAsync();
-      } catch (error) {
-        errors.push(error);
-      }
-      throwSqliteLifecycleErrors(errors, "Agent database cleanup failed");
     },
   };
 }
