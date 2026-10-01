@@ -1,5 +1,5 @@
 // Creates verified SQLite snapshots, compacting by default.
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import fsSync, { type Stats } from "node:fs";
 import fs from "node:fs/promises";
 import type { FileHandle } from "node:fs/promises";
@@ -18,21 +18,24 @@ import {
 } from "./directory-durability.js";
 import { formatErrorMessage } from "./errors.js";
 import {
-  copyFileHandle,
   hashFileDescriptorSync,
   sameFileMutationFingerprint,
   type FileMutationFingerprint,
 } from "./file-descriptor.js";
 import { openNodeSqliteDatabase } from "./node-sqlite.js";
 import { backupNodeSqliteDatabase } from "./sqlite-backup.js";
+import { copySqliteFile } from "./sqlite-file-copy.js";
 import { assertSqliteIntegrity } from "./sqlite-integrity.js";
 import { createPrivateSqliteTempDirectory } from "./sqlite-private-directory.js";
 import { withPreparedSqliteSnapshot } from "./sqlite-readonly-location-cleanup.js";
 import {
   prepareSqliteReadOnlyLocationInProcess,
-  prepareSqliteReadOnlyLocationSyncInProcess,
+  prepareSqliteReadOnlyCopyInProcess,
 } from "./sqlite-readonly-location.js";
-import { withSqliteSnapshotSource } from "./sqlite-snapshot-source.js";
+import {
+  prepareSqliteReadOnlyLocation,
+  withSqliteSnapshotSource,
+} from "./sqlite-snapshot-source.js";
 import { readSqliteUserVersion } from "./sqlite-user-version.js";
 
 export type SqliteSnapshotValidator = (database: DatabaseSync, databaseLabel: string) => void;
@@ -111,20 +114,21 @@ async function assertTargetAbsent(targetPath: string): Promise<void> {
 
 async function copyFileExclusive(
   source: FileHandle,
+  sourcePath: string,
   targetPath: string,
 ): Promise<{ content: SqliteFileContent; identity: Stats }> {
   const sourceFingerprint = await source.stat({ bigint: true });
   let target: Awaited<ReturnType<typeof fs.open>> | undefined;
   let targetIdentity: Stats | undefined;
   try {
-    target = await fs.open(targetPath, "wx+", 0o600);
-    targetIdentity = await target.stat();
-    const hash = createHash("sha256");
-    const offset = await copyFileHandle(source, target, {
-      onChunk: (chunk) => {
-        hash.update(chunk);
-      },
-    });
+    const publication = await copySqliteFile(sourcePath, targetPath, sourceFingerprint);
+    target = await fs.open(targetPath, "r+");
+    const openedIdentity = await target.stat();
+    if (!sameFileIdentity(publication, openedIdentity)) {
+      throw new Error(`SQLite snapshot target changed during publication: ${targetPath}`);
+    }
+    targetIdentity = openedIdentity;
+    const content = await hashOpenPublishedFile(target, targetPath, targetIdentity);
     await assertMutationFingerprintUnchanged(source, sourceFingerprint, targetPath);
     await target.sync();
     const currentIdentity = await fs.lstat(targetPath);
@@ -132,7 +136,7 @@ async function copyFileExclusive(
       throw new Error(`SQLite snapshot target changed during publication: ${targetPath}`);
     }
     return {
-      content: { sha256: hash.digest("hex"), sizeBytes: offset },
+      content,
       identity: currentIdentity,
     };
   } catch (error) {
@@ -338,8 +342,8 @@ function assertSynchronousCallbackResult(result: unknown, label: string): void {
 }
 
 /**
- * Publish the exact bytes of one already-verified SQLite file without reopening
- * its pathname during the copy. The target is always created exclusively.
+ * Publish the exact bytes of one already-verified SQLite file through a pinned
+ * source identity. The target is always created exclusively.
  */
 export async function publishVerifiedSqliteFile(
   options: PublishVerifiedSqliteFileOptions,
@@ -371,7 +375,7 @@ export async function publishVerifiedSqliteFile(
     await fs.chmod(stagingDir, 0o700);
     source = await fs.open(options.sourcePath, "r");
     await assertOpenFileIdentity(source, options.sourcePath, options.sourceIdentity);
-    const staged = await copyFileExclusive(source, stagedPath);
+    const staged = await copyFileExclusive(source, options.sourcePath, stagedPath);
     const expectedContent = options.expectedContent;
     assertExpectedContent(staged.content, expectedContent, options.targetPath);
     await source.close();
@@ -550,18 +554,29 @@ export async function createVerifiedSqliteSnapshot(
   await assertRegularSourceFile(sourcePath, options.requireNonEmptySource === true);
   await assertTargetAbsent(options.targetPath);
 
+  if (options.preserveRowIds && !options.sourceAcquisition) {
+    // Preserve physical pages as well as row IDs. Raw family descriptors must
+    // stay outside a live native owner's process so close cannot release its locks.
+    const prepared = await prepareSqliteReadOnlyLocation(sourcePath, {
+      preserveSourceArtifacts: true,
+    });
+    return withPreparedSqliteSnapshot(prepared, (privateSourcePath) =>
+      verifyAndPublishSqliteSnapshot(options, privateSourcePath),
+    );
+  }
   if (options.sourceAcquisition) {
-    const prepared = options.sourceAcquisition.preserveSourceArtifacts
-      ? prepareSqliteReadOnlyLocationSyncInProcess(
-          sourcePath,
-          options.sourceAcquisition.stagingRoot,
-        )
-      : await prepareSqliteReadOnlyLocationInProcess(
-          sourcePath,
-          options.sourceAcquisition.stagingRoot,
-          undefined,
-          options.onProgress,
-        );
+    const prepared =
+      options.preserveRowIds || options.sourceAcquisition.preserveSourceArtifacts
+        ? await prepareSqliteReadOnlyCopyInProcess(
+            sourcePath,
+            options.sourceAcquisition.stagingRoot,
+          )
+        : await prepareSqliteReadOnlyLocationInProcess(
+            sourcePath,
+            options.sourceAcquisition.stagingRoot,
+            undefined,
+            options.onProgress,
+          );
     return withPreparedSqliteSnapshot(prepared, (privateSourcePath) =>
       verifyAndPublishSqliteSnapshot(options, privateSourcePath),
     );
