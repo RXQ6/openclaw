@@ -184,6 +184,8 @@ export type SubagentRegistryWriteOptions = {
   context: OpenClawStateWorkerContext;
   assertCurrent?: () => void;
   onCommitted?: (runIds: readonly string[]) => void;
+  /** Admit native persistence and publication after staged rows have been captured. */
+  withPublication?: (publish: () => Promise<void>) => Promise<void>;
   retireRunIds?: readonly string[];
   pendingKillClaim?: SubagentRunRecord;
 };
@@ -286,89 +288,91 @@ export async function persistSubagentRegistryChangesAsync(
         deleteRunIds: runIds.filter((runId) => !snapshot.has(runId)),
       };
       const { context } = options;
-      await runOpenClawStateWorkerOperation(
-        context,
-        async (scope) => {
-          const receipt = await scope.execute({ type: "subagents.persistChanges", input: write });
-          if (receipt.writeId !== write.writeId) {
-            throw new Error("Queued registry acknowledgement identifies another write");
-          }
-          acknowledged = true;
-          try {
-            authority.assertDatabase();
-          } catch (error) {
-            throw new SubagentRegistryWriteError("committed", error, "superseded");
-          }
-          const currentIds = authority.currentRunIds();
-          if (currentIds.length > 0) {
-            const failures: unknown[] = [];
-            try {
-              options.onCommitted?.(currentIds);
-            } catch (error) {
-              failures.push(error);
+      const persist = () =>
+        runOpenClawStateWorkerOperation(
+          context,
+          async (scope) => {
+            const receipt = await scope.execute({ type: "subagents.persistChanges", input: write });
+            if (receipt.writeId !== write.writeId) {
+              throw new Error("Queued registry acknowledgement identifies another write");
             }
+            acknowledged = true;
             try {
-              // A callback failure cannot suppress committed facts or override its successor.
               authority.assertDatabase();
-              const publishedIds = authority.currentRunIds();
-              if (publishedIds.length > 0) {
-                publish(snapshot, publishedIds);
-              }
             } catch (error) {
-              failures.push(error);
+              throw new SubagentRegistryWriteError("committed", error, "superseded");
             }
-            if (failures.length === 1) {
-              throw failures[0];
-            }
-            if (failures.length > 1) {
-              throw new SubagentRegistryWriteError(
-                "committed",
-                new AggregateError(
-                  failures,
-                  "Subagent registry acknowledgement settlement failed",
-                  { cause: failures[0] },
-                ),
-                failures.some(
-                  (error) =>
-                    error instanceof SubagentRegistryWriteError &&
-                    error.publication === "superseded",
-                )
-                  ? "superseded"
-                  : undefined,
-              );
-            }
-          }
-        },
-        {
-          assertCurrent: authority.assertCurrent,
-          createAdmission: () => {
-            let phase: "waiting" | "transaction" | "commit" = "waiting";
-            return {
-              nativeLocations: [
-                context.admission.databasePath,
-                context.admission.identity.canonicalPath,
-              ],
-              admission: createSqliteWorkerOperationAdmission((request, grant) => {
-                if (
-                  request.facts !== write.writeId ||
-                  !(
-                    (phase === "waiting" && request.stage === "transaction") ||
-                    (phase === "transaction" && request.stage === "commit")
+            const currentIds = authority.currentRunIds();
+            if (currentIds.length > 0) {
+              const failures: unknown[] = [];
+              try {
+                options.onCommitted?.(currentIds);
+              } catch (error) {
+                failures.push(error);
+              }
+              try {
+                // A callback failure cannot suppress committed facts or override its successor.
+                authority.assertDatabase();
+                const publishedIds = authority.currentRunIds();
+                if (publishedIds.length > 0) {
+                  publish(snapshot, publishedIds);
+                }
+              } catch (error) {
+                failures.push(error);
+              }
+              if (failures.length === 1) {
+                throw failures[0];
+              }
+              if (failures.length > 1) {
+                throw new SubagentRegistryWriteError(
+                  "committed",
+                  new AggregateError(
+                    failures,
+                    "Subagent registry acknowledgement settlement failed",
+                    { cause: failures[0] },
+                  ),
+                  failures.some(
+                    (error) =>
+                      error instanceof SubagentRegistryWriteError &&
+                      error.publication === "superseded",
                   )
-                ) {
-                  throw new Error("Queued registry write authority requested out of order");
-                }
-                authority.assertCurrent();
-                if (!grant()) {
-                  throw new Error("Queued registry write authority expired");
-                }
-                phase = request.stage === "transaction" ? "transaction" : "commit";
-                commitGranted = phase === "commit";
-              }),
-            };
+                    ? "superseded"
+                    : undefined,
+                );
+              }
+            }
           },
-        },
-      );
+          {
+            assertCurrent: authority.assertCurrent,
+            createAdmission: () => {
+              let phase: "waiting" | "transaction" | "commit" = "waiting";
+              return {
+                nativeLocations: [
+                  context.admission.databasePath,
+                  context.admission.identity.canonicalPath,
+                ],
+                admission: createSqliteWorkerOperationAdmission((request, grant) => {
+                  if (
+                    request.facts !== write.writeId ||
+                    !(
+                      (phase === "waiting" && request.stage === "transaction") ||
+                      (phase === "transaction" && request.stage === "commit")
+                    )
+                  ) {
+                    throw new Error("Queued registry write authority requested out of order");
+                  }
+                  authority.assertCurrent();
+                  if (!grant()) {
+                    throw new Error("Queued registry write authority expired");
+                  }
+                  phase = request.stage === "transaction" ? "transaction" : "commit";
+                  commitGranted = phase === "commit";
+                }),
+              };
+            },
+          },
+        );
+      await (options.withPublication ? options.withPublication(persist) : persist());
     } catch (error) {
       if (acknowledged && error instanceof SubagentRegistryWriteError) {
         throw error;
@@ -389,6 +393,10 @@ export async function persistSubagentRegistryChangesAsync(
 export function captureSubagentRunMutationSnapshot(entry: SubagentRunRecord): SubagentRunRecord {
   const snapshot = structuredClone(entry);
   snapshot.execution = entry.execution;
+  // Announcements retain this immutable fact while unrelated completion fields are staged.
+  if (snapshot.completion && entry.completion?.terminalReply) {
+    snapshot.completion.terminalReply = entry.completion.terminalReply;
+  }
   // An absent optional owner must remain absent for exact preimage comparison.
   if (Object.hasOwn(entry, "killIntent")) {
     snapshot.killIntent = entry.killIntent;
@@ -407,7 +415,7 @@ export type SubagentRegistryPostimageResult = {
   publication: SubagentRegistryPublication;
 };
 
-function replaceSubagentRunRecord(entry: SubagentRunRecord, value: SubagentRunRecord): void {
+export function replaceSubagentRunRecord(entry: SubagentRunRecord, value: SubagentRunRecord): void {
   for (const key of Object.keys(entry)) {
     Reflect.deleteProperty(entry, key);
   }
@@ -416,13 +424,14 @@ function replaceSubagentRunRecord(entry: SubagentRunRecord, value: SubagentRunRe
 
 function matchesSubagentRunPreimages(
   runs: ReadonlyMap<string, SubagentRunRecord>,
-  previous: ReadonlyMap<SubagentRunRecord, SubagentRunRecord>,
+  previous: ReadonlyMap<SubagentRunRecord, SubagentRunRecord | undefined>,
   retired?: ReadonlySet<SubagentRunRecord>,
 ): boolean {
-  return [...previous].every(
-    ([entry, snapshot]) =>
-      runs.get(snapshot.runId) === (retired?.has(entry) ? undefined : entry) &&
-      isDeepStrictEqual(entry, snapshot),
+  return [...previous].every(([entry, snapshot]) =>
+    snapshot === undefined
+      ? !runs.has(entry.runId)
+      : runs.get(snapshot.runId) === (retired?.has(entry) ? undefined : entry) &&
+        isDeepStrictEqual(entry, snapshot),
   );
 }
 
@@ -468,7 +477,7 @@ function retainUnchangedSubagentOwners(
 /** Native receipts and staged writes publish through the same live preimage authority. */
 export function captureSubagentRunPostimagePublication(params: {
   runs: Map<string, SubagentRunRecord>;
-  previous: ReadonlyMap<SubagentRunRecord, SubagentRunRecord>;
+  previous: ReadonlyMap<SubagentRunRecord, SubagentRunRecord | undefined>;
   /** Already published native retirements, retained by their original receipt owner. */
   retiredPreimages?: ReadonlySet<SubagentRunRecord>;
   context: OpenClawStateWorkerContext;
@@ -543,23 +552,29 @@ export function captureSubagentRunPostimagePublication(params: {
         throw new SubagentRegistryWriteError("committed", error, "superseded");
       }
       // Prepare all records before installing any row; decoding failure is not partial publication.
-      const selected = [...postimages].map(([entry, next]) => ({
-        entry,
-        next:
-          next && params.fromWorker
-            ? retainUnchangedSubagentOwners(
-                originals.get(entry)!,
-                next,
-                runtimeOwners.get(entry)!,
-                params.fromWorker.deliveryReceipt === "retain-unchanged",
-              )
-            : next,
-      }));
+      const selected = [...postimages].map(([entry, next]) => {
+        const previous = originals.get(entry);
+        return {
+          entry,
+          next:
+            next && params.fromWorker && previous
+              ? retainUnchangedSubagentOwners(
+                  previous,
+                  next,
+                  runtimeOwners.get(entry)!,
+                  params.fromWorker.deliveryReceipt === "retain-unchanged",
+                )
+              : next,
+        };
+      });
       for (const { entry, next } of selected) {
         if (next === null) {
           params.runs.delete(entry.runId);
         } else {
           replaceSubagentRunRecord(entry, next);
+          if (!originals.get(entry)) {
+            params.runs.set(entry.runId, entry);
+          }
         }
       }
       published = true;
@@ -571,7 +586,8 @@ export function captureSubagentRunPostimagePublication(params: {
 /** The existing writer captures staged rows synchronously; live preimages remain until ACK. */
 export async function publishSubagentRunPostimages(params: {
   runs: Map<string, SubagentRunRecord>;
-  previous: ReadonlyMap<SubagentRunRecord, SubagentRunRecord>;
+  /** An undefined preimage registers a new row without exposing it before ACK. */
+  previous: ReadonlyMap<SubagentRunRecord, SubagentRunRecord | undefined>;
   retire?: ReadonlySet<SubagentRunRecord>;
   pendingKillClaim?: SubagentRunRecord;
   persist: (
@@ -583,6 +599,7 @@ export async function publishSubagentRunPostimages(params: {
   assertCurrent: () => void;
   /** An acknowledged native mutation can retain target custody after its caller retires. */
   assertPublicationCurrent?: () => void;
+  withPublication?: SubagentRegistryWriteOptions["withPublication"];
   onPublished?: () => void;
 }): Promise<SubagentRegistryPostimageResult> {
   const selected = [...params.previous].map(([entry, previous]) => ({
@@ -612,6 +629,7 @@ export async function publishSubagentRunPostimages(params: {
       params.context,
       {
         pendingKillClaim: params.pendingKillClaim,
+        withPublication: params.withPublication,
         retireRunIds: selected.filter(({ retire }) => retire).map(({ entry }) => entry.runId),
         assertCurrent() {
           params.assertCurrent();
@@ -627,9 +645,28 @@ export async function publishSubagentRunPostimages(params: {
       ...selected.map(({ entry }) => entry.runId),
     );
   } finally {
-    if (matchesSubagentRunPreimages(params.runs, nextSnapshots)) {
+    // Registration hides its provisional row even if an older tombstone changed during capture.
+    const registration = selected.some((selection) => selection.previous === undefined);
+    if (registration || matchesSubagentRunPreimages(params.runs, nextSnapshots)) {
       for (const selection of selected) {
-        replaceSubagentRunRecord(selection.entry, selection.previous);
+        if (
+          registration &&
+          (params.runs.get(selection.entry.runId) !== selection.entry ||
+            !isDeepStrictEqual(selection.entry, nextSnapshots.get(selection.entry)))
+        ) {
+          continue;
+        }
+        if (selection.previous) {
+          const { previous, next } = selection;
+          // Unchanged staging must not revoke a native writer's captured delivery owner.
+          const restored =
+            previous.delivery && isDeepStrictEqual(previous.delivery, next.delivery)
+              ? { ...previous, delivery: next.delivery }
+              : previous;
+          replaceSubagentRunRecord(selection.entry, restored);
+        } else {
+          params.runs.delete(selection.entry.runId);
+        }
       }
     }
     capturing = false;

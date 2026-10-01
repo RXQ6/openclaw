@@ -25,7 +25,10 @@ import { SUBAGENT_ENDED_REASON_ERROR } from "./subagent-lifecycle-events.js";
 import { subagentRuns, waitForSubagentRetirementPublication } from "./subagent-registry-memory.js";
 import {
   SubagentRegistryWriteError,
+  assertSubagentRegistryWriteSourceCurrent,
+  replaceSubagentRunRecord,
   waitForPendingSubagentKillClaim,
+  waitForPendingSubagentRegistryWrites,
 } from "./subagent-registry-persistence.js";
 import { registerRequiredQueuedSubagent } from "./subagent-registry-queued-registration.js";
 import {
@@ -143,7 +146,12 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
       waitForClaim: () => undefined,
       waitForRetirementPublication: () => waitForSubagentRetirementPublication(entry),
       canLaunch: () => activated && registryCurrent() && exactEntry() && ownsSession(),
-      canAcceptLaunch: () => acknowledged && registryCurrent() && exactEntry() && ownsSession(),
+      canAcceptLaunch: () =>
+        acknowledged &&
+        !subagentRuns.isCompletionAuthorityRetired(entry) &&
+        registryCurrent() &&
+        exactEntry() &&
+        ownsSession(),
       canAbortAcceptedRun: () => registryCurrent() && ownsSession(),
       canCleanupSession: () => !uncertain && registryCurrent() && ownsSession() && !exactEntry(),
       canRetireReservation: () => ownsSwarmRunReservation(entry.schedulerSlotId ?? runId, entry),
@@ -190,7 +198,13 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
             assertRegistryCurrent();
             this.options.runs.set(runId, entry);
             acknowledged = true;
-            params.publishAuthority();
+            try {
+              options.assertPublicationCurrent?.();
+              params.publishAuthority();
+            } catch (error) {
+              subagentRuns.retireCompletionAuthority(entry);
+              throw error;
+            }
             if (!ownership.superseded) {
               ownership.accept(entry);
             }
@@ -221,6 +235,9 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
       if (error instanceof SubagentRegistryWriteError) {
         uncertain = error.outcome === "unknown" || (error.outcome === "committed" && !acknowledged);
       }
+      if (acknowledged && !activated) {
+        subagentRuns.retireCompletionAuthority(entry);
+      }
       // A committed row still needs terminal observation when its caller cannot launch.
       observeRetainedRun();
       throw error;
@@ -238,6 +255,25 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
       return;
     }
     const lifecycleGeneration = getAgentEventLifecycleGeneration();
+    const registrationContext = captureOpenClawStateWorkerContext();
+    const pendingWrite = waitForPendingSubagentRegistryWrites(
+      [runId],
+      registrationContext.admission,
+    );
+    if (pendingWrite) {
+      const captured = { ...registerParams };
+      const capturedOptions = { ...options };
+      return pendingWrite.then(() => {
+        capturedOptions.assertCurrent?.();
+        assertSubagentRegistryWriteSourceCurrent(registrationContext);
+        if (!isAgentEventLifecycleGenerationCurrent(lifecycleGeneration)) {
+          throw new Error(
+            "Subagent registration lifecycle changed while awaiting its earlier write",
+          );
+        }
+        return this.registerSubagentRun(captured, capturedOptions);
+      });
+    }
     const cfg = this.options.getRuntimeConfig();
     const now = Date.now();
     const runTimeoutSeconds = registerParams.runTimeoutSeconds ?? 0;
@@ -248,6 +284,24 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
     const previous = this.options.runs.get(runId);
     const previousGeneration = previous?.generation;
     const previousCreatedAt = previous?.createdAt;
+    if (options.reuseAcceptedRun && previous) {
+      options.assertCurrent?.();
+      if (
+        previous.childSessionKey !== childSessionKey ||
+        previous.requesterSessionKey !== requesterSessionKey ||
+        previous.requesterAgentId !== requesterAgentId ||
+        previous.requesterTurnRunId !== (registerParams.requesterTurnRunId?.trim() || undefined) ||
+        previous.expectsCompletionMessage !== registerParams.expectsCompletionMessage ||
+        Boolean(previous.collect) !== Boolean(registerParams.collect)
+      ) {
+        throw new Error(
+          "Accepted run already has another completion owner; inspect it before retrying.",
+        );
+      }
+      // Admission replay retains the original result, generation, custody, and sole waiter.
+      subagentRuns.runWithCompletionAuthority(previous, () => options.assertCurrent?.());
+      return;
+    }
     const requesterStorePath = previous
       ? previous.requesterStorePath
       : resolvePhysicalSessionStorePath(
@@ -264,7 +318,6 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
           cfg,
         );
     const queued = registerParams.queued === true;
-    const registrationContext = captureOpenClawStateWorkerContext();
     const registrationOwnership = subagentRuns.captureRegistrationOwnership(childSessionKey, runId);
     const register = (
       completionAuthority?: Awaited<
@@ -458,7 +511,7 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
       if (previousRunId !== nextRunId) {
         this.options.runs.delete(nextRunId);
       }
-      this.restoreRunRecord(entry, previous);
+      replaceSubagentRunRecord(entry, previous);
       if (previousRunId !== nextRunId) {
         this.options.runs.set(previousRunId, entry);
       }
@@ -534,7 +587,7 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
     try {
       this.options.persistOrThrow(entry.runId);
     } catch (persistError) {
-      this.restoreRunRecord(entry, snapshot);
+      replaceSubagentRunRecord(entry, snapshot);
       throw persistError;
     }
     return true;
@@ -558,7 +611,7 @@ export class SubagentLaunchManager extends SubagentRecoveryManager {
     try {
       this.options.persistOrThrow(entry.runId);
     } catch (persistError) {
-      this.restoreRunRecord(entry, snapshot);
+      replaceSubagentRunRecord(entry, snapshot);
       throw persistError;
     }
     return true;
