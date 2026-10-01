@@ -1,30 +1,16 @@
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
-import type { SqliteWorkerCommand } from "../infra/sqlite-worker-contract.js";
-import type { BlobWriteParams } from "./plugin-blob-store.sqlite.js";
+import type { WorkerOperations } from "../state/worker-operation-registry.js";
 import type {
   PluginBlobEntry,
   PluginBlobEntryInfo,
   PluginBlobStoreOperation,
 } from "./plugin-blob-store.types.js";
+import type { pluginBlobOperations } from "./plugin-blob-store.worker.js";
 
 type Namespace = { pluginId: string; namespace: string };
 type Key = Namespace & { key: string };
-type Write = Omit<BlobWriteParams, "env">;
 
-export type PluginBlobWorkerOperations = {
-  "pluginBlob.register": { input: Write; output: void };
-  "pluginBlob.registerIfAbsent": { input: Write; output: boolean };
-  "pluginBlob.delete": { input: Key; output: boolean };
-  "pluginBlob.deleteExpiredKey": {
-    input: Key;
-    output: PluginBlobEntryInfo<unknown> | undefined;
-  };
-  "pluginBlob.deleteExpired": {
-    input: Namespace;
-    output: PluginBlobEntryInfo<unknown>[];
-  };
-  "pluginBlob.clear": { input: Namespace; output: void };
-};
+export type PluginBlobWorkerOperations = WorkerOperations<typeof pluginBlobOperations>;
 
 export const pluginBlobWorkerOperations = {
   "pluginBlob.register": {
@@ -45,17 +31,7 @@ export const pluginBlobWorkerOperations = {
     message: "Failed to delete expired plugin blobs.",
   },
   "pluginBlob.clear": { operation: "clear", message: "Failed to clear plugin blob entries." },
-} as const satisfies Record<
-  keyof PluginBlobWorkerOperations,
-  { operation: PluginBlobStoreOperation; message: string }
->;
-
-export function isPluginBlobWorkerCommand(command: {
-  type: string;
-  input: unknown;
-}): command is SqliteWorkerCommand<PluginBlobWorkerOperations> {
-  return Object.hasOwn(pluginBlobWorkerOperations, command.type);
-}
+} as const satisfies Record<string, { operation: PluginBlobStoreOperation; message: string }>;
 
 export type PluginBlobReadCommand =
   | { type: "pluginBlob.lookup"; input: Key }

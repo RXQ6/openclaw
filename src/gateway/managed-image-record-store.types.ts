@@ -1,5 +1,8 @@
 import type { Insertable, Selectable } from "kysely";
+import type { SqliteWorkerCommand } from "../infra/sqlite-worker-contract.js";
 import type { DB as OpenClawStateKyselyDatabase } from "../state/openclaw-state-db.generated.js";
+import type { WorkerOperations } from "../state/worker-operation-registry.js";
+import type { managedImageRecordOperations } from "./managed-image-record-store.kernel.js";
 
 type ManagedImageRecordVariant = {
   mediaRoot: string;
@@ -49,25 +52,12 @@ export type ManagedImageRecordAttachment = {
   updatedAt: string;
 };
 
-export type ManagedImageRecordWorkerOperations = {
-  "managedImages.insert": { input: ManagedImageRecord; output: boolean };
-  "managedImages.attach": { input: ManagedImageRecordAttachment; output: boolean };
-  "managedImages.claimCleanup": { input: ManagedImageRecord; output: boolean };
-  "managedImages.deleteClaimed": { input: ManagedImageRecord; output: boolean };
-  "managedImages.read": { input: { attachmentId: string }; output: ManagedImageRecord | null };
-  "managedImages.entries": { input: { sessionKey?: string }; output: ManagedImageRecordEntry[] };
-  "managedImages.originalMediaIds": { input: undefined; output: string[] };
-};
-
-export type ManagedImageRecordCommand = {
-  [Key in keyof ManagedImageRecordWorkerOperations]: {
-    type: Key;
-    input: ManagedImageRecordWorkerOperations[Key]["input"];
-  };
-}[keyof ManagedImageRecordWorkerOperations];
+export type ManagedImageRecordWorkerOperations = WorkerOperations<
+  typeof managedImageRecordOperations
+>;
 
 export type ManagedImageRecordMutation = Extract<
-  ManagedImageRecordCommand,
+  SqliteWorkerCommand<ManagedImageRecordWorkerOperations>,
   {
     type:
       | "managedImages.insert"

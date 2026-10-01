@@ -1,13 +1,47 @@
+import type { NativeHookRelayStoreWorkerOperations } from "../agents/harness/native-hook-relay-store.worker-contract.js";
+import type { McpOAuthWorkerOperations } from "../agents/mcp-oauth-store.types.js";
 import type { WorktreeWorkerOperations } from "../agents/worktrees/dispatch.worker.js";
+import type { AuditWorkerOperations } from "../audit/audit-event-writer.types.js";
+import type { ChannelIngressWorkerOperations } from "../channels/message/ingress-queue.worker-contract.js";
+import type { DoctorWorkerOperations } from "../commands/doctor-state.worker.js";
 import type { FleetRegistryWriteOperations } from "../fleet/registry.types.js";
+import type { ManagedImageRecordWorkerOperations } from "../gateway/managed-image-record-store.types.js";
+import type { DeliveryQueueWorkerOperations } from "../infra/delivery-queue.worker-contract.js";
+import type { DevicePairingWorkerOperations } from "../infra/device-pairing-worker-contract.js";
+import type { CurrentConversationBindingWorkerOperations } from "../infra/outbound/current-conversation-bindings.worker-contract.js";
+import type { PromotionWorkerOperations } from "../infra/promotions-feed.worker.js";
 import type { ApnsRegistrationWorkerOperations } from "../infra/push-apns-store.worker-contract.js";
 import type { WebPushWorkerOperations } from "../infra/push-web-store.worker-contract.js";
+import type { SessionDeliveryWorkerOperations } from "../infra/session-delivery-queue.worker-contract.js";
+import type { LegacyMcpOAuthWorkerOperations } from "../infra/state-migrations.mcp-oauth.worker-contract.js";
+import type { TelemetryWorkerOperations } from "../infra/telemetry-worker-contract.js";
+import type { ModelCatalogWorkerOperations } from "../model-catalog/remote-store.worker.js";
+import type { NodeWorkerJournalWorkerOperations } from "../node-host/node-worker-journal.worker-contract.js";
+import type { PluginBlobWorkerOperations } from "../plugin-state/plugin-blob-worker-contract.js";
+import type { OnboardingRecommendationWriteOperations } from "./onboarding-recommendations.contract.js";
 import { createWorkerOperationRegistry } from "./worker-operation-registry.js";
 
 export type RegisteredStateWorkerOperations = WebPushWorkerOperations &
   ApnsRegistrationWorkerOperations &
   WorktreeWorkerOperations &
-  FleetRegistryWriteOperations;
+  FleetRegistryWriteOperations &
+  DeliveryQueueWorkerOperations &
+  SessionDeliveryWorkerOperations &
+  CurrentConversationBindingWorkerOperations &
+  DevicePairingWorkerOperations &
+  McpOAuthWorkerOperations &
+  LegacyMcpOAuthWorkerOperations &
+  NativeHookRelayStoreWorkerOperations &
+  AuditWorkerOperations &
+  PromotionWorkerOperations &
+  TelemetryWorkerOperations &
+  DoctorWorkerOperations &
+  ModelCatalogWorkerOperations &
+  ManagedImageRecordWorkerOperations &
+  PluginBlobWorkerOperations &
+  OnboardingRecommendationWriteOperations &
+  NodeWorkerJournalWorkerOperations &
+  ChannelIngressWorkerOperations;
 
 export const stateWorkerRegistry = createWorkerOperationRegistry<RegisteredStateWorkerOperations>({
   webPush: () => import("../infra/push-web-store.worker.js").then((m) => m.webPushOperations),
@@ -15,4 +49,44 @@ export const stateWorkerRegistry = createWorkerOperationRegistry<RegisteredState
   worktrees: () =>
     import("../agents/worktrees/dispatch.worker.js").then((m) => m.worktreeOperations),
   fleet: () => import("../fleet/registry.worker.js").then((m) => m.fleetOperations),
+  mcpOAuth: () => import("../agents/mcp-oauth-store.worker.js").then((m) => m.mcpOAuthOperations),
+  legacyMcpOAuth: () =>
+    import("../infra/state-migrations.mcp-oauth.worker.js").then((m) => m.legacyMcpOAuthOperations),
+  nativeHookRelay: () =>
+    import("../agents/harness/native-hook-relay-store.worker.js").then(
+      (m) => m.nativeHookRelayOperations,
+    ),
+  audit: () => import("../audit/audit-event-writer.worker.js").then((m) => m.auditOperations),
+  promotions: () => import("../infra/promotions-feed.worker.js").then((m) => m.promotionOperations),
+  telemetry: () => import("../infra/telemetry-store.worker.js").then((m) => m.telemetryOperations),
+  doctor: () => import("../commands/doctor-state.worker.js").then((m) => m.doctorOperations),
+  modelCatalog: () =>
+    import("../model-catalog/remote-store.worker.js").then((m) => m.modelCatalogOperations),
+  managedImages: () =>
+    import("../gateway/managed-image-record-store.kernel.js").then(
+      (m) => m.managedImageRecordOperations,
+    ),
+  pluginBlob: () =>
+    import("../plugin-state/plugin-blob-store.worker.js").then((m) => m.pluginBlobOperations),
+  onboardingRecommendations: () =>
+    import("./onboarding-recommendations.kernel.js").then(
+      (m) => m.onboardingRecommendationOperations,
+    ),
+  nodeWorker: () =>
+    import("../node-host/node-worker-journal.worker.js").then((m) => m.nodeWorkerJournalOperations),
+  channelIngress: () =>
+    import("../channels/message/ingress-queue.worker.js").then((m) => m.channelIngressOperations),
+  devicePairing: () =>
+    import("../infra/device-pairing-core.worker.js").then((m) => m.devicePairingOperations),
+  node: () => import("../infra/device-pairing-node.worker.js").then((m) => m.nodePairingOperations),
+  bootstrap: () =>
+    import("../infra/device-bootstrap.worker-kernel.js").then((m) => m.deviceBootstrapOperations),
+  deliveryQueue: () =>
+    import("../infra/delivery-queue.worker.js").then((m) => m.deliveryQueueOperations),
+  sessionDelivery: () =>
+    import("../infra/session-delivery-queue.worker.js").then((m) => m.sessionDeliveryOperations),
+  conversationBindings: () =>
+    import("../infra/outbound/current-conversation-bindings.worker.js").then(
+      (m) => m.conversationBindingOperations,
+    ),
 });
