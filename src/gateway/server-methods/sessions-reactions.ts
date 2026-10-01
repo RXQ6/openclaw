@@ -223,19 +223,6 @@ async function mirrorReaction(params: {
             throw new Error("channel configuration changed before reaction delivery");
           }
         };
-        const current = await readSessionConversationBindingAsync(scope, transport.conversationRef);
-        if (
-          !current ||
-          current.channel !== conversation.channel ||
-          current.accountId !== conversation.accountId ||
-          current.target !== conversation.target ||
-          current.threadId !== conversation.threadId ||
-          current.nativeChannelId !== conversation.nativeChannelId
-        ) {
-          return { status: "failed", reason: "source conversation changed before delivery" };
-        }
-        // The registry has no synchronous worker read: binding is the last awaited
-        // check before handoff; the adapter guard retains live reactor/session/config checks.
         assertCurrent();
         const outcome = resolveMessageActionOutcome(
           await runMessageAction({
@@ -247,6 +234,22 @@ async function mirrorReaction(params: {
             // A person asked for this reaction from the Control UI; like the CLI it
             // is an operator action, not a model-delegated conversation read.
             conversationReadOrigin: "direct-operator",
+            onPlatformSendDispatch: async () => {
+              const current = await readSessionConversationBindingAsync(
+                scope,
+                transport.conversationRef,
+              );
+              if (
+                !current ||
+                current.channel !== conversation.channel ||
+                current.accountId !== conversation.accountId ||
+                current.target !== conversation.target ||
+                current.threadId !== conversation.threadId ||
+                current.nativeChannelId !== conversation.nativeChannelId
+              ) {
+                throw new Error("source conversation changed before delivery");
+              }
+            },
             assertDirectAdapterHandoff: assertCurrent,
             params: {
               channel,

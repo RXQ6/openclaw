@@ -26,7 +26,6 @@ import {
   createTestRegistry,
 } from "../../test-utils/channel-plugins.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
-import { readSessionConversationBindingAsync } from "../session-transcript-readers.js";
 import { sessionReactionHandlers } from "./sessions-reactions.js";
 import type { GatewayClient, GatewayRequestContext, RespondFn } from "./types.js";
 
@@ -164,13 +163,17 @@ async function seedChannelMessage() {
 }
 
 beforeEach(() => {
-  runMessageAction.mockReset().mockResolvedValue({
-    kind: "action",
-    channel: "testchat",
-    action: "react",
-    handledBy: "plugin",
-    payload: { ok: true },
-    dryRun: false,
+  runMessageAction.mockReset().mockImplementation(async (input: MessageActionInput) => {
+    await input.onPlatformSendDispatch?.();
+    input.assertDirectAdapterHandoff?.();
+    return {
+      kind: "action",
+      channel: "testchat",
+      action: "react",
+      handledBy: "plugin",
+      payload: { ok: true },
+      dryRun: false,
+    };
   });
 });
 
@@ -675,45 +678,22 @@ describe("session reaction handlers", () => {
     },
   );
 
-  it("refuses queued mirrors when their captured source conversation changes", async () => {
+  it("rechecks the source conversation after awaited action preparation", async () => {
     await withOpenClawTestState({ scenario: "minimal" }, async () => {
       registerReactionChannel();
-      for (const change of ["removed", "channel", "account", "target", "thread"] as const) {
+      for (const change of [
+        "removed",
+        "channel",
+        "account",
+        "target",
+        "thread",
+        "nativeChannel",
+      ] as const) {
         runMessageAction.mockClear();
         const { messageId, config, conversationRef } = await seedChannelMessage();
-        const requestContext = context(config);
-        const firstEntered = createDeferredCore();
-        const releaseFirst = createDeferredCore();
-        const removalCommitted = createDeferredCore();
-        vi.mocked(requestContext.broadcast).mockImplementation((_event, payload) => {
-          if ((payload as { action: string }).action === "removed") {
-            removalCommitted.resolve();
-          }
-        });
-        runMessageAction.mockImplementationOnce(async () => {
-          firstEntered.resolve();
-          await releaseFirst.promise;
-          return { kind: "action", payload: { ok: true } };
-        });
-        const first = call(
-          "session.reactions.set",
-          { sessionKey, messageId, emoji: "👍" },
-          client("alice"),
-          requestContext,
-        );
-        await firstEntered.promise;
-        const pending = call(
-          "session.reactions.set",
-          { sessionKey, messageId, emoji: "👍", remove: true },
-          client("alice"),
-          requestContext,
-        );
-        try {
-          await removalCommitted.promise;
-          // Join a read behind the queued mirror's capture on the same history worker.
-          expect(
-            await readSessionConversationBindingAsync(transcriptScope, conversationRef),
-          ).toMatchObject({ target: "channel:room-42" });
+        const channelRequest = vi.fn();
+        runMessageAction.mockImplementationOnce(async (input: MessageActionInput) => {
+          await Promise.resolve();
           runOpenClawAgentWriteTransaction(
             (database) => {
               const db = getNodeSqliteKysely<Pick<DB, "conversations">>(database.db);
@@ -728,6 +708,7 @@ describe("session reaction handlers", () => {
                   account: { account_id: "other-account" },
                   target: { delivery_target: "channel:other-room" },
                   thread: { thread_id: "other-thread" },
+                  nativeChannel: { native_channel_id: "other-native-room" },
                 }[change];
                 executeSqliteQuerySync(
                   database.db,
@@ -740,15 +721,22 @@ describe("session reaction handlers", () => {
             },
             { agentId: "main" },
           );
-          expect(runMessageAction).toHaveBeenCalledTimes(1);
-        } finally {
-          releaseFirst.resolve();
-        }
-        expect((await first)[1]).toMatchObject({ mirror: { status: "delivered" } });
-        expect(await pending).toMatchObject([
+          await input.onPlatformSendDispatch?.();
+          input.assertDirectAdapterHandoff?.();
+          channelRequest(input.params);
+          return { kind: "action", payload: { ok: true } };
+        });
+        expect(
+          await call(
+            "session.reactions.set",
+            { sessionKey, messageId, emoji: "👍" },
+            client("alice"),
+            context(config),
+          ),
+        ).toMatchObject([
           true,
           {
-            reactions: [],
+            reactions: [{ emoji: "👍", count: 1 }],
             mirror: {
               status: "failed",
               reason: "source conversation changed before delivery",
@@ -756,6 +744,7 @@ describe("session reaction handlers", () => {
           },
         ]);
         expect(runMessageAction).toHaveBeenCalledTimes(1);
+        expect(channelRequest).not.toHaveBeenCalled();
       }
     });
   });
