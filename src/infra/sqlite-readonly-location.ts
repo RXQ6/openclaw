@@ -387,7 +387,17 @@ async function createStableReadOnlyCopy(
   try {
     return createStableReadOnlyCopyInTempDirectory(pathname, journalMode, tempDir);
   } catch (error) {
-    await removeTempDirectoryAsync(tempDir);
+    const errors: unknown[] = [error];
+    const removed = await removeTempDirectoryAsync(tempDir, (cleanupError) =>
+      errors.push(cleanupError),
+    );
+    if (!removed) {
+      throw createSqliteLifecycleAggregateError(
+        errors,
+        "SQLite snapshot preparation and cleanup failed",
+        error,
+      );
+    }
     throw error;
   }
 }
