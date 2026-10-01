@@ -149,24 +149,34 @@ describe("subagent announce active requester admission", () => {
     let attempt = 0;
     const queueEmbeddedAgentMessageWithOutcome = vi.fn<
       SubagentAnnounceDeliveryTestDeps["queueEmbeddedAgentMessageWithOutcome"]
-    >((sessionId) => {
+    >((queuedSessionId) => {
       attempt += 1;
       if (attempt === 1) {
         vi.setSystemTime(118_000);
-        return { queued: false, sessionId, reason: "compacting", gatewayHealth: "live" };
+        return {
+          queued: false,
+          sessionId: queuedSessionId,
+          reason: "compacting",
+          gatewayHealth: "live",
+        };
       }
       if (attempt === 2) {
         vi.setSystemTime(119_500);
         return {
           queued: false,
-          sessionId,
+          sessionId: queuedSessionId,
           reason: "source_reply_delivery_mode_mismatch",
           gatewayHealth: "live",
         };
       }
-      return { queued: true, sessionId, target: "embedded_run", gatewayHealth: "live" };
+      return {
+        queued: true,
+        sessionId: queuedSessionId,
+        target: "embedded_run",
+        gatewayHealth: "live",
+      };
     });
-    const requesterSessionKey = "agent:main:discord:dm:U123";
+    const budgetRequesterSessionKey = "agent:main:discord:dm:U123";
     const origin = { channel: "discord", to: "dm:U123", accountId: "acct-1" };
     setSubagentAnnounceDeliveryDepsForTest({
       callGateway,
@@ -174,15 +184,15 @@ describe("subagent announce active requester admission", () => {
       getRequesterSessionActivity: () => ({ sessionId, isActive: true }),
       loadRequesterSessionEntry: () => ({
         cfg: {},
-        canonicalKey: requesterSessionKey,
+        canonicalKey: budgetRequesterSessionKey,
         agentId: "main",
         entry: { sessionId, updatedAt: 1 },
       }),
       queueEmbeddedAgentMessageWithOutcome,
     });
     const delivery = deliverSubagentAnnouncement({
-      requesterSessionKey,
-      targetRequesterSessionKey: requesterSessionKey,
+      requesterSessionKey: budgetRequesterSessionKey,
+      targetRequesterSessionKey: budgetRequesterSessionKey,
       triggerMessage: "child done",
       requesterSessionOrigin: origin,
       completionDirectOrigin: origin,
