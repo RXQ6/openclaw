@@ -4,7 +4,7 @@ import type { WorktreeWorkerOperations } from "../agents/worktrees/dispatch.work
 import type { AuditWorkerOperations } from "../audit/audit-event-writer.types.js";
 import type { ChannelIngressWorkerOperations } from "../channels/message/ingress-queue.worker-contract.js";
 import type { DoctorWorkerOperations } from "../commands/doctor-state.worker.js";
-import type { FleetRegistryWriteOperations } from "../fleet/registry.types.js";
+import type { FleetRegistryWriteOperations } from "../fleet/registry.worker-contract.js";
 import type { ManagedImageRecordWorkerOperations } from "../gateway/managed-image-record-store.types.js";
 import type { DeliveryQueueWorkerOperations } from "../infra/delivery-queue.worker-contract.js";
 import type { DevicePairingWorkerOperations } from "../infra/device-pairing-worker-contract.js";
