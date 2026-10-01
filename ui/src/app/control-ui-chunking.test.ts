@@ -129,18 +129,21 @@ describe("Control UI build chunking", () => {
     });
   });
 
-  it("lets snapshot prewarming load independently of the measured chat boot group", () => {
+  it("lets snapshot prewarming load independently of the measured boot groups", () => {
     const database = new URL("../pages/chat/session-snapshot-database.ts", import.meta.url)
       .pathname;
     const stableGroup = controlUiCodeSplitting.groups[0];
-    const chatGroup = controlUiCodeSplitting.groups.find(
-      (group) => group.name === "control-ui-boot-chat",
-    )!;
+    const bootGroup = controlUiCodeSplitting.groups.find(
+      (group) =>
+        typeof group.name === "string" &&
+        group.name.startsWith("control-ui-boot-") &&
+        group.test?.(database),
+    );
 
-    expect(chatGroup.test?.(database)).toBe(true);
+    expect(bootGroup).toBeDefined();
     expect(stableGroup?.test?.(database)).toBe(true);
     expect(controlUiStableChunkName(database)).toBe("session-snapshot-database");
-    expect(stableGroup?.priority).toBeGreaterThan(chatGroup.priority);
+    expect(stableGroup?.priority).toBeGreaterThan(bootGroup!.priority);
   });
 
   it("consolidates shared boot without pulling in the chat route or optional panels", () => {
