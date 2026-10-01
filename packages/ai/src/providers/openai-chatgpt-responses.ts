@@ -262,6 +262,7 @@ export const streamOpenAICodexResponses: StreamFunction<
       const unresolvedApiKey = requireApiKey(model.provider, options?.apiKey);
       // WebSocket auth has no fetch seam; unwrap immediately before request construction.
       const transportHost = getAiTransportHost();
+      const websocketState = getOpenAICodexWebSocketRuntimeState(transportHost);
       const apiKey = transportHost.resolveSecretSentinel(unresolvedApiKey);
       const modelHeaders = resolveAiTransportHeaderSentinels(model.headers);
       const optionHeaders = resolveAiTransportHeaderSentinels(options?.headers);
@@ -296,7 +297,6 @@ export const streamOpenAICodexResponses: StreamFunction<
       const requestOptions =
         activeSignal === options?.signal ? options : { ...options, signal: activeSignal };
       const transport = options?.transport || "auto";
-      const websocketState = getOpenAICodexWebSocketRuntimeState(transportHost);
       const websocketAuthority = transportHost.requiresManagedTransport(model)
         ? undefined
         : resolveCodexWebSocketAuthority({
@@ -465,7 +465,7 @@ export const streamOpenAICodexResponses: StreamFunction<
             activeSignal?.throwIfAborted();
             lifecycle.assertCurrent();
           }
-          attemptResponse = await (buildManagedModelFetch(model) ?? fetch)(
+          attemptResponse = await (buildManagedModelFetch(model, transportHost) ?? fetch)(
             resolveCodexUrl(model.baseUrl),
             {
               method: "POST",

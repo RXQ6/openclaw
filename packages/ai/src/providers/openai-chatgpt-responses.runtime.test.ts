@@ -116,7 +116,7 @@ describe("ChatGPT Responses runtime transport ownership", () => {
     }
   });
 
-  it("keeps default-host socket state reachable after host replacement", async () => {
+  it("keeps default-host socket state reachable when replaced during payload construction", async () => {
     const sessionId = "default-host-replacement";
     const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
     server.on("connection", (socket) => {
@@ -138,9 +138,12 @@ describe("ChatGPT Responses runtime transport ownership", () => {
         apiKey: "opaque",
         sessionId,
         transport: "websocket-cached",
+        onPayload: (body) => {
+          configureAiTransportHost({ resolveSecretSentinel: () => createJwt() });
+          return body;
+        },
       }).result();
 
-      configureAiTransportHost({ resolveSecretSentinel: () => createJwt() });
       closeOpenAICodexWebSocketSessions(sessionId);
 
       expect(closeSpy).toHaveBeenCalledWith(1000, "debug_close");
@@ -153,6 +156,44 @@ describe("ChatGPT Responses runtime transport ownership", () => {
         server.close((error) => (error ? reject(error) : resolve()));
       });
     }
+  });
+
+  it("keeps managed fetch and credentials on one host during payload construction", async () => {
+    const firstToken = createJwt();
+    let firstRequestHeaders: HeadersInit | undefined;
+    const firstFetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      firstRequestHeaders = init?.headers;
+      return new Response(`data: ${JSON.stringify(completion("resp_first"))}\n\n`, {
+        headers: { "content-type": "text/event-stream" },
+      });
+    });
+    const secondFetch = vi.fn(
+      async () =>
+        new Response(`data: ${JSON.stringify(completion("resp_second"))}\n\n`, {
+          headers: { "content-type": "text/event-stream" },
+        }),
+    );
+    configureAiTransportHost({
+      buildModelFetch: () => firstFetch,
+      requiresManagedTransport: () => true,
+      resolveSecretSentinel: (value) => (value === "opaque" ? firstToken : value),
+    });
+
+    await streamOpenAICodexResponses(model, context, {
+      apiKey: "opaque",
+      transport: "auto",
+      onPayload: (body) => {
+        configureAiTransportHost({
+          buildModelFetch: () => secondFetch,
+          requiresManagedTransport: () => true,
+        });
+        return body;
+      },
+    }).result();
+
+    expect(firstFetch).toHaveBeenCalledOnce();
+    expect(secondFetch).not.toHaveBeenCalled();
+    expect(new Headers(firstRequestHeaders).get("authorization")).toBe(`Bearer ${firstToken}`);
   });
 
   it.each(["auto", "websocket-cached"] as const)(

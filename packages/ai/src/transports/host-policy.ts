@@ -1,5 +1,9 @@
 import type { Model } from "@openclaw/llm-core";
-import { getAiTransportHost, type AiProviderRequestPolicyInput } from "../host.js";
+import {
+  getAiTransportHost,
+  type AiProviderRequestPolicyInput,
+  type AiTransportHost,
+} from "../host.js";
 
 export function buildGuardedModelFetch(
   model: Model,
@@ -17,8 +21,10 @@ export function buildGuardedModelFetch(
 }
 
 /** SDKs keep their default transport unless their embedding owner requires an explicit one. */
-export function buildManagedModelFetch(model: Model): typeof fetch | undefined {
-  const host = getAiTransportHost();
+export function buildManagedModelFetch(
+  model: Model,
+  host: AiTransportHost = getAiTransportHost(),
+): typeof fetch | undefined {
   if (!host.requiresManagedTransport(model)) {
     return undefined;
   }
