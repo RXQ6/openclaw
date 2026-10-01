@@ -10,7 +10,11 @@ import type {
   ResponseCreateParamsStreaming,
   ResponseInput,
 } from "openai/resources/responses/responses.js";
-import { getAiTransportHost, resolveAiTransportHeaderSentinels } from "../host.js";
+import {
+  getAiTransportHost,
+  resolveAiTransportHeaderSentinels,
+  type AiTransportHost,
+} from "../host.js";
 import type { BaseOpenAIStreamOptions } from "../provider-options.js";
 import { registerSessionResourceCleanup } from "../session-resources.js";
 import { buildManagedModelFetch } from "../transports/host-policy.js";
@@ -87,6 +91,7 @@ import {
   type CodexWebSocketAuthority,
 } from "./openai-chatgpt-responses-websocket-authority.js";
 import {
+  closeAllOpenAICodexWebSocketStates,
   closeOpenAICodexWebSocketState,
   closeWebSocketSilently,
   deleteOwnedWebSocketSession,
@@ -297,9 +302,10 @@ export const streamOpenAICodexResponses: StreamFunction<
       const requestOptions =
         activeSignal === options?.signal ? options : { ...options, signal: activeSignal };
       const transport = options?.transport || "auto";
-      const websocketAuthority = transportHost.requiresManagedTransport(model)
-        ? undefined
-        : resolveCodexWebSocketAuthority({
+      let websocketAuthority: CodexWebSocketAuthority | undefined;
+      if (!transportHost.requiresManagedTransport(model)) {
+        try {
+          websocketAuthority = resolveCodexWebSocketAuthority({
             transport,
             transportHost,
             baseUrl: model.baseUrl,
@@ -309,6 +315,21 @@ export const streamOpenAICodexResponses: StreamFunction<
                 sessionId || createCodexRequestId(),
               ),
           });
+        } catch (error) {
+          if (transport !== "auto") {
+            throw error;
+          }
+          appendAssistantMessageDiagnostic(
+            output,
+            createAssistantMessageDiagnostic("provider_transport_failure", error, {
+              configuredTransport: transport,
+              fallbackTransport: "sse",
+              eventsEmitted: false,
+              phase: "before_message_stream_start",
+            }),
+          );
+        }
+      }
       const websocketDisabledForSession =
         transport === "auto" &&
         websocketAuthority !== undefined &&
@@ -817,8 +838,15 @@ export function resetOpenAICodexWebSocketStateForTest(): void {
   cachedWebsocket = null;
 }
 
-export function closeOpenAICodexWebSocketSessions(sessionId?: string): void {
-  closeOpenAICodexWebSocketState(getAiTransportHost(), sessionId);
+export function closeOpenAICodexWebSocketSessions(
+  sessionId?: string,
+  owner?: AiTransportHost,
+): void {
+  if (owner) {
+    closeOpenAICodexWebSocketState(owner, sessionId);
+    return;
+  }
+  closeAllOpenAICodexWebSocketStates(sessionId);
 }
 
 registerSessionResourceCleanup(closeOpenAICodexWebSocketSessions);

@@ -2,11 +2,15 @@ import { once } from "node:events";
 import type { AddressInfo } from "node:net";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
+import { createApiRegistry } from "../api-registry.js";
 import {
   configureAiTransportHost,
   createAiTransportHost,
+  getDefaultAiTransportHost,
   runWithAiTransportHost,
 } from "../host.js";
+import { cleanupSessionResources } from "../session-resources.js";
+import { createNodeLlmRuntime } from "../stream.js";
 import type { Context, Model } from "../types.js";
 import {
   closeOpenAICodexWebSocketSessions,
@@ -80,33 +84,38 @@ describe("ChatGPT Responses runtime transport ownership", () => {
       baseUrl: `http://127.0.0.1:${(server.address() as AddressInfo).port}/backend-api`,
     } satisfies Model<"openai-chatgpt-responses">;
     const options = { apiKey: "opaque", sessionId, transport: "websocket-cached" as const };
-    const firstHost = createAiTransportHost({
+    const registry = createApiRegistry();
+    registry.registerApiProvider({
+      api: "openai-chatgpt-responses",
+      stream: streamOpenAICodexResponses,
+      streamSimple: streamOpenAICodexResponses,
+    });
+    const firstRuntime = createNodeLlmRuntime(registry, {
       resolveSecretSentinel: (value) => (value === "opaque" ? firstToken : value),
     });
-    const secondHost = createAiTransportHost({
+    const secondRuntime = createNodeLlmRuntime(registry, {
       resolveSecretSentinel: (value) => (value === "opaque" ? secondToken : value),
     });
 
     try {
-      await runWithAiTransportHost(firstHost, () =>
-        streamOpenAICodexResponses(loopbackModel, context, options).result(),
-      );
-      await runWithAiTransportHost(secondHost, () =>
-        streamOpenAICodexResponses(loopbackModel, context, options).result(),
-      );
-      runWithAiTransportHost(firstHost, () => closeOpenAICodexWebSocketSessions(sessionId));
-      await runWithAiTransportHost(secondHost, () =>
-        streamOpenAICodexResponses(loopbackModel, context, options).result(),
-      );
+      await firstRuntime.stream(loopbackModel, context, options).result();
+      await secondRuntime.stream(loopbackModel, context, options).result();
+      firstRuntime.cleanupSessionResources(sessionId);
+      await secondRuntime.stream(loopbackModel, context, options).result();
+      closeOpenAICodexWebSocketSessions(sessionId);
+      await secondRuntime.stream(loopbackModel, context, options).result();
+      await firstRuntime.stream(loopbackModel, context, options).result();
 
       expect(received).toEqual([
         { authorization: `Bearer ${firstToken}`, connectionId: 1 },
         { authorization: `Bearer ${secondToken}`, connectionId: 2 },
         { authorization: `Bearer ${secondToken}`, connectionId: 2 },
+        { authorization: `Bearer ${secondToken}`, connectionId: 3 },
+        { authorization: `Bearer ${firstToken}`, connectionId: 4 },
       ]);
     } finally {
-      runWithAiTransportHost(firstHost, () => closeOpenAICodexWebSocketSessions(sessionId));
-      runWithAiTransportHost(secondHost, () => closeOpenAICodexWebSocketSessions(sessionId));
+      firstRuntime.cleanupSessionResources(sessionId);
+      secondRuntime.cleanupSessionResources(sessionId);
       for (const socket of server.clients) {
         socket.terminate();
       }
@@ -118,9 +127,13 @@ describe("ChatGPT Responses runtime transport ownership", () => {
 
   it("keeps default-host socket state reachable when replaced during payload construction", async () => {
     const sessionId = "default-host-replacement";
+    const receivedConnectionIds: number[] = [];
     const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    let connectionId = 0;
     server.on("connection", (socket) => {
+      const id = ++connectionId;
       socket.on("message", () => {
+        receivedConnectionIds.push(id);
         socket.send(JSON.stringify(completion("resp_default")));
       });
     });
@@ -134,6 +147,7 @@ describe("ChatGPT Responses runtime transport ownership", () => {
 
     try {
       configureAiTransportHost({ resolveSecretSentinel: () => createJwt() });
+      const firstHost = getDefaultAiTransportHost();
       await streamOpenAICodexResponses(loopbackModel, context, {
         apiKey: "opaque",
         sessionId,
@@ -143,10 +157,21 @@ describe("ChatGPT Responses runtime transport ownership", () => {
           return body;
         },
       }).result();
+      await streamOpenAICodexResponses(loopbackModel, context, {
+        apiKey: "opaque",
+        sessionId,
+        transport: "websocket-cached",
+      }).result();
 
-      closeOpenAICodexWebSocketSessions(sessionId);
+      cleanupSessionResources(sessionId, firstHost);
+      await streamOpenAICodexResponses(loopbackModel, context, {
+        apiKey: "opaque",
+        sessionId,
+        transport: "websocket-cached",
+      }).result();
 
       expect(closeSpy).toHaveBeenCalledWith(1000, "debug_close");
+      expect(receivedConnectionIds).toEqual([1, 2, 2]);
     } finally {
       closeOpenAICodexWebSocketSessions(sessionId);
       for (const socket of server.clients) {
@@ -227,4 +252,26 @@ describe("ChatGPT Responses runtime transport ownership", () => {
       expect(WebSocketFixture).not.toHaveBeenCalled();
     },
   );
+
+  it("falls back to SSE when a relative auto endpoint cannot form a WebSocket URL", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(`data: ${JSON.stringify(completion("resp_relative"))}\n\n`, {
+          headers: { "content-type": "text/event-stream" },
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await streamOpenAICodexResponses(
+      { ...model, baseUrl: "/backend-api" },
+      context,
+      { apiKey: createJwt(), transport: "auto" },
+    ).result();
+
+    expect(result.stopReason).toBe("stop");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/backend-api/codex/responses",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
 });

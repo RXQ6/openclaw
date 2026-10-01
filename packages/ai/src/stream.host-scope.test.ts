@@ -16,6 +16,7 @@ import {
   getDefaultAiTransportHost,
   runWithAiTransportHost,
 } from "./host.js";
+import { cleanupSessionResources, registerSessionResourceCleanup } from "./session-resources.js";
 import { createLlmRuntime, createNodeLlmRuntime } from "./stream.js";
 
 const original = getDefaultAiTransportHost();
@@ -288,6 +289,60 @@ describe("runtime-owned transport host", () => {
       expect(getAiTransportHost().resolveSecretSentinel("opaque")).toBe("opaque");
     });
     expect(getAiTransportHost().resolveSecretSentinel("opaque")).toBe("Gateway:opaque");
+  });
+
+  it("passes each explicit runtime owner to session-resource cleanup", () => {
+    const calls: Array<{ sessionId: string | undefined; owner: object | undefined }> = [];
+    const unregister = registerSessionResourceCleanup((sessionId, owner) => {
+      calls.push({ sessionId, owner });
+    });
+    try {
+      const first = createNodeLlmRuntime();
+      const second = createNodeLlmRuntime();
+      first.cleanupSessionResources("shared");
+      second.cleanupSessionResources();
+      cleanupSessionResources("global");
+
+      expect(calls.map(({ sessionId }) => sessionId)).toEqual(["shared", undefined, "global"]);
+      expect(calls[0]?.owner).toBeDefined();
+      expect(calls[1]?.owner).toBeDefined();
+      expect(calls[0]?.owner).not.toBe(calls[1]?.owner);
+      expect(calls[2]?.owner).toBeUndefined();
+    } finally {
+      unregister();
+    }
+  });
+
+  it("cleans every default host used by an ordinary runtime after replacement", () => {
+    const owners: object[] = [];
+    const unregister = registerSessionResourceCleanup((_sessionId, owner) => {
+      if (owner) {
+        owners.push(owner);
+      }
+    });
+    try {
+      configureAiTransportHost({ resolveSecretSentinel: (value) => "first:" + value });
+      const firstHost = getDefaultAiTransportHost();
+      const runtime = createLlmRuntime(registryFor(async (value) => value));
+      runtime.streamSimple(model, { messages: [] }, { apiKey: "opaque", sessionId: "shared" });
+
+      configureAiTransportHost({ resolveSecretSentinel: (value) => "replacement:" + value });
+      const replacementHost = getDefaultAiTransportHost();
+      runtime.cleanupSessionResources("shared");
+      runtime.cleanupSessionResources("shared");
+
+      expect(owners).toEqual([firstHost, replacementHost, replacementHost]);
+
+      owners.length = 0;
+      runtime.streamSimple(model, { messages: [] }, { apiKey: "opaque", sessionId: "package" });
+      configureAiTransportHost({ resolveSecretSentinel: (value) => "latest:" + value });
+      const latestHost = getDefaultAiTransportHost();
+      cleanupSessionResources("package");
+      runtime.cleanupSessionResources("package");
+      expect(owners).toEqual([latestHost]);
+    } finally {
+      unregister();
+    }
   });
 
   it.each(["stream", "streamSimple"] as const)(

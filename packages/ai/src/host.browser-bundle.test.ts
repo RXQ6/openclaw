@@ -5,11 +5,21 @@ import { expect, it } from "vitest";
 
 type BrowserHostModule = {
   configureAiTransportHost(host: object): void;
+  createAssistantMessageEventStream(): {
+    push(event: object): void;
+    result(): Promise<unknown>;
+  };
   createApiRegistry(): {
     registerApiProvider(provider: object): void;
   };
   createLlmRuntime(registry: object): {
-    stream(model: object, context: object): { result(): Promise<unknown> };
+    stream(
+      model: object,
+      context: object,
+    ): {
+      result(): Promise<unknown>;
+      [Symbol.asyncIterator](): AsyncIterator<unknown>;
+    };
   };
   getDefaultAiTransportHost(): unknown;
   runWithAiTransportHost<T>(host: unknown, run: () => T): T;
@@ -17,7 +27,12 @@ type BrowserHostModule = {
 
 it("keeps the default transport host usable in browser bundles", async () => {
   const result = await build({
-    entryPoints: [fileURLToPath(new URL("./index.ts", import.meta.url))],
+    stdin: {
+      contents:
+        'export * from "./index.ts"; export { createAssistantMessageEventStream } from "@openclaw/llm-core/event-stream";',
+      resolveDir: fileURLToPath(new URL(".", import.meta.url)),
+      sourcefile: "browser-host-entry.ts",
+    },
     bundle: true,
     format: "iife",
     globalName: "OpenClawAiHost",
@@ -65,6 +80,78 @@ it("keeps the default transport host usable in browser bundles", async () => {
     { api: "browser-test", provider: "fixture", id: "browser" },
     { messages: [] },
   );
-  browserHost.configureAiTransportHost({});
+  expect(() => browserHost.configureAiTransportHost({})).toThrow(
+    "Cannot replace the AI transport host while browser provider work is pending",
+  );
   await expect(stream.result()).resolves.toBe(final);
+  browserHost.configureAiTransportHost({});
+
+  let releaseResult!: () => void;
+  const resultGate = new Promise<void>((resolve) => {
+    releaseResult = resolve;
+  });
+  const pendingSource = {
+    ...source,
+    async result() {
+      await resultGate;
+      return final;
+    },
+  };
+  const pendingRegistry = browserHost.createApiRegistry();
+  pendingRegistry.registerApiProvider({
+    api: "browser-pending-test",
+    stream: () => pendingSource,
+    streamSimple: () => pendingSource,
+  });
+  const pendingStream = browserHost
+    .createLlmRuntime(pendingRegistry)
+    .stream(
+      { api: "browser-pending-test", provider: "fixture", id: "browser-pending" },
+      { messages: [] },
+    );
+  expect(await pendingStream[Symbol.asyncIterator]().next()).toEqual({
+    done: true,
+    value: undefined,
+  });
+  expect(() => browserHost.configureAiTransportHost({})).toThrow(
+    "Cannot replace the AI transport host while browser provider work is pending",
+  );
+  releaseResult();
+  await expect(pendingStream.result()).resolves.toBe(final);
+  browserHost.configureAiTransportHost({});
+
+  const nativeSource = browserHost.createAssistantMessageEventStream();
+  const nativeRegistry = browserHost.createApiRegistry();
+  nativeRegistry.registerApiProvider({
+    api: "browser-native-test",
+    stream: () => nativeSource,
+    streamSimple: () => nativeSource,
+  });
+  const nativeStream = browserHost
+    .createLlmRuntime(nativeRegistry)
+    .stream(
+      { api: "browser-native-test", provider: "fixture", id: "browser-native" },
+      { messages: [] },
+    );
+  const delegatedRegistry = browserHost.createApiRegistry();
+  delegatedRegistry.registerApiProvider({
+    api: "browser-delegated-test",
+    stream: () => nativeStream,
+    streamSimple: () => nativeStream,
+  });
+  const delegatedStream = browserHost
+    .createLlmRuntime(delegatedRegistry)
+    .stream(
+      { api: "browser-delegated-test", provider: "fixture", id: "browser-delegated" },
+      { messages: [] },
+    );
+  expect(() => browserHost.configureAiTransportHost({})).toThrow(
+    "Cannot replace the AI transport host while browser provider work is pending",
+  );
+  nativeSource.push({ type: "done", reason: "stop", message: final });
+  await nativeSource.result();
+  await Promise.resolve();
+  browserHost.configureAiTransportHost({});
+  await expect(nativeStream.result()).resolves.toBe(final);
+  await expect(delegatedStream.result()).resolves.toBe(final);
 });

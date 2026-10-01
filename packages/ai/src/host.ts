@@ -299,6 +299,31 @@ function createAiTransportHostScope(): AiTransportHostScope | undefined {
 
 // Avoid a static node:async_hooks import: provider modules also load in browser/Vite builds.
 const scopedAiTransportHost = createAiTransportHostScope();
+let pendingUnscopedHost: ActiveAiTransportHost | undefined;
+let pendingUnscopedOperations = 0;
+
+function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
+  return (
+    value !== null &&
+    (typeof value === "object" || typeof value === "function") &&
+    typeof Reflect.get(value, "then") === "function"
+  );
+}
+
+function trackUnscopedOperation(host: ActiveAiTransportHost, result: unknown): void {
+  if (!isPromiseLike(result)) {
+    return;
+  }
+  pendingUnscopedHost = host;
+  pendingUnscopedOperations += 1;
+  const release = () => {
+    pendingUnscopedOperations -= 1;
+    if (pendingUnscopedOperations === 0) {
+      pendingUnscopedHost = undefined;
+    }
+  };
+  void Promise.resolve(result).then(release, release);
+}
 
 /** Reports whether distinct host policy can survive asynchronous work. */
 export function supportsScopedAiTransportHosts(): boolean {
@@ -323,7 +348,12 @@ export function runWithAiTransportHost<T>(host: ActiveAiTransportHost, run: () =
     if (host !== activeAiTransportHost) {
       throw new Error("Scoped AI transport hosts require Node.js async context support");
     }
-    return run();
+    if (pendingUnscopedHost && pendingUnscopedHost !== host) {
+      throw new Error("AI transport host changed while browser provider work was still pending");
+    }
+    const result = run();
+    trackUnscopedOperation(host, result);
+    return result;
   }
   return scopedAiTransportHost.run(host, run);
 }
@@ -335,6 +365,9 @@ export function getDefaultAiTransportHost(): ActiveAiTransportHost {
 
 /** Installs host implementations for the transport policy ports. */
 export function configureAiTransportHost(host: Partial<AiTransportHost>): void {
+  if (!scopedAiTransportHost && pendingUnscopedOperations > 0) {
+    throw new Error("Cannot replace the AI transport host while browser provider work is pending");
+  }
   activeAiTransportHost = createAiTransportHost(host);
   const transportHost = activeAiTransportHost;
   if (

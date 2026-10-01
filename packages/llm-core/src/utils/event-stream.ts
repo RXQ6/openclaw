@@ -42,10 +42,11 @@ export function getEventStreamCompletion(stream: object): Promise<unknown> | und
 export function bindAssistantMessageEventStream(
   source: AssistantMessageEventStreamContract,
   run: <T>(operation: () => T) => T,
+  options?: { result?: () => Promise<AssistantMessage> },
 ): AssistantMessageEventStreamContract {
   const push = source.push.bind(source);
   const end = source.end.bind(source);
-  const result = source.result.bind(source);
+  const result = options?.result ?? source.result.bind(source);
   const iterate = source[Symbol.asyncIterator].bind(source);
   const bound: AssistantMessageEventStreamContract = {
     push: (event) => run(() => push(event)),

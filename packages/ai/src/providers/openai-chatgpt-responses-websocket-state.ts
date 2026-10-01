@@ -3,7 +3,7 @@ import type {
   ResponseCreateParamsStreaming,
   ResponseInput,
 } from "openai/resources/responses/responses.js";
-import { getDefaultAiTransportHost, type AiTransportHost } from "../host.js";
+import type { AiTransportHost } from "../host.js";
 import {
   clearCodexWebSocketSseFallback,
   type CodexWebSocketAuthority,
@@ -63,25 +63,22 @@ export interface OpenAICodexWebSocketRuntimeState {
   sseFallbacks: CodexWebSocketSseFallbacks;
 }
 
-const processDefaultStateOwner = {};
-const processDefaultHosts = new WeakSet<AiTransportHost>();
-const runtimeStates = new WeakMap<object, OpenAICodexWebSocketRuntimeState>();
-
-function resolveRuntimeStateOwner(transportHost: AiTransportHost): object {
-  if (transportHost === getDefaultAiTransportHost()) {
-    processDefaultHosts.add(transportHost);
-  }
-  return processDefaultHosts.has(transportHost) ? processDefaultStateOwner : transportHost;
-}
+const runtimeStates = new WeakMap<AiTransportHost, OpenAICodexWebSocketRuntimeState>();
+const runtimeStateReferences = new Set<WeakRef<OpenAICodexWebSocketRuntimeState>>();
+const runtimeStateFinalizer = new FinalizationRegistry<WeakRef<OpenAICodexWebSocketRuntimeState>>(
+  (reference) => runtimeStateReferences.delete(reference),
+);
 
 export function getOpenAICodexWebSocketRuntimeState(
   transportHost: AiTransportHost,
 ): OpenAICodexWebSocketRuntimeState {
-  const owner = resolveRuntimeStateOwner(transportHost);
-  let state = runtimeStates.get(owner);
+  let state = runtimeStates.get(transportHost);
   if (!state) {
     state = { sessionCache: new Map(), sseFallbacks: new Map() };
-    runtimeStates.set(owner, state);
+    runtimeStates.set(transportHost, state);
+    const reference = new WeakRef(state);
+    runtimeStateReferences.add(reference);
+    runtimeStateFinalizer.register(state, reference, reference);
   }
   return state;
 }
@@ -140,14 +137,7 @@ export function scheduleSessionWebSocketExpiry(
   }, SESSION_WEBSOCKET_CACHE_TTL_MS);
 }
 
-export function closeOpenAICodexWebSocketState(
-  transportHost: AiTransportHost,
-  sessionId?: string,
-): void {
-  const state = runtimeStates.get(resolveRuntimeStateOwner(transportHost));
-  if (!state) {
-    return;
-  }
+function closeRuntimeState(state: OpenAICodexWebSocketRuntimeState, sessionId?: string): void {
   const closeEntry = (entry: CachedWebSocketConnection) => {
     if (entry.idleTimer) {
       clearTimeout(entry.idleTimer);
@@ -168,4 +158,25 @@ export function closeOpenAICodexWebSocketState(
   }
   state.sessionCache.clear();
   clearCodexWebSocketSseFallback(state.sseFallbacks);
+}
+
+export function closeOpenAICodexWebSocketState(
+  transportHost: AiTransportHost,
+  sessionId?: string,
+): void {
+  const state = runtimeStates.get(transportHost);
+  if (state) {
+    closeRuntimeState(state, sessionId);
+  }
+}
+
+export function closeAllOpenAICodexWebSocketStates(sessionId?: string): void {
+  for (const reference of runtimeStateReferences) {
+    const state = reference.deref();
+    if (!state) {
+      runtimeStateReferences.delete(reference);
+      continue;
+    }
+    closeRuntimeState(state, sessionId);
+  }
 }
