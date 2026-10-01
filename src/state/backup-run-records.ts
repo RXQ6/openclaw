@@ -106,14 +106,14 @@ export function summarizeBackupTargets(runs: readonly BackupRunRecord[]) {
     }
   >();
   for (const run of runs) {
-    const target = run.location?.name ?? resolveBackupRunTarget(run) ?? run.archivePath;
+    const target = run.location?.name ?? resolveBackupRunTarget(run);
     const namespace = resolveBackupRunNamespace(run);
     const key = JSON.stringify([run.kind, target, namespace]);
     let group = groups.get(key);
     if (!group) {
       group = {
         kind: run.kind,
-        target,
+        target: target ?? run.archivePath,
         ...(namespace === undefined ? {} : { namespace }),
         latest: run,
       };

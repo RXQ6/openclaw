@@ -51,7 +51,7 @@ export const OpenClawSchemaShape = {
     })
     .optional(),
   env: z
-    .object({
+    .strictObject({
       shellEnv: z
         .strictObject({
           enabled: z.boolean().optional(),
@@ -60,7 +60,6 @@ export const OpenClawSchemaShape = {
         .optional(),
       vars: z.record(z.string(), z.string()).optional(),
     })
-    .strict()
     .optional(),
   wizard: z
     .strictObject({

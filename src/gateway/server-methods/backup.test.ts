@@ -85,7 +85,34 @@ describe("backup.status", () => {
       status: "failed",
       error: "disk unavailable",
     };
-    ledger.mockResolvedValue([failed, ok]);
+    const archiveOk: BackupRunRecord = {
+      id: "archive-ok",
+      createdAt: 10,
+      archivePath: "/backups/old.tar.gz",
+      kind: "archive",
+      status: "ok",
+    };
+    const archiveFailed: BackupRunRecord = {
+      ...archiveOk,
+      id: "archive-failed",
+      createdAt: 20,
+      archivePath: "/backups/new.tar.gz",
+      status: "failed",
+    };
+    const snapshotOk: BackupRunRecord = {
+      ...archiveOk,
+      id: "snapshot-ok",
+      kind: "sqlite-snapshot",
+      archivePath: "/backups/old-snapshot",
+    };
+    const snapshotFailed: BackupRunRecord = {
+      ...snapshotOk,
+      id: "snapshot-failed",
+      createdAt: 20,
+      archivePath: "/backups/new-snapshot",
+      status: "failed",
+    };
+    ledger.mockResolvedValue([failed, archiveFailed, snapshotFailed, ok, archiveOk, snapshotOk]);
     const job: CronJob = {
       ...buildBackupScheduleJob({
         mode: "offsite",
@@ -106,6 +133,18 @@ describe("backup.status", () => {
       {
         targets: [
           { kind: "archive", target: "offsite", namespace: "host", latest: failed, latestOk: ok },
+          {
+            kind: "archive",
+            target: "/backups/new.tar.gz",
+            latest: archiveFailed,
+            latestOk: archiveOk,
+          },
+          {
+            kind: "sqlite-snapshot",
+            target: "/backups/new-snapshot",
+            latest: snapshotFailed,
+            latestOk: snapshotOk,
+          },
         ],
         schedules: [
           {
