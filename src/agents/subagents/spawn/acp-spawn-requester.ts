@@ -6,7 +6,6 @@ import { readAcpSessionMeta } from "../../../acp/runtime/session-meta.js";
 import { resolveSessionStorePathCore } from "../../../config/sessions/paths.js";
 import { listSessionEntriesReadOnly } from "../../../config/sessions/session-accessor.js";
 import { withSessionEntryReadOnlyInWorker } from "../../../config/sessions/session-entry-read-runtime.js";
-import type { SessionEntry } from "../../../config/sessions/types.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import { getSessionBindingService } from "../../../infra/outbound/session-binding-service.js";
 import {

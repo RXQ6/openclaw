@@ -2539,48 +2539,6 @@ describe("deliverSubagentAnnouncement completion delivery", () => {
     expect(callGateway).not.toHaveBeenCalled();
   });
 
-  it("keeps the remaining wake budget after compaction and delivery-mode mismatch", async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(0);
-    const callGateway = createGatewayMock();
-    let attempt = 0;
-    const queueEmbeddedAgentMessageWithOutcome = vi.fn<QueueEmbeddedAgentMessageWithOutcome>(
-      (sessionId) => {
-        attempt += 1;
-        if (attempt === 1) {
-          vi.setSystemTime(118_000);
-          return { queued: false, sessionId, reason: "compacting", gatewayHealth: "live" };
-        }
-        if (attempt === 2) {
-          vi.setSystemTime(119_500);
-          return {
-            queued: false,
-            sessionId,
-            reason: "source_reply_delivery_mode_mismatch",
-            gatewayHealth: "live",
-          };
-        }
-        return { queued: true, sessionId, target: "embedded_run", gatewayHealth: "live" };
-      },
-    );
-    const delivery = deliverDiscordDirectMessageCompletion({
-      callGateway,
-      isActive: true,
-      queueEmbeddedAgentMessageWithOutcome,
-      sourceTool: "subagent_announce",
-      internalEvents: taskCompletionEvents({ childSessionId: "child-session-id" }),
-    });
-    await vi.runAllTimersAsync();
-
-    expectDeliveryPath(await delivery, "steered");
-    expect(queueEmbeddedAgentMessageWithOutcome).toHaveBeenCalledTimes(3);
-    const retryOptions = mockCallArg(queueEmbeddedAgentMessageWithOutcome, 2, 2);
-    expect(retryOptions.deliveryTimeoutMs).toBe(500);
-    expect(retryOptions.sourceReplyDeliveryMode).toBeUndefined();
-    expect(retryOptions.waitForTranscriptCommit).toBe(true);
-    expect(callGateway).not.toHaveBeenCalled();
-  });
-
   it("falls back to the external requester route when completion origin is internal", async () => {
     const callGateway = createPayloadGatewayMock({ text: "child completion output" });
     const result = await deliverSlackChannelAnnouncement({

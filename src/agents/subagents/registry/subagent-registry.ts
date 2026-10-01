@@ -50,7 +50,6 @@ import {
   countPendingDescendantRuns,
   getLatestLiveSubagentRunByChildSessionKey,
 } from "./subagent-registry-read.js";
-import { adoptSubagentRunForRequesterTurnInRuns } from "./subagent-registry-requester-yield.js";
 import { createSubagentRegistryRestorer } from "./subagent-registry-restore.js";
 import type { RegisterSubagentRunParams } from "./subagent-registry-run-launch-record.js";
 import { createSubagentRunManager } from "./subagent-registry-run-manager.js";
@@ -717,12 +716,8 @@ function resetSubagentRegistryForTests() {
 
 const testing = {
   failQueuedSubagentRun: subagentRunManager.failQueuedSubagentRun,
-  async sweepOnceForTests() {
-    await subagentSweeper.sweepOnce();
-  },
-  async runSweeperTickForTests() {
-    await subagentSweeper.runTick();
-  },
+  sweepOnceForTests: subagentSweeper.sweepOnce,
+  runSweeperTickForTests: subagentSweeper.runTick,
 } as const;
 
 function addSubagentRunForTests(entry: SubagentRunRecord) {
@@ -771,32 +766,8 @@ export const markSubagentMessageWait = publicApi.markSubagentMessageWait;
 export const listUnsettledRequesterChildren = publicApi.listUnsettledRequesterChildren;
 export type { UnsettledRequesterChild } from "./subagent-registry-requester-yield.js";
 
-export function adoptSubagentRunForRequesterTurn(
-  params: Omit<Parameters<typeof adoptSubagentRunForRequesterTurnInRuns>[0], "runs" | "persist">,
-) {
-  if (subagentLifecycleController.newerGenerationOwnsSession(params.expected)) {
-    return Promise.resolve(undefined);
-  }
-  return adoptSubagentRunForRequesterTurnInRuns({
-    ...params,
-    runs: subagentRuns,
-    persist: persistSubagentRunsAsyncOrThrow,
-    assertPublicationCurrent: () =>
-      subagentRuns.runWithCompletionAuthority(params.expected, () => {
-        params.assertPublicationCurrent?.();
-        if (subagentLifecycleController.newerGenerationOwnsSession(params.expected)) {
-          throw new Error("Steered completion no longer owns its execution");
-        }
-      }),
-    assertCurrent: () =>
-      subagentRuns.runWithCompletionAuthority(params.expected, () => {
-        params.assertCurrent();
-        if (subagentLifecycleController.newerGenerationOwnsSession(params.expected)) {
-          throw new Error("Steered completion no longer owns its execution");
-        }
-      }),
-  });
-}
+export const adoptSubagentRunForRequesterTurn =
+  subagentLifecycleController.adoptSubagentRunForRequesterTurn;
 
 const SUBAGENT_REGISTRY_TEST_HANDLE = Symbol.for("openclaw.subagentRegistryTestApi");
 if (process.env.VITEST || process.env.NODE_ENV === "test") {

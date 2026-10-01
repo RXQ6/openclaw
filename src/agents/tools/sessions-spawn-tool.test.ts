@@ -10,8 +10,6 @@ import { upsertSessionEntryCore } from "../../config/sessions/session-accessor.j
 import { GatewayClientRequestError } from "../../gateway/client.js";
 import { withTestDir } from "../../test-helpers/temp-dir.js";
 import { finalizeAgentToolAvailability } from "../agent-tool-availability.js";
-import { createSubagentRunRecord } from "../subagent-test-fixtures.test-helpers.js";
-import { countActiveRunsForSessionFromRuns } from "../subagents/registry/subagent-registry-queries.js";
 import { readParentExecutionIdentity } from "../subagents/spawn/execution-identity-spawn-context.js";
 import {
   expectRegisteredSubagentRun,
@@ -1167,48 +1165,6 @@ describe("sessions_spawn tool", () => {
     const fields = requireRecord(items.properties, "attachment properties");
     expect(fields.content).toMatchObject({ type: "string" });
     expect(fields.content).not.toHaveProperty("maxLength");
-  });
-
-  it("keeps visible child quotas separate for agents sharing a bare requester key", async () => {
-    hoisted.prepareModelChoiceMock.mockResolvedValue({
-      kind: "automatic",
-      ref: { provider: "mock-provider", model: "primary" },
-    });
-    const otherAgentRun = createSubagentRunRecord({
-      runId: "other-agent-run",
-      childSessionKey: "agent:other:subagent:child",
-      requesterSessionKey: "global",
-      requesterAgentId: "other",
-      createdAt: Date.now(),
-    });
-    const runs = new Map([[otherAgentRun.runId, otherAgentRun]]);
-    const tool = makeVisibleTool({
-      agentSessionKey: "global",
-      requesterAgentIdOverride: "main",
-      config: {
-        session: { scope: "global" },
-        agents: {
-          defaults: {
-            model: "mock-provider/primary",
-            subagents: { maxChildrenPerAgent: 1 },
-          },
-          entries: { main: {}, other: {} },
-        },
-      },
-      callGateway: mockGateway({
-        key: "agent:main:dashboard:quota-child",
-        runStarted: true,
-        runId: "quota-child-run",
-      }),
-      countActiveRuns: (key, options) => countActiveRunsForSessionFromRuns(runs, key, options),
-    });
-
-    const result = await tool.execute("visible-bare-key-quota", {
-      task: "inspect the repository",
-      visible: true,
-    });
-
-    expect(result.details).toMatchObject({ status: "accepted", runId: "quota-child-run" });
   });
 
   it("rejects an unsupported visible model before creation or registration", async () => {

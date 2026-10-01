@@ -80,7 +80,7 @@ describe("prepared subagent publication ownership", () => {
           return [entry.runId, entry] as const;
         }),
       );
-      persistSubagentRunsToDiskOrThrow(records);
+      persistSubagentRunsToDiskOrThrow(records, [...records.keys()]);
       for (const entry of [...records.values()].slice(0, 300)) {
         subagentRuns.set(entry.runId, entry);
       }

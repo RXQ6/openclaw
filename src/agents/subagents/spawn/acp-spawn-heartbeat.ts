@@ -53,7 +53,7 @@ export function hasSessionLocalHeartbeatRelayRoute(params: {
   }
 
   const heartbeat = resolveHeartbeatConfig(params.cfg, params.requesterAgentId);
-  if ((heartbeat?.target ?? "none") !== "last") {
+  if (heartbeat?.target !== "last") {
     return false;
   }
 

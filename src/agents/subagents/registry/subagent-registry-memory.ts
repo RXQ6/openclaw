@@ -456,7 +456,7 @@ class SubagentRunMap extends Map<string, SubagentRunRecord> {
 export const subagentRuns = new SubagentRunMap();
 
 // In-place owner publications refresh keyed membership; replacements invalidate it.
-subscribeSubagentRunChanges((ids) => {
+subscribeSubagentRunChanges("projection", ({ runIds: ids }) => {
   if (!ids) {
     subagentRuns.sessionReadLookup = undefined;
   } else {
