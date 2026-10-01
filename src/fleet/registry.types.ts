@@ -1,3 +1,6 @@
+import type { WorkerOperations } from "../state/worker-operation-registry.js";
+import type { fleetOperations } from "./registry.worker.js";
+
 export type FleetCellRecord = {
   tenantId: string;
   createdAtMs: number;
@@ -22,23 +25,4 @@ export type FleetCellOperationName =
   | "restore"
   | "rm";
 
-export type FleetRegistryWriteOperations = {
-  "fleet.cell.reserve": {
-    input: ReserveFleetCellParams & { operationOwner?: string };
-    output: FleetCellRecord;
-  };
-  "fleet.cell.updateImage": {
-    input: { tenantId: string; image: string; operationOwner?: string };
-    output: void;
-  };
-  "fleet.cell.delete": { input: { tenantId: string; operationOwner?: string }; output: void };
-  "fleet.operation.acquire": {
-    input: { tenantId: string; operation: FleetCellOperationName; owner: string; nowMs?: number };
-    output: void;
-  };
-  "fleet.operation.heartbeat": {
-    input: { tenantId: string; owner: string; nowMs?: number };
-    output: void;
-  };
-  "fleet.operation.release": { input: { tenantId: string; owner: string }; output: void };
-};
+export type FleetRegistryWriteOperations = WorkerOperations<typeof fleetOperations>;
