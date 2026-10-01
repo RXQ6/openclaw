@@ -143,6 +143,7 @@ export type AgentsApiEvent = z.infer<typeof eventSchema>;
 export type AgentsApiItem = z.infer<typeof itemSchema>;
 export type AgentsApiFunctionCall = z.infer<typeof functionCallSchema>;
 export type AgentsApiInputFile = HostedEnvironmentFileParam.HostedEnvironmentFileParamInline;
+export type AgentsApiFileUploadResult = { status: "uploaded" } | { status: "unavailable" };
 export type AgentsApiArtifact = z.infer<typeof artifactSchema>;
 export type AgentsApiFunctionResult =
   | { success: true; output: string }
@@ -362,8 +363,9 @@ export class AgentsApiClient {
     sessionId: string,
     file: AgentsApiInputFile,
     signal: AbortSignal,
-  ): Promise<void> {
+  ): Promise<AgentsApiFileUploadResult> {
     const session = await this.session(sessionId, signal);
+    signal.throwIfAborted();
     if (session.environment.type !== "openai_hosted") {
       throw new Error("Agents API file upload requires the session's connected hosted environment");
     }
@@ -372,17 +374,43 @@ export class AgentsApiClient {
       .object({ id: z.string(), type: z.literal("openai_hosted"), status: z.string() })
       .parse(retrieved);
     this.assertCurrent();
-    if (environment.id !== session.environment.id || environment.status !== "connected") {
+    signal.throwIfAborted();
+    if (environment.id !== session.environment.id) {
       throw new Error("Agents API file upload requires the session's connected hosted environment");
     }
-    const uploaded = await this.environments.files.create(session.environment.id, file, {
-      signal,
-      headers: { "Idempotency-Key": randomUUID() },
-    });
+    if (environment.status === "disconnected") {
+      return { status: "unavailable" };
+    }
+    if (environment.status !== "connected") {
+      throw new Error("Agents API file upload requires the session's connected hosted environment");
+    }
+    let uploaded: unknown;
+    try {
+      uploaded = await this.environments.files.create(session.environment.id, file, {
+        signal,
+        headers: { "Idempotency-Key": randomUUID() },
+      });
+    } catch (error) {
+      if (error instanceof OpenAI.ConflictError && error.status === 409) {
+        const failure = errorSchema.safeParse(error.error);
+        if (
+          failure.success &&
+          failure.data.type === "conflict_error" &&
+          failure.data.message ===
+            "the hosted environment is dormant; submit new input to start a fresh sandbox"
+        ) {
+          this.assertCurrent();
+          signal.throwIfAborted();
+          return { status: "unavailable" };
+        }
+      }
+      throw error;
+    }
     const saved = z
       .object({ environment_id: z.string(), path: z.string(), size_bytes: z.number() })
       .parse(uploaded);
     this.assertCurrent();
+    signal.throwIfAborted();
     if (
       saved.environment_id !== session.environment.id ||
       saved.path !== file.path ||
@@ -392,6 +420,7 @@ export class AgentsApiClient {
         "Agents API uploaded file did not match the requested environment, path, or size",
       );
     }
+    return { status: "uploaded" };
   }
 
   async artifacts(
