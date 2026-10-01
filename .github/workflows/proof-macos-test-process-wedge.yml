@@ -1,0 +1,96 @@
+# Temporary proof workflow: reproduce the saturated full-suite macOS test wedge and capture
+# thread/task dumps. Lives only on its scratch branch; never merged.
+name: Proof macOS test process wedge
+
+on:
+  push:
+    branches: [proof/macos-test-process-wedge]
+
+permissions:
+  contents: read
+
+jobs:
+  hunt:
+    name: wedge hunt (${{ matrix.shard }})
+    runs-on: xcode-27
+    timeout-minutes: 240
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          source scripts/lib/swift-toolchain.sh
+          select_xcode_toolchain
+          sw_vers
+          sysctl -n hw.logicalcpu hw.memsize
+          git log --oneline -1
+          csrutil status || true
+          ls -l /usr/bin/swift-inspect || true
+          helper="$(dirname "$(xcrun --find swift)")/../libexec/swift/pm/swiftpm-testing-helper"
+          ls -l "$helper" || true
+          codesign -d --entitlements - "$helper" 2>&1 | head -40 || true
+          sudo -n true && echo "sudo ok"
+
+      - name: Setup Node environment for Apple assets
+        uses: ./.github/actions/setup-node-env
+        with:
+          node-version: "24.21.0"
+          cache-mode: "off"
+          install-bun: "false"
+          install-deps: "false"
+
+      - name: Install Mermaid renderer dependencies
+        env:
+          CI: "true"
+        run: >-
+          pnpm install --frozen-lockfile --prefer-offline --optional
+          --filter '@openclaw/mermaid-renderer...'
+          --config.ignore-scripts=false
+          --config.engine-strict=false
+          --config.enable-pre-post-scripts=true
+          --config.side-effects-cache=true
+
+      - name: Prepare Apple Mermaid assets
+        run: node scripts/prepare-apple-mermaid.mjs
+
+      - name: Apply proof-only continuation attribution
+        # Leak reports otherwise name only the enclosing function (for example `wait()`).
+        run: |
+          set -euo pipefail
+          files=$(grep -rlE "withChecked(Throwing)?Continuation \{" apps/macos/Sources apps/macos/Tests \
+            apps/shared/OpenClawKit/Sources apps/swabble/Sources)
+          perl -pi -e 's/withChecked(Throwing)?Continuation \{/withChecked$1Continuation(function: "\\(#fileID):\\(#line)") {/g' $files
+          git diff --stat | tail -3
+          git diff | grep '^+' | grep -c 'function: "\\(#fileID)' || true
+
+      - name: Build tests
+        run: |
+          set -euo pipefail
+          start=$(date +%s)
+          swift build --package-path apps/macos --build-system native --enable-code-coverage \
+            --disable-index-store -Xswiftc -gline-tables-only --build-tests
+          echo "build seconds=$(( $(date +%s) - start ))"
+
+      - name: Hunt full-suite wedge under CPU saturation
+        timeout-minutes: 205
+        env:
+          SHARD: ${{ matrix.shard }}
+          HUNT_MINUTES: "195"
+          STALL_SECONDS: "300"
+        run: bash .github/proof-wedge/hunt.sh
+
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: macos-wedge-${{ matrix.shard }}
+          path: ${{ runner.temp }}/wedge/*
+          if-no-files-found: ignore
