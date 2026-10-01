@@ -61,7 +61,7 @@ vi.mock("../agents/prepared-model-runtime.js", () => ({
   rejectPendingPreparedModelRuntimeReplacement: vi.fn(),
   refreshPreparedModelRuntimeSnapshots: vi.fn(async () => {}),
 }));
-vi.mock("../plugins/installed-plugin-index-records.js", () => ({
+vi.mock("../plugins/installed-plugin-index-record-reader.js", () => ({
   clearLoadInstalledPluginIndexInstallRecordsCache: vi.fn(),
   loadInstalledPluginIndexInstallRecords: vi.fn(async () => ({})),
   loadInstalledPluginIndexInstallRecordsSync: vi.fn(() => ({})),
