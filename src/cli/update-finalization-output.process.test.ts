@@ -183,7 +183,7 @@ describe.each(["repair", "finalize"])("update %s process output", (command) => {
       );
       if (scenario === "json" || scenario === "human") {
         for (const status of ["in_progress", "completed"]) {
-          const phaseRecord = `\"step\":\"finalize:preflight\",\"status\":\"${status}\"`;
+          const phaseRecord = `"step":"finalize:preflight","status":"${status}"`;
           expect(result.stderr, failure).toContain(phaseRecord);
           expect(result.stdout, failure).not.toContain(phaseRecord);
         }

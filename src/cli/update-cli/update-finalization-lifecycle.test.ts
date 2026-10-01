@@ -21,18 +21,15 @@ import { withCliProcessScope } from "../runtime-cleanup-scope.js";
 import { UpdateFinalizationLifecycle } from "./update-finalization-lifecycle.js";
 
 const dirs = createTempDirTracker();
+let stderrWrite: ReturnType<typeof vi.fn>;
 
 it("writes successful finalization progress to stderr and failures as errors", async () => {
   const logPath = path.join(dirs.make("openclaw-finalize-log-"), "openclaw.log");
   setLoggerOverride({ level: "info", file: logPath });
   const lifecycle = new UpdateFinalizationLifecycle(false, 5_000, () => {});
   await lifecycle.run("doctor", async () => undefined);
-  expect(process.stderr.write).toHaveBeenCalledWith(
-    expect.stringContaining('"status":"in_progress"'),
-  );
-  expect(process.stderr.write).toHaveBeenCalledWith(
-    expect.stringContaining('"status":"completed"'),
-  );
+  expect(stderrWrite).toHaveBeenCalledWith(expect.stringContaining('"status":"in_progress"'));
+  expect(stderrWrite).toHaveBeenCalledWith(expect.stringContaining('"status":"completed"'));
   await flushLogger();
   const phaseRecords = fs
     .readFileSync(logPath, "utf8")
@@ -136,7 +133,8 @@ beforeEach(() => {
   vi.stubEnv("OPENCLAW_STATE_DIR", dirs.make("openclaw-finalize-heartbeat-"));
   vi.stubEnv(UPDATE_RUN_ID_ENV, undefined);
   vi.spyOn(defaultRuntime, "error").mockImplementation(() => {});
-  vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  stderrWrite = vi.fn(() => true);
+  vi.spyOn(process.stderr, "write").mockImplementation(stderrWrite);
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
