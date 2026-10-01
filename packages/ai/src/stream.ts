@@ -174,13 +174,28 @@ function createRuntime(registry: ApiRegistry, transportHost?: Partial<AiTranspor
     const completion = getEventStreamCompletion(started);
     const bound = bindAssistantMessageEventStream(started, runWithStreamHost);
     if (completion) {
-      void runWithStreamHost(() => completion);
       if (!supportsScopedAiTransportHosts()) {
-        const result = runWithStreamHost(() => bound.result());
-        return bindAssistantMessageEventStream(bound, (operation) => operation(), {
-          result: () => result,
-        });
+        let producerSettled = false;
+        const observedCompletion = completion.then(
+          () => {
+            producerSettled = true;
+          },
+          (error: unknown) => {
+            producerSettled = true;
+            throw error;
+          },
+        );
+        void runWithStreamHost(() => observedCompletion);
+        const result = runWithStreamHost(() => started.result());
+        return bindAssistantMessageEventStream(
+          started,
+          (operation) => (producerSettled ? operation() : runWithStreamHost(operation)),
+          {
+            result: () => result,
+          },
+        );
       }
+      void runWithStreamHost(() => completion);
     }
     return !completion && !supportsScopedAiTransportHosts()
       ? retainUnscopedStreamLifetime(bound, runWithStreamHost)

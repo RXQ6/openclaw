@@ -133,11 +133,26 @@ it("keeps the default transport host usable in browser bundles", async () => {
       { api: "browser-native-test", provider: "fixture", id: "browser-native" },
       { messages: [] },
     );
+  const delegatedSource = browserHost.createAssistantMessageEventStream();
+  const delegatedNativeRegistry = browserHost.createApiRegistry();
+  delegatedNativeRegistry.registerApiProvider({
+    api: "browser-delegated-native-test",
+    stream: () => delegatedSource,
+    streamSimple: () => delegatedSource,
+  });
+  const delegatedNativeStream = browserHost.createLlmRuntime(delegatedNativeRegistry).stream(
+    {
+      api: "browser-delegated-native-test",
+      provider: "fixture",
+      id: "browser-delegated-native",
+    },
+    { messages: [] },
+  );
   const delegatedRegistry = browserHost.createApiRegistry();
   delegatedRegistry.registerApiProvider({
     api: "browser-delegated-test",
-    stream: () => nativeStream,
-    streamSimple: () => nativeStream,
+    stream: () => delegatedNativeStream,
+    streamSimple: () => delegatedNativeStream,
   });
   const delegatedStream = browserHost
     .createLlmRuntime(delegatedRegistry)
@@ -149,9 +164,20 @@ it("keeps the default transport host usable in browser bundles", async () => {
     "Cannot replace the AI transport host while browser provider work is pending",
   );
   nativeSource.push({ type: "done", reason: "stop", message: final });
-  await nativeSource.result();
+  delegatedSource.push({ type: "done", reason: "stop", message: final });
+  await Promise.all([nativeSource.result(), delegatedSource.result()]);
   await Promise.resolve();
   browserHost.configureAiTransportHost({});
   await expect(nativeStream.result()).resolves.toBe(final);
   await expect(delegatedStream.result()).resolves.toBe(final);
+  const nativeEvents = [];
+  for await (const event of nativeStream) {
+    nativeEvents.push(event);
+  }
+  expect(nativeEvents).toEqual([{ type: "done", reason: "stop", message: final }]);
+  const delegatedEvents = [];
+  for await (const event of delegatedStream) {
+    delegatedEvents.push(event);
+  }
+  expect(delegatedEvents).toEqual([{ type: "done", reason: "stop", message: final }]);
 });
