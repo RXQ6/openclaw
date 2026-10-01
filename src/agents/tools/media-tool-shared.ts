@@ -21,6 +21,7 @@ import {
   classifyMediaReferenceSource,
   normalizeMediaReferenceSource,
 } from "../../media/media-reference.js";
+import { getMediaDir } from "../../media/store.js";
 import type { WebMediaResult } from "../../media/web-media.js";
 import {
   listAvailableManifestContractValues,
@@ -404,7 +405,7 @@ export async function resolveMediaToolReferenceAccess(params: {
     params.sandbox?.root ?? params.fsPolicy?.root ?? params.cwd ?? params.workspaceDir,
   );
   const cwd = normalizeWorkspaceDir(params.cwd) ?? root;
-  const workspaceRoots = root ? [root] : [];
+  const hostRoots = [getMediaDir(), ...(root ? [root] : [])];
   const workspaceOnly = params.fsPolicy?.workspaceOnly ?? params.sandbox?.workspaceOnly === true;
   const reference = classifyMediaReferenceSource(params.input);
   const resolveHostPath = () => {
@@ -414,10 +415,8 @@ export async function resolveMediaToolReferenceAccess(params: {
     if (reference.isHttpUrl || reference.isMediaStoreUrl || reference.looksLikeWindowsDrivePath) {
       return params.input;
     }
-    if (params.input.startsWith("~")) {
-      return resolveUserPath(params.input);
-    }
-    return cwd ? path.resolve(cwd, params.input) : params.input;
+    const input = params.input.startsWith("~") ? resolveUserPath(params.input) : params.input;
+    return cwd ? path.resolve(cwd, input) : input;
   };
   const pathInfo: { resolved: string; rewrittenFrom?: string } = params.isDataUrl
     ? { resolved: "" }
@@ -431,7 +430,7 @@ export async function resolveMediaToolReferenceAccess(params: {
   return {
     resolvedPath: params.isDataUrl ? null : pathInfo.resolved,
     localRoots: uniqueStrings([
-      ...(workspaceOnly ? workspaceRoots : [...getDefaultLocalRootsCore(), ...workspaceRoots]),
+      ...(workspaceOnly ? hostRoots : [...getDefaultLocalRootsCore(), ...hostRoots]),
       ...(params.fsPolicy?.readOnlyRoots ?? []),
     ]),
     ...(pathInfo.rewrittenFrom ? { rewrittenFrom: pathInfo.rewrittenFrom } : {}),
