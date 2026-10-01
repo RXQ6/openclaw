@@ -67,9 +67,13 @@ afterEach(() => {
 type SnapshotOptions = Parameters<typeof createVerifiedSqliteSnapshot>[0];
 
 async function expectSnapshotSuccess(options: SnapshotOptions): Promise<void> {
-  await expect(createVerifiedSqliteSnapshot(options)).resolves.toEqual({
+  const snapshot = await createVerifiedSqliteSnapshot(options);
+  const published = await fs.readFile(options.targetPath);
+  expect(snapshot).toEqual({
     path: options.targetPath,
     userVersion: 0,
+    sha256: createHash("sha256").update(published).digest("hex"),
+    sizeBytes: published.length,
   });
 }
 
