@@ -11,6 +11,11 @@
     "type": "object",
     "additionalProperties": false,
     "properties": {
+      "nativeTools": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Allowlist of native Agents API tool names for new sessions. Omit to allow all native tools offered by the harness; an empty list disables them all. Existing sessions retain their original tools; reset the session to adopt a changed list. OpenClaw functions, MCP servers, plugins, and environment-provided tools are configured separately."
+      },
       "plugins": {
         "type": "object",
         "additionalProperties": false,

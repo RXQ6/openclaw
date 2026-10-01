@@ -172,6 +172,36 @@ afterEach(() => {
 
 describe("Agents API attempt environment selection", () => {
   it.each([
+    { nativeTools: [], expectedTools: [] },
+    {
+      nativeTools: ["web_search", "future_native_tool"],
+      expectedTools: [{ type: "web_search", mode: "live" }],
+    },
+  ])(
+    "selects native tools $nativeTools only when creating a session",
+    async ({ nativeTools, expectedTools }) => {
+      const created = await attempt(undefined, undefined, undefined, undefined, { nativeTools });
+
+      expect(created.result).toMatchObject({ terminal: { kind: "ok" } });
+      expect(await requestBody(0)).toHaveProperty("agent.tools", expectedTools);
+      mocks.fetch.mockClear();
+
+      const continued = await attempt(
+        undefined,
+        created.bind.mock.calls[0]![0],
+        undefined,
+        undefined,
+        {
+          nativeTools: nativeTools.length ? [] : ["web_search"],
+        },
+      );
+
+      expect(continued.result).toMatchObject({ terminal: { kind: "ok" } });
+      expect(await requestBody(0)).toEqual({ agent: { reasoning: { effort: null } } });
+    },
+  );
+
+  it.each([
     { access: "enabled" },
     { access: "disabled", allowed_domains: null },
     {

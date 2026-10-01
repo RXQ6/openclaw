@@ -14,7 +14,7 @@ import { retryAsync } from "openclaw/plugin-sdk/retry-runtime";
 import { sleepWithAbort } from "openclaw/plugin-sdk/runtime-env";
 import { fetchWithSsrFGuard } from "openclaw/plugin-sdk/ssrf-runtime";
 import { z } from "zod";
-import type { AgentsApiEnvironment } from "./config.js";
+import type { AgentsApiConfig, AgentsApiEnvironment } from "./config.js";
 
 const usageSchema = z.looseObject({
   input_tokens: z.number(),
@@ -196,6 +196,7 @@ export class AgentsApiClient {
     instructions: string,
     model: string,
     options?: {
+      nativeTools?: AgentsApiConfig["nativeTools"];
       functions?: AgentToolParam.AgentToolConfigParamFunction[];
       mcpTools?: AgentToolParam.AgentToolConfigParamMcp[];
       files?: AgentsApiInputFile[];
@@ -204,6 +205,12 @@ export class AgentsApiClient {
     },
   ): Promise<string> {
     const environment: AgentsApiEnvironment = options?.environment ?? { type: "openai_hosted" };
+    const nativeTools: AgentToolParam[] = [{ type: "web_search", mode: "live" }];
+    const allowlist = options?.nativeTools;
+    const tools = nativeTools.filter(
+      (tool) => allowlist === undefined || allowlist.includes(tool.type),
+    );
+    tools.push(...(options?.mcpTools ?? []), ...(options?.functions ?? []));
     const session = await this.sessions.create(
       {
         agent: {
@@ -211,11 +218,7 @@ export class AgentsApiClient {
           instructions,
           reasoning: options?.reasoning,
           multi_agent: { enabled: false },
-          tools: [
-            { type: "web_search", mode: "live" },
-            ...(options?.mcpTools ?? []),
-            ...(options?.functions ?? []),
-          ],
+          tools,
         },
         environment:
           environment.type === "openai_hosted"

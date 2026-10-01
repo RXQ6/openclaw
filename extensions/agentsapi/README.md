@@ -14,6 +14,32 @@ overrides are covered in the
 
 Multi-user Gateways are not supported by the Agents API MVP.
 
+Omit `plugins.entries.agentsapi.config.nativeTools` to allow all native Agents API
+tools offered by the harness. Set a list of tool names to restrict new sessions to
+those tools, or an empty list to disable them all. The harness currently offers
+`web_search`:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "agentsapi": {
+        "config": { "nativeTools": [] }
+      }
+    }
+  }
+}
+```
+
+`["web_search"]` allows only native live search. The setting accepts a list of
+strings; names that do not match an available native tool have no effect.
+This follows the native API's [optional web-search declaration](https://developers.openai.com/api/docs/guides/agents-api/tools/web-search).
+The list does not filter OpenClaw functions, MCP servers, installed plugins, or
+environment-provided shell and file tools. Those retain their existing settings.
+Existing sessions keep the tools selected at creation. Restart the Gateway after
+editing this setting, then start or reset a session to adopt it. There is no live
+tool-list update or automatic session reset.
+
 Configure HTTP MCP servers through the shared `mcp.servers` configuration or an
 enabled plugin's MCP bundle. For example:
 
