@@ -1,4 +1,6 @@
 import { sessionChanges } from "../../sessions/session-row-changes.js";
+import type { WorkerOperations } from "../../state/worker-operation-registry.js";
+import type { workerPlacementOperations } from "./placement-dispatch-store.worker.js";
 import type { WorkerSessionPlacementState } from "./placement-state.js";
 import type { WorkerWorkspaceResultConflict } from "./workspace-conflicts.js";
 
@@ -34,12 +36,9 @@ export type WorkerSessionPlacementDispatchIdentity = WorkerSessionPlacementIdent
   >;
 };
 
-export type WorkerPlacementDispatchStoreOperations = {
-  "workerPlacements.startDispatch": {
-    input: { placement: WorkerSessionPlacementDispatchIdentity; nowMs: number };
-    output: WorkerSessionPlacementRecord;
-  };
-};
+export type WorkerPlacementDispatchStoreOperations = WorkerOperations<
+  typeof workerPlacementOperations
+>;
 
 export type WorkerSessionTurnOwner =
   | { kind: "local"; environmentId?: string; ownerEpoch?: number }

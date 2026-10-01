@@ -35,12 +35,6 @@ import type {
   SessionGroupCatalogMutation,
   SessionGroupCatalogMutationResult,
 } from "../gateway/session-group-catalog.types.js";
-import type { WorkerInferenceStoreOperations } from "../gateway/worker-environments/inference-store.worker-contract.js";
-import type { WorkerPlacementDispatchStoreOperations } from "../gateway/worker-environments/placement-record.js";
-import type { PlacementSessionToolWorkerOperations } from "../gateway/worker-environments/placement-session-tool-operations.worker-contract.js";
-import type { PlacementTurnClaimWorkerOperations } from "../gateway/worker-environments/placement-turn-claims.worker-contract.js";
-import type { WorkspaceJournalWorkerOperations } from "../gateway/worker-environments/placement-workspace-journal.worker-contract.js";
-import type { WorkerEnvironmentWorkerOperations } from "../gateway/worker-environments/store-worker-contract.js";
 import type {
   DeferredPluginMigration,
   DeferredPluginMigrationRecordInput,
@@ -79,7 +73,6 @@ import type { PluginBindingApprovalEntry } from "../plugins/conversation-binding
 import type { PluginMetadataStateSelector } from "../plugins/installed-plugin-index-row.js";
 import type { HostedCatalogSnapshotWorkerOperations } from "../plugins/official-external-plugin-catalog-snapshot-store.worker-contract.js";
 import type { PluginSourceAdmissionPublication } from "../plugins/plugin-source-admission.types.js";
-import type { ProjectRegistryWorkerOperations } from "../projects/project-registry.worker-contract.js";
 import type { CaptureWorkerOperations } from "../proxy-capture/store.worker-contract.js";
 import type { SecretStoreConfigRefWrite } from "../secrets/store/secret-store-config-ref.kernel.js";
 import type { SecretStoreExpiryCutoffs } from "../secrets/store/secret-store-expiry.kernel.js";
@@ -107,7 +100,6 @@ import type { OpenClawAgentDatabaseWorkerLeaseReceipt } from "./openclaw-agent-d
 import type { OpenClawStateLeaseLifecycleOperations } from "./openclaw-state-lease-context.js";
 import type { OpenClawStateLeaseIdentity } from "./openclaw-state-lease-store.js";
 import type { RegisteredStateWorkerOperations } from "./openclaw-state-worker-registry.js";
-import type { RepositoryWorkspaceWorkerOperations } from "./session-repository-workspaces.types.js";
 import type { UserPreferenceWorkerOperations } from "./user-preferences.types.js";
 import type { UserProfileWorkerOperations } from "./user-profiles.worker.js";
 
@@ -117,7 +109,6 @@ export type OpenClawStateWorkerOpenPreparation = { type: "deviceIdentity"; ident
 export type OpenClawStateWorkerOperations = RegisteredStateWorkerOperations &
   UpdateRunReconciliationOperations &
   UpdateRunWriteOperations &
-  RepositoryWorkspaceWorkerOperations &
   CaptureWorkerOperations &
   TuiLastSessionWorkerOperations &
   AcpSessionWriteOperations &
@@ -141,13 +132,6 @@ export type OpenClawStateWorkerOperations = RegisteredStateWorkerOperations &
   UserProfileWorkerOperations &
   ChannelIngressWorkerOperations &
   CronStateWorkerOperations &
-  ProjectRegistryWorkerOperations &
-  WorkerEnvironmentWorkerOperations &
-  WorkerInferenceStoreOperations &
-  PlacementTurnClaimWorkerOperations &
-  WorkspaceJournalWorkerOperations &
-  PlacementSessionToolWorkerOperations &
-  WorkerPlacementDispatchStoreOperations &
   SessionDeliveryWorkerOperations &
   DeliveryQueueWorkerOperations &
   TranscriptReadOperations &

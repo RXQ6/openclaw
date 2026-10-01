@@ -1,6 +1,7 @@
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
-import type { SqliteWorkerCommand } from "../../infra/sqlite-worker-contract.js";
+import type { WorkerOperations } from "../../state/worker-operation-registry.js";
 import type { WorkerSessionPlacementRecord } from "./placement-record.js";
+import type { workspaceJournalOperations } from "./placement-workspace-journal.worker.js";
 import type { WorkerWorkspaceReconciliationJournal } from "./workspace-manifest.js";
 
 export type WorkerWorkspaceJournalOwner = {
@@ -23,24 +24,7 @@ export type WorkspaceJournalReceipt = WorkspaceJournalMutation & {
   type: "placementJournals.begin" | "placementJournals.abort" | "placementJournals.prune";
 };
 
-export type WorkspaceJournalWorkerOperations = {
-  "placementJournals.begin": {
-    input: {
-      owner: WorkerWorkspaceJournalOwner;
-      journal: WorkerWorkspaceReconciliationJournal;
-      nowMs?: number;
-    };
-    output: WorkspaceJournalReceipt;
-  };
-  "placementJournals.abort": {
-    input: { owner: WorkerWorkspaceJournalOwner; force?: boolean };
-    output: WorkspaceJournalReceipt;
-  };
-  "placementJournals.prune": {
-    input: Record<string, never>;
-    output: WorkspaceJournalReceipt;
-  };
-};
+export type WorkspaceJournalWorkerOperations = WorkerOperations<typeof workspaceJournalOperations>;
 
 export type WorkspaceJournalReadCommand =
   | { type: "placementJournals.owners" }
@@ -83,16 +67,6 @@ export function isWorkspaceJournalReadCommand(
       ((value.type === "placementJournals.placement" || value.type === "placementJournals.load") &&
         isJournalOwner(value.owner) &&
         (value.allowFailedOwner === undefined || typeof value.allowFailedOwner === "boolean")))
-  );
-}
-
-export function isWorkspaceJournalWriteCommand(command: {
-  type: PropertyKey;
-}): command is SqliteWorkerCommand<WorkspaceJournalWorkerOperations> {
-  return (
-    command.type === "placementJournals.begin" ||
-    command.type === "placementJournals.abort" ||
-    command.type === "placementJournals.prune"
   );
 }
 

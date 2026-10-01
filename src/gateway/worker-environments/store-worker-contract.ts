@@ -1,6 +1,6 @@
 import type { Selectable } from "kysely";
-import type { SqliteWorkerCommand } from "../../infra/sqlite-worker-contract.js";
 import type { WorkerEnvironments } from "../../state/openclaw-state-db.generated.js";
+import type { WorkerOperations } from "../../state/worker-operation-registry.js";
 import type { WorkerCredentialRecord } from "./credential.js";
 import type {
   WorkerEnvironmentIntentInput,
@@ -19,6 +19,7 @@ import type {
   CredentialRevocationInput,
   TransitionInput,
 } from "./store-write-types.js";
+import type { workerEnvironmentOperations } from "./store.worker.js";
 
 export type WorkerEnvironmentFacts = {
   ids: string[];
@@ -133,29 +134,9 @@ type WithoutAdmission<T> = T extends object
         ? { placementBinding?: Omit<NonNullable<Binding>, "assertCurrent"> }
         : unknown)
   : T;
-type WorkerEnvironmentMutationInput<Method extends WorkerEnvironmentMutationMethod> =
+export type WorkerEnvironmentMutationInput<Method extends WorkerEnvironmentMutationMethod> =
   WithoutAdmission<Parameters<WorkerEnvironmentMutationMethods[Method]>[0]>;
 
-type WorkerEnvironmentMutationReceipt<Result> = {
-  result: Result;
-  changed: boolean;
-  facts: WorkerEnvironmentFacts;
-};
-export type WorkerEnvironmentWorkerOperations = {
-  [Method in WorkerEnvironmentMutationMethod as `workerEnvironments.${Method}`]: {
-    input: { input: WorkerEnvironmentMutationInput<Method>; nowMs?: number };
-    output: WorkerEnvironmentMutationReceipt<ReturnType<WorkerEnvironmentMutationMethods[Method]>>;
-  };
-} & {
-  "workerEnvironments.initialize": {
-    input: { nowMs?: number };
-    output: WorkerEnvironmentMutationReceipt<undefined>;
-  };
-};
-
-export function isWorkerEnvironmentCommand(command: {
-  type: string;
-  input: unknown;
-}): command is SqliteWorkerCommand<WorkerEnvironmentWorkerOperations> {
-  return command.type.startsWith("workerEnvironments.");
-}
+export type WorkerEnvironmentWorkerOperations = WorkerOperations<
+  typeof workerEnvironmentOperations
+>;
