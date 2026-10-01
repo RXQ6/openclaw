@@ -55,6 +55,7 @@ import {
   transferCoreTtsToolResultProvenance,
 } from "../tools/tts-tool-result-provenance.js";
 import type { AgentHarnessHostCapabilities } from "./host-capability-types.js";
+import { captureRequiredWorkspaceToolFloor, cloneSnapshot } from "./host-capability-workspace.js";
 import { normalizeNativeOperationCwd, prepareAgentHarnessEnvironment } from "./host-environment.js";
 import { bindHarnessMedia } from "./host-media.js";
 import {
@@ -78,21 +79,6 @@ type AgentHarnessHostAttempt = Partial<EmbeddedRunAttemptParams> &
 type AgentHarnessHostApprovalResult = NonNullable<
   Awaited<ReturnType<AgentHarnessHostCapabilities["waitForApproval"]>>
 >;
-
-function freezeSnapshot<T>(value: T, seen = new WeakSet<object>()): T {
-  if (!value || typeof value !== "object" || seen.has(value as object)) {
-    return value;
-  }
-  seen.add(value as object);
-  for (const nested of Object.values(value as Record<string, unknown>)) {
-    freezeSnapshot(nested, seen);
-  }
-  return Object.freeze(value);
-}
-
-function cloneSnapshot<T>(value: T): T {
-  return freezeSnapshot(structuredClone(value));
-}
 
 function gateBoundTool(
   tool: AnyAgentTool,
@@ -273,6 +259,7 @@ export function createAgentHarnessHostCapabilities(params: {
   };
   const config = attempt.config ? cloneSnapshot(attempt.config) : undefined;
   const hostSandboxEnabled = attempt.sandbox?.enabled === true;
+  const requiredWorkspace = captureRequiredWorkspaceToolFloor(attempt, params.pluginId, config);
   const media = bindHarnessMedia({
     attempt,
     config,
@@ -522,6 +509,7 @@ export function createAgentHarnessHostCapabilities(params: {
             createOpenClawCodingToolsInternal(
               {
                 ...options,
+                ...requiredWorkspace?.(options),
                 // Availability belongs to this prepared host, not mutable plugin inputs.
                 githubPublicationAvailable,
                 runtimePluginToolGrant,
@@ -530,7 +518,8 @@ export function createAgentHarnessHostCapabilities(params: {
                 operationalRunInstance,
               },
               // Sandboxes use their materialized snapshot paths, never host library pins.
-              !hostSandboxEnabled &&
+              !requiredWorkspace &&
+                !hostSandboxEnabled &&
                 !options?.sandbox?.enabled &&
                 options?.includeCoreTools !== false &&
                 options?.toolConstructionPlan?.includeBaseCodingTools !== false
