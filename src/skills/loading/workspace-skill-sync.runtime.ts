@@ -1,7 +1,6 @@
 // Sandbox workspace skill synchronization is deferred behind the sandbox runtime boundary.
 import fs from "node:fs";
 import path from "node:path";
-import { openRootFile } from "@openclaw/fs-safe/advanced";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { resolveSandboxPath } from "../../agents/sandbox-paths.js";
 import { canonicalizePath } from "../../agents/utils/paths.js";
@@ -24,6 +23,7 @@ import type {
   SkillUsagePath,
 } from "../types.js";
 import { resolveSkillKey } from "./frontmatter.js";
+import { ensureWritableSkillDirectories } from "./skill-directory-modes.js";
 import { shouldSyncSkillPath } from "./skill-paths.js";
 import { resolveSkillTelemetrySource } from "./source.js";
 import { prepareWorkspaceSkills } from "./workspace-skill-loader.js";
@@ -78,32 +78,6 @@ function resolveSyncedSkillsManifestKey(manifest: SyncedSkillsManifest): string 
     manifest.skillRootsFingerprint,
     manifest.entryKeys,
   ]);
-}
-
-async function removeSyncedSkill(rootDir: string, relativePath: string): Promise<void> {
-  const absolutePath = path.join(rootDir, relativePath);
-  if (process.platform !== "win32" && (await fsp.lstat(absolutePath)).isDirectory()) {
-    const opened = await openRootFile({
-      rootPath: rootDir,
-      absolutePath,
-      allowedType: "directory",
-      boundaryLabel: "sandbox skills",
-    });
-    if (!opened.ok) {
-      throw new Error("Cannot open synced skill directory", { cause: opened.error });
-    }
-    try {
-      // Copies inherit source modes. Repair only owner access through a confined
-      // descriptor; agent writes remain blocked by the read-only skill mount.
-      fs.fchmodSync(opened.fd, opened.stat.mode | 0o700);
-    } finally {
-      fs.closeSync(opened.fd);
-    }
-    for (const child of await fsp.readdir(absolutePath)) {
-      await removeSyncedSkill(rootDir, path.join(relativePath, child));
-    }
-  }
-  await removePathWithinRoot({ rootDir, relativePath, recursive: true, symlinks: "unlink" });
 }
 
 async function ensureSyncedSkillsDirectory(targetSkillsDir: string): Promise<void> {
@@ -278,7 +252,13 @@ export async function syncWorkspaceSkills(params: {
     );
     for (const child of await fsp.readdir(targetSkillsDir)) {
       if (!preservedDestinations.has(child)) {
-        await removeSyncedSkill(targetDir, path.join("skills", child));
+        await ensureWritableSkillDirectories(targetSkillsDir, child);
+        await removePathWithinRoot({
+          rootDir: targetDir,
+          relativePath: path.join("skills", child),
+          recursive: true,
+          symlinks: "unlink",
+        });
       }
     }
 
@@ -312,6 +292,7 @@ export async function syncWorkspaceSkills(params: {
               force: true,
               filter: shouldSyncSkillPath,
             });
+            await ensureWritableSkillDirectories(targetSkillsDir, path.basename(destinationPath));
           }
         } catch (error) {
           if (entry.skill.source === "openclaw-library") {
