@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import type { MockInstance } from "vitest";
 import { createTempDirTracker } from "../../../test/helpers/temp-dir.js";
 import { UPDATE_RUN_ID_ENV } from "../../infra/update-control-plane-sentinel.js";
 import { UpdateDoctorError } from "../../infra/update-doctor-result.js";
@@ -21,7 +22,7 @@ import { withCliProcessScope } from "../runtime-cleanup-scope.js";
 import { UpdateFinalizationLifecycle } from "./update-finalization-lifecycle.js";
 
 const dirs = createTempDirTracker();
-let stderrWrite: ReturnType<typeof vi.fn>;
+let stderrWrite: MockInstance<typeof process.stderr.write>;
 
 it("writes successful finalization progress to stderr and failures as errors", async () => {
   const logPath = path.join(dirs.make("openclaw-finalize-log-"), "openclaw.log");
@@ -133,8 +134,7 @@ beforeEach(() => {
   vi.stubEnv("OPENCLAW_STATE_DIR", dirs.make("openclaw-finalize-heartbeat-"));
   vi.stubEnv(UPDATE_RUN_ID_ENV, undefined);
   vi.spyOn(defaultRuntime, "error").mockImplementation(() => {});
-  stderrWrite = vi.fn(() => true);
-  vi.spyOn(process.stderr, "write").mockImplementation(stderrWrite);
+  stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
