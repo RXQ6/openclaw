@@ -40,9 +40,7 @@ function activeModalToastLayer() {
 
 function restingToastLayer() {
   return (
-    document.querySelector(".shell-nav[aria-modal='true']") ??
-    document.querySelector(".shell") ??
-    document.querySelector("openclaw-focused-dashboard-command-palette")
+    document.querySelector(".shell-nav[aria-modal='true']") ?? document.querySelector(".shell")
   );
 }
 

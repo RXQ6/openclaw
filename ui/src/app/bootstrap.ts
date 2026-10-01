@@ -462,13 +462,6 @@ export function bootstrapApplication(): ApplicationRuntime {
     requested: "push" | "replace",
   ) => {
     const location = routeLocation(routeId, options);
-    // Focus documents never start the application router. A palette action
-    // leaves that document through the same canonical route/options contract.
-    if (focusLocation) {
-      const href = `${location.pathname}${location.search}${location.hash}`;
-      window.location[requested === "replace" ? "replace" : "assign"](href);
-      return Promise.resolve();
-    }
     // Preserve pre-start navigation exactly as the fire-and-forget entry point does.
     if (!routerStarted) {
       pendingRouterStartNavigation = { location, mode: requested };

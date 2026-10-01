@@ -1,5 +1,4 @@
-import { html, nothing } from "lit";
-import type { RouteId } from "../app-routes.ts";
+import { html } from "lit";
 import {
   COMMAND_PALETTE_DIALOG_STYLE,
   COMMAND_PALETTE_OPEN_EVENT,
@@ -21,10 +20,9 @@ import { showToast } from "../lib/toast.ts";
 import { uploadsEnabled, uploadsDisabledMessage } from "../lib/uploads.ts";
 import type { ApplicationContext, ApplicationNavigationOptions } from "./context.ts";
 import { gatewayPresentationScope } from "./gateway-presentation-scope.ts";
-import {
-  isOptionalElementDefined,
-  type LazyCustomElementRequestController,
-  type OptionalCustomElement,
+import type {
+  LazyCustomElementRequestController,
+  OptionalCustomElement,
 } from "./lazy-custom-element.ts";
 import { lazyShellEvent, type LazyShellEvent } from "./lazy-shell-action.ts";
 
@@ -404,26 +402,4 @@ export function renderCommandPaletteLoading(
       <div class="cmd-palette__empty" role="status">${t("common.loading")}</div>
     </div>
   </openclaw-modal-dialog>`;
-}
-
-export function renderCommandPaletteElement(
-  host: {
-    readonly commandPaletteElement: OptionalCustomElement;
-    navigate(routeId: RouteId, options?: ApplicationNavigationOptions): void;
-    selectChatSession(sessionKey: string): void;
-    handleCommandPaletteSlashCommand(command: string): void;
-  },
-  desktopAvailable = false,
-  custodianAvailable = false,
-) {
-  return isOptionalElementDefined(host.commandPaletteElement)
-    ? html`<openclaw-command-palette
-        .desktopAvailable=${desktopAvailable}
-        .custodianAvailable=${custodianAvailable}
-        .onNavigate=${(routeId: RouteId, options?: ApplicationNavigationOptions) =>
-          host.navigate(routeId, options)}
-        .onSelectSession=${(sessionKey: string) => host.selectChatSession(sessionKey)}
-        .onSlashCommand=${(command: string) => host.handleCommandPaletteSlashCommand(command)}
-      ></openclaw-command-palette>`
-    : nothing;
 }

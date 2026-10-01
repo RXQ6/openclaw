@@ -66,9 +66,6 @@ export function createDraftFixture(options: FixtureOptions = {}) {
       setSessionKey: vi.fn(),
     },
     agents: {
-      async ensureList() {
-        return this.state.agentsList;
-      },
       state: {
         agentsList: {
           defaultId: "main",
