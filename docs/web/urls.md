@@ -371,6 +371,10 @@ candidate links preserve `/focus`. Missing, ambiguous, and unavailable sessions
 remain visible, and the dashboard is not read until the session resolves to a
 canonical key.
 
+Command-K on Apple platforms, or Ctrl+K elsewhere, opens the command palette
+without leaving the focused dashboard. Selecting a page or session opens its
+normal Control UI route.
+
 The other focus targets are:
 
 ```text

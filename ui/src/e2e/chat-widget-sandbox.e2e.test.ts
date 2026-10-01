@@ -367,6 +367,37 @@ suite.define(() => {
           const boardNote = board.getByRole("textbox", { name: "Local note" });
           await note.fill("State survives rerenders");
           await boardNote.fill("Dashboard state survives swaps");
+          expect(
+            await boardNote.evaluate((element) => {
+              const event = new KeyboardEvent("keydown", {
+                key: "k",
+                code: "KeyK",
+                ctrlKey: true,
+                bubbles: true,
+                cancelable: true,
+              });
+              element.dispatchEvent(event);
+              return event.defaultPrevented;
+            }),
+          ).toBe(false);
+          await page.keyboard.press("ControlOrMeta+K");
+          const paletteInput = page.locator(".cmd-palette__input");
+          await paletteInput.waitFor();
+          await page.keyboard.type("Settings");
+          expect(await paletteInput.inputValue()).toBe("Settings");
+          await page.keyboard.press("Escape");
+          await paletteInput.waitFor({ state: "hidden" });
+          await expect
+            .poll(() =>
+              boardNote.evaluate(
+                (element) => document.hasFocus() && document.activeElement === element,
+              ),
+            )
+            .toBe(true);
+          await page.keyboard.type("!");
+          expect(await boardNote.inputValue()).toBe("Dashboard state survives swaps!");
+          await page.keyboard.press("Backspace");
+          expect(await boardNote.inputValue()).toBe("Dashboard state survives swaps");
           for (const region of ["main", "side"]) {
             await page.locator(".chat-panel-swap").click();
             await expect

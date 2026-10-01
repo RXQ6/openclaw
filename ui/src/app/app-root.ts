@@ -358,6 +358,9 @@ export class OpenClawApp extends OpenClawLightDomElement {
         return;
       }
       this.focusDashboardRoute = { kind: "session", data: result };
+      if (result.agentId) {
+        context.agentSelection.set(result.agentId);
+      }
       if (result.canonicalLocation && result.canonicalLocationSource) {
         this.replaceFocusDashboardLocation(
           result.canonicalLocation,
@@ -448,6 +451,10 @@ export class OpenClawApp extends OpenClawLightDomElement {
           isNativeWebChromeHost() ? null : () => this.closeDocument(this.context?.basePath ?? "")
         }
       ></openclaw-board-document>
+      <openclaw-focused-dashboard-command-palette
+        .sessionKey=${route.data.sessionKey}
+        .agentId=${route.data.agentId}
+      ></openclaw-focused-dashboard-command-palette>
       ${
         !gatewayConnected && gatewaySnapshot.lastError === null
           ? renderConnectingSplash(gatewayStartupStatus)

@@ -1,5 +1,4 @@
 import { html, nothing } from "lit";
-import type { RouteId } from "../app-routes.ts";
 import { renderLazyElementModal } from "../components/lazy-view-error.ts";
 import {
   debugOverlayTemplate,
@@ -7,6 +6,7 @@ import {
   type DebugOverlayFrameHost,
 } from "../pages/debug/debug-overlay-frame.ts";
 import {
+  renderCommandPaletteElement,
   renderCommandPaletteLoading,
   type CommandPaletteLoadingState,
 } from "./app-shell-command-palette-loading.ts";
@@ -51,18 +51,7 @@ export function renderShellLazyOverlays(
           ? renderPendingDebugOverlay(host, lazyElementState)
           : renderLazyElementModal(host.lazyCustomElements)
     }
-    ${
-      isOptionalElementDefined(host.commandPaletteElement)
-        ? html`<openclaw-command-palette
-            .desktopAvailable=${desktopPanelAvailable}
-            .custodianAvailable=${custodianPanelAvailable}
-            .onNavigate=${(routeId: RouteId, options?: ApplicationNavigationOptions) =>
-              host.navigate(routeId, options)}
-            .onSelectSession=${(sessionKey: string) => host.selectChatSession(sessionKey)}
-            .onSlashCommand=${(command: string) => host.handleCommandPaletteSlashCommand(command)}
-          ></openclaw-command-palette>`
-        : nothing
-    }
+    ${renderCommandPaletteElement(host, desktopPanelAvailable, custodianPanelAvailable)}
     ${isOptionalElementDefined(DEBUG_OVERLAY_ELEMENT) ? debugOverlayTemplate : nothing}
     ${
       !nativeEmbed && isOptionalElementDefined(KEYBOARD_SHORTCUTS_ELEMENT)

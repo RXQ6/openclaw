@@ -216,6 +216,8 @@ export class PaletteSessionDraft implements ReactiveController {
       return;
     }
     const context = this.read().context;
+    // Focus documents do not have a sidebar warming the draft's agent defaults.
+    void context?.agents.ensureList();
     const agentId = context?.agentSelection.state.selectedId ?? "";
     this.data = {
       agentId,

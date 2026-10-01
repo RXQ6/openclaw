@@ -6,6 +6,7 @@ import {
 import { html, nothing, type PropertyValues } from "lit";
 import { property, state } from "lit/decorators.js";
 import type { ApplicationGatewaySnapshot } from "../../app/context.ts";
+import "../../app/focused-dashboard-command-palette.ts";
 import { hasOperatorApprovalsAccess, hasOperatorWriteAccess } from "../../app/operator-access.ts";
 import { icons } from "../../components/icons.ts";
 import { t } from "../../i18n/index.ts";

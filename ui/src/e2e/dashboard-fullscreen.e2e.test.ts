@@ -133,10 +133,21 @@ suite.define(() => {
         sessionKey,
         deferredMethods: ["sessions.resolve"],
         featureCapabilities: [GATEWAY_SERVER_CAPS.BOARD_WIDGET_PUT_CANVAS_DOC],
-        featureMethods: ["board.get", "board.update", "board.widget.grant", "board.widget.put"],
+        featureMethods: [
+          "board.get",
+          "board.update",
+          "board.widget.grant",
+          "board.widget.put",
+          "sessions.create",
+        ],
         methodResponses: {
           "sessions.describe": { session: sessionRow },
           "board.get": boardSnapshot,
+          "sessions.create": {
+            key: "agent:main:dashboard:shortcut-created",
+            runStarted: true,
+            runId: "shortcut-created-run",
+          },
           "board.widget.grant": {
             ...boardSnapshot,
             revision: 2,
@@ -178,6 +189,28 @@ suite.define(() => {
       await document.getByRole("button", { name: "Close dashboard" }).waitFor();
       expect(new URL(page.url()).pathname).toBe(canonicalFocusPath);
 
+      const retainedBoard = await document.elementHandle();
+      for (const { platform, modifier } of [
+        { platform: "MacIntel", modifier: "Meta" },
+        { platform: "Linux x86_64", modifier: "Control" },
+      ]) {
+        await page.evaluate((value) => {
+          Object.defineProperty(navigator, "platform", { configurable: true, get: () => value });
+        }, platform);
+        await document.getByRole("tab", { name: "Research" }).focus();
+        await page.keyboard.press(`${modifier}+K`);
+        const input = page.locator(".cmd-palette__input");
+        await input.waitFor();
+        await page.keyboard.type("Settings");
+        const loadedInput = page.locator("openclaw-command-palette .cmd-palette__input");
+        await loadedInput.waitFor();
+        expect(await loadedInput.inputValue()).toBe("Settings");
+        await page.keyboard.press("Escape");
+        await input.waitFor({ state: "hidden" });
+        expect(await retainedBoard?.evaluate((board) => board.isConnected)).toBe(true);
+        expect(await page.locator("openclaw-app-shell").count()).toBe(0);
+      }
+
       await document
         .locator('[data-widget-name="permissions"]')
         .getByRole("button", { name: "Reject" })
@@ -207,6 +240,23 @@ suite.define(() => {
       });
       await gateway.emitGatewayEvent("board.changed", { sessionKey });
       await document.getByText("A clear board, ready for work", { exact: true }).waitFor();
+      await page.keyboard.press("Control+K");
+      const prompt = "Start a focused dashboard follow-up task with the current project context.";
+      const input = page.locator(".cmd-palette__input");
+      await input.fill(prompt);
+      await input.press("Control+Enter");
+      const created = await gateway.waitForRequest("sessions.create");
+      expect(created.params).toMatchObject({ message: prompt });
+      await input.waitFor({ state: "hidden" });
+      const openSession = page.locator(".app-toast").getByRole("button", {
+        name: "Open session",
+        exact: true,
+      });
+      await openSession.waitFor();
+      expect(new URL(page.url()).pathname).toBe(canonicalFocusPath);
+      await openSession.click();
+      await page.waitForURL((url) => url.pathname.startsWith("/chat/main/"));
+      await page.locator("openclaw-app-shell").waitFor();
     });
   });
 
@@ -257,7 +307,7 @@ suite.define(() => {
     );
   });
 
-  it("hands nested sandbox scroll remainder to the shell-free dashboard document", async () => {
+  it("preserves sandbox scroll and shortcut ownership across document replacements", async () => {
     const sandboxHost = createSandboxHostHttpServer();
     const sandboxPort = await listenOnLoopback(sandboxHost);
     try {
@@ -470,11 +520,21 @@ suite.define(() => {
             finalBoardBox.y + finalBoardBox.height + 1,
           );
 
-          widgetDocument = buildWidgetDocument(
-            "Cleanup controls",
-            `<button style="position:fixed;top:24px;left:24px"
-              onclick="this.textContent='Cleanup requested'">Run cleanup</button>`,
-          );
+          // Persisted HTML need not contain the current generated widget wrapper.
+          widgetDocument = `<!doctype html><html><head><title>Cleanup controls</title>
+            <style>body{margin:0}</style></head><body>
+            <button style="position:fixed;top:24px;left:24px"
+              onclick="this.textContent='Cleanup requested'">Run cleanup</button>
+            <input style="position:fixed;top:64px;left:24px" aria-label="Dashboard note">
+            <button style="position:fixed;top:104px;left:24px" onclick="
+              parent.postMessage({type:'openclaw:widget-command-palette',nonce:window.shortcutNonce||window.scrollNonce},'*');
+              parent.postMessage({type:'fixture-shortcut-attempted'},'*');">Attempt shortcut</button>
+            <script>
+              window.addEventListener('message',event=>{
+                if(event.data?.type==='openclaw:widget-board-host')window.scrollNonce=event.data.nonce;
+                if(event.data?.type==='openclaw:widget-shortcut-host')window.shortcutNonce=event.data.nonce;
+              });
+            </script></body></html>`;
           await gateway.setMethodResponse("board.get", {
             ...widgetSnapshot,
             revision: 2,
@@ -506,6 +566,49 @@ suite.define(() => {
           await replacement
             .getByRole("button", { name: "Cleanup requested", exact: true })
             .waitFor();
+          await page.evaluate(() => {
+            window.addEventListener("message", function settle(event) {
+              if (event.data?.type === "fixture-shortcut-attempted") {
+                window.removeEventListener("message", settle);
+                Reflect.set(window, "shortcutForgerySettled", true);
+              }
+            });
+          });
+          await expect
+            .poll(() =>
+              replacement
+                .locator("body")
+                .evaluate(() => Boolean(Reflect.get(window, "scrollNonce"))),
+            )
+            .toBe(true);
+          await replacement.getByRole("button", { name: "Attempt shortcut", exact: true }).click();
+          await page.waitForFunction(() => Reflect.get(window, "shortcutForgerySettled") === true);
+          expect(await page.locator(".cmd-palette__input").count()).toBe(0);
+          const note = replacement.getByRole("textbox", { name: "Dashboard note" });
+          await note.fill("Saved draft");
+          await note.evaluate(() => {
+            const descriptors = Object.getOwnPropertyDescriptors(KeyboardEvent.prototype);
+            Reflect.set(window, "keyboardDescriptors", descriptors);
+            Object.defineProperties(KeyboardEvent.prototype, {
+              key: { configurable: true, get: () => "k" },
+              ctrlKey: { configurable: true, get: () => true },
+              metaKey: { configurable: true, get: () => false },
+            });
+          });
+          await page.keyboard.press("j");
+          expect(await note.inputValue()).toBe("Saved draftj");
+          expect(await page.locator(".cmd-palette__input").count()).toBe(0);
+          await note.evaluate(() => {
+            Object.defineProperties(
+              KeyboardEvent.prototype,
+              Reflect.get(window, "keyboardDescriptors"),
+            );
+          });
+          await page.keyboard.press("ControlOrMeta+K");
+          await page.locator(".cmd-palette__input").waitFor();
+          await page.keyboard.press("Escape");
+          await page.locator(".cmd-palette__input").waitFor({ state: "hidden" });
+          expect(await note.inputValue()).toBe("Saved draftj");
           await page.screenshot({ path: `${suite.artifactDir}/dashboard-fixed-controls.png` });
         },
       );
