@@ -107,7 +107,7 @@ receiver but its response is lost. An explicit HTTP rejection or a failure prove
 to precede sending records **Not delivered** and allows the in-app fallback
 notification. An unknown outcome does not trigger that fallback.
 
-Execution failures use one scheduler-owned threshold and cooldown policy. A job with an existing failure route is covered by default after 2 consecutive failures with a 1-hour cooldown. The route can be a resolved failure destination or the job's primary announce target. Jobs with no such route stay quiet unless a per-job or global `failureAlert` object explicitly activates the policy.
+Execution failures use one scheduler-owned threshold and cooldown policy. A job with an existing failure route is covered by default after 2 consecutive failures with a 1-hour cooldown. The route can be a resolved failure destination, the job's primary announce target, or, for a job created from a conversation, that owner conversation. Jobs with none of these routes, such as an unowned `delivery.mode: "none"` job, stay quiet unless a per-job or global `failureAlert` object explicitly activates the policy.
 
 Repeated failures with the same cause form one incident and do not send repeated alerts, even after the cooldown expires or the Gateway restarts. A changed cause or destination can send a new alert after the cooldown. A successful run clears the incident and its cooldown without sending a notification, so the next failure can alert again; the recovery stays visible in automation history. Skipped runs and unknown delivery outcomes do not establish recovery. A successful quiet trigger check can recover a trigger failure, but cannot establish that a previously failed payload has recovered.
 
@@ -118,6 +118,7 @@ Failure notification routes resolve in this order:
 1. Route fields in the job's `failureAlert` object.
 2. `job.delivery.failureDestination`, layered over the destination fields in global `cron.failureAlert` (`mode`, `channel`, `to`, `accountId`). A `cron.failureDestination` block is not read directly; `openclaw doctor --fix` merges it into the global object.
 3. The job's primary announce target.
+4. The owner conversation's stored route, when the job was created from a conversation and nothing above names a recipient.
 
 - `job.failureAlert: false` disables execution and required-delivery failure alerts for that job. The auto-disable safety notification remains active.
 - Global `cron.failureAlert.enabled: false` disables inherited notifications. A per-job `failureAlert` object explicitly re-enables that job; `enabled: true` explicitly enables the global policy.

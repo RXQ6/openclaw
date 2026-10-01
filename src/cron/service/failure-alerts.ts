@@ -87,7 +87,7 @@ export function resolveFailureAlert(
     deps: Pick<CronJobPolicyContext["deps"], "cronConfig">;
     preparedFailureAlert?: CronJobPolicyContext["preparedFailureAlert"];
   },
-  job: Pick<CronJob, "delivery" | "failureAlert"> & Partial<Pick<CronJob, "id">>,
+  job: Pick<CronJob, "delivery" | "failureAlert"> & Partial<Pick<CronJob, "id" | "owner">>,
 ): ResolvedFailureAlert | null {
   const prepared = state.preparedFailureAlert;
   if (prepared) {
@@ -121,7 +121,8 @@ export function resolveFailureAlert(
   const primaryAnnounceRoute =
     primaryRoute.mode === "announce" && primaryRoute.requested ? primaryRoute : undefined;
   const explicitlyConfigured = jobConfig !== undefined || globalConfig !== undefined;
-  if (!alternateRoute && !primaryAnnounceRoute && !explicitlyConfigured) {
+  const ownerSessionKey = normalizeOptionalString(job.owner?.sessionKey);
+  if (!alternateRoute && !primaryAnnounceRoute && !explicitlyConfigured && !ownerSessionKey) {
     return null;
   }
   const configuredMode =
@@ -150,6 +151,10 @@ export function resolveFailureAlert(
     mode === "announce" && !hasAnnounceRouteSelector && primaryChannel
       ? primaryChannel
       : (resolveFailureAlertChannel(route?.channel, route?.to) ?? "last");
+  // With no other alert route, an owned job alerts its owner conversation through that
+  // conversation's stored route, the same place its repair request goes.
+  const ownerRoute =
+    mode === "announce" && !route && !hasAnnounceRouteSelector ? ownerSessionKey : undefined;
   const routeUsesPrimaryChannel =
     mode === "announce" && primaryAnnounceRoute !== undefined && channel === primaryChannel;
   const to =
@@ -190,6 +195,7 @@ export function resolveFailureAlert(
     threadId: primaryRouteMatches ? primaryAnnounceRoute.threadId : undefined,
     includeSkipped: jobConfig?.includeSkipped ?? globalConfig?.includeSkipped ?? false,
     alternateRoute: alternateRoute !== null && !primaryRouteMatches,
+    ...(ownerRoute ? { sessionKey: ownerRoute } : {}),
   };
 }
 

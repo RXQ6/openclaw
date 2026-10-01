@@ -11,7 +11,7 @@ import {
   setReplyPayloadMetadata,
   type ReplyPayload,
 } from "../../auto-reply/reply-payload.js";
-import { isSilentReplyPayloadText } from "../../auto-reply/tokens.js";
+import { AUTOMATION_FAILED_TOKEN, isSilentReplyPayloadText } from "../../auto-reply/tokens.js";
 import { truncateUtf16Safe } from "../../utils.js";
 
 type DeliveryPayload = Pick<
@@ -291,12 +291,27 @@ export function resolveCronPayloadOutcome(params: {
       ? { ...params.failureSignal, message: failureMessage }
       : undefined;
   const runLevelError = formatCronRunLevelError(params.runLevelError);
+  // Only an exact first line counts; a reply that quotes the token stays ordinary output.
+  const [reportedFirstLine, ...reportedDetail] = (
+    normalizedFinalAssistantVisibleText ??
+    fallbackOutputText ??
+    ""
+  ).split("\n");
+  const reportedFailure =
+    reportedFirstLine?.trim() === AUTOMATION_FAILED_TOKEN
+      ? (normalizeOptionalString(reportedDetail.join("\n")) ??
+        "The automation run reported that it failed.")
+      : undefined;
   const hasFatalErrorPayload =
-    hasFatalStructuredErrorPayload || failureSignal !== undefined || runLevelError !== undefined;
+    hasFatalStructuredErrorPayload ||
+    failureSignal !== undefined ||
+    runLevelError !== undefined ||
+    reportedFailure !== undefined;
   const structuredErrorText = hasFatalStructuredErrorPayload
     ? (lastErrorPayloadText ?? "cron isolated run returned an error payload")
     : undefined;
-  const fatalDeliveryText = structuredErrorText ?? failureSignal?.message ?? runLevelError;
+  const fatalDeliveryText =
+    structuredErrorText ?? failureSignal?.message ?? runLevelError ?? reportedFailure;
   const fatalDeliveryPayload = fatalDeliveryText
     ? ({ text: fatalDeliveryText, isError: true } satisfies DeliveryPayload)
     : undefined;
@@ -325,7 +340,7 @@ export function resolveCronPayloadOutcome(params: {
       ? structuredErrorText
       : failureSignal
         ? formatCronFailureSignal(failureSignal)
-        : runLevelError,
+        : (runLevelError ?? reportedFailure),
     pendingPresentationWarningError: hasPendingPresentationWarning
       ? lastErrorPayloadText
       : undefined,

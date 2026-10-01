@@ -78,6 +78,8 @@ type CronFailureAlertRoute = {
   accountId?: string;
   threadId?: string | number;
   alternateRoute: boolean;
+  /** Owner conversation whose stored route resolves a `last` channel. */
+  sessionKey?: string;
 };
 
 export type ResolvedFailureAlert = CronFailureAlertRoute & {

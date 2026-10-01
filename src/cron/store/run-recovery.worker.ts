@@ -26,6 +26,7 @@ export function repairCronRunInWorker(
         id: input.proposal.jobId,
         delivery: job?.delivery,
         failureAlert: job?.failureAlert,
+        owner: job?.owner,
       });
       const logs: CronRunRecoveryOutcome["logs"] = [];
       const { nowMs, cronConfig, failureAlert } = preparation;

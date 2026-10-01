@@ -172,6 +172,7 @@ function transportFailureAlert(
       mode: params.route.mode,
       accountId: params.route.accountId,
       threadId: params.route.threadId,
+      sessionKey: params.route.sessionKey,
       ...(params.route.alternateRoute ? { inheritSessionThread: false as const } : {}),
       onDeliverySettled: async (outcome) => {
         const recordResult = await recordFailureAlertOutcome(

@@ -29,6 +29,7 @@ export function mutateCronExternalStateInWorker(
             id: input.jobId,
             delivery: job?.delivery,
             failureAlert: job?.failureAlert,
+            owner: job?.owner,
           });
           const outcome: CronRuntimeMutationContracts["cron.mutateExternalState"]["outcome"] = {
             nowMs: preparation.nowMs,

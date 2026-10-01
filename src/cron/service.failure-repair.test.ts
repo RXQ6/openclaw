@@ -117,6 +117,37 @@ describe("CronService failure repair", () => {
     });
   });
 
+  it("routes an owned no-delivery job through its owner conversation", async () => {
+    await withFailureAlertCron(
+      { scheduler: createTestGatewayScheduler() },
+      async ({ cron, sendCronFailureAlert, runCronFailureRepair, addJob }) => {
+        const job = await addJob("owned report", {
+          delivery: { mode: "none" },
+          owner: owned.owner,
+        });
+        const unowned = await addJob("unowned report", { delivery: { mode: "none" } });
+        for (const id of [job.id, unowned.id, job.id, unowned.id]) {
+          await cron.run(id, "force");
+        }
+        expect(runCronFailureRepair).toHaveBeenCalledOnce();
+        expect(runCronFailureRepair.mock.calls[0]?.[0]).toMatchObject({
+          jobId: job.id,
+          sessionKey: ownerSessionKey,
+        });
+
+        await cron.run(job.id, "force");
+        await cron.run(unowned.id, "force");
+        expect(sendCronFailureAlert).toHaveBeenCalledOnce();
+        expect(sendCronFailureAlert.mock.calls[0]?.[0]).toMatchObject({
+          job: { id: job.id },
+          channel: "last",
+          to: undefined,
+          sessionKey: ownerSessionKey,
+        });
+      },
+    );
+  });
+
   it.each([
     { name: "agentTurn", payload: { kind: "agentTurn", message: "sync" }, repairs: true },
     { name: "systemEvent", payload: { kind: "systemEvent", text: "check" }, repairs: true },

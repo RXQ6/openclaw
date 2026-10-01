@@ -46,10 +46,11 @@ export function recordSkippedCronRunsInWorker(
         jobIds,
         mutate({ jobs }) {
           const preparation = prepareCronRuntimeMutation("cron.recordSkippedRuns", input.nonce, {
-            jobs: [...jobs.values()].map(({ id, delivery, failureAlert }) => ({
+            jobs: [...jobs.values()].map(({ id, delivery, failureAlert, owner }) => ({
               id,
               delivery,
               failureAlert,
+              owner,
             })),
           });
           const outcome: CronRuntimeMutationContracts["cron.recordSkippedRuns"]["outcome"] = {

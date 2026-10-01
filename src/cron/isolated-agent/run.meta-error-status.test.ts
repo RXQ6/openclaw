@@ -161,6 +161,24 @@ describe("runCronIsolatedAgentTurn - meta.error status propagation", () => {
     expect(result.error).toContain("Bash failed");
   });
 
+  it.each([
+    {
+      reply: "AUTOMATION_FAILED\nNo shell tool is available in this run.",
+      expected: { status: "error", error: "No shell tool is available in this run." },
+    },
+    {
+      reply: "Report posted. Reply AUTOMATION_FAILED only when the report is blocked.",
+      expected: { status: "ok", error: undefined },
+    },
+  ])("settles the run from a reported failure line: $expected.status", async (testCase) => {
+    await useRealOutcome();
+    mockAgentRun({
+      payloads: [{ text: testCase.reply }],
+      meta: { finalAssistantVisibleText: testCase.reply },
+    });
+    expectObjectFields(await runTurn(), testCase.expected);
+  });
+
   it("does not mark empty accepted child-session handoffs as cron errors", async () => {
     mockChildRun([], 0);
     mockAnnounceOutcome([], undefined, { deliveryDisposition: { kind: "empty" } });

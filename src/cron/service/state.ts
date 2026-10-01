@@ -263,6 +263,8 @@ export type CronServiceDeps = {
     mode?: "announce" | "webhook";
     accountId?: string;
     threadId?: string | number;
+    /** Conversation whose stored route resolves a `last` channel. */
+    sessionKey?: string;
     inheritSessionThread?: false;
     /** Persists the transport-owned terminal fact before Gateway work admission releases. */
     onDeliverySettled: (outcome: CronFailureNotificationDelivery) => Promise<void>;
