@@ -19,7 +19,7 @@ import {
   deleteCachedClawInstallSchemaVersion,
 } from "./provenance-runtime-read.js";
 import { readClawSecondaryReferenceTables } from "./provenance-secondary-references.js";
-import type { PersistedClawInstall } from "./provenance.js";
+import type { PersistedClawInstall } from "./provenance-types.js";
 import type { ClawAddPlan } from "./types.js";
 import type { PersistedClawWorkspaceFile } from "./workspace.js";
 

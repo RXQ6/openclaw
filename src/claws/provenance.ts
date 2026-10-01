@@ -40,40 +40,19 @@ import {
   deleteCachedClawInstallSchemaVersion,
 } from "./provenance-runtime-read.js";
 import * as installRecordSchema from "./provenance-schema-version.js";
+import type { ClawInstallStatus, PersistedClawInstall } from "./provenance-types.js";
 import type { ClawAddPlan, ClawPackage, ResolvedClawPackage } from "./types.js";
 import type { PersistedClawWorkspaceFile } from "./workspace.js";
 export {
   CLAW_PACKAGE_REF_SCHEMA_VERSION,
   type PersistedClawPackageRef,
 } from "./package-extension-provenance.js";
+export type { ClawInstallStatus, PersistedClawInstall } from "./provenance-types.js";
 
 type ClawProvenanceDatabase = Pick<
   DB,
   "claw_installs" | "claw_package_refs" | "claw_workspace_files"
 >;
-
-export type ClawInstallStatus =
-  | "pending"
-  | "workspace_ready"
-  | "config_committed"
-  | "complete"
-  | "partial";
-
-export type PersistedClawInstall = {
-  schemaVersion: ReturnType<typeof installRecordSchema.parseClawInstallRecordSchemaVersion>;
-  claw: ClawAddPlan["claw"];
-  manifestSchemaVersion: ClawAddPlan["manifestSchemaVersion"];
-  planIntegrity: string;
-  agentId: string;
-  workspace: string;
-  agentConfigDigest: string;
-  agentOrigin: ClawAgentOrigin;
-  agentOwnedPaths: string[];
-  bootstrap?: { sourcePath: string; contentDigest: string };
-  status: ClawInstallStatus;
-  addedAtMs: number;
-  updatedAtMs: number;
-};
 
 type ClawInstallRow = {
   schema_version: string;

@@ -63,7 +63,7 @@ export async function runClawsUpdateCommand(
     return;
   }
   const config = withAuthoredAgentRoster(
-    listedMcpServers.runtimeConfig,
+    listedMcpServers.runtimeConfig ?? listedMcpServers.config,
     listedMcpServers.sourceConfigBeforeMigrations,
   );
   let source = opts.from;
