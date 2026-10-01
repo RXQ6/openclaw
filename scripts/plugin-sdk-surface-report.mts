@@ -193,16 +193,15 @@ export function readPluginSdkSurfaceBudgets(env: NodeJS.ProcessEnv = process.env
       158,
       env,
     ),
-    // #160931 (b4ae783fbfd) added three callable agent-harness-runtime exports
-    // without its ratchet update; these pin exactly that growth.
+    // #162256 removed the unshipped MCP transport re-export; retain that reduction.
     publicExports: readPluginSdkSurfaceBudgetEnv(
       "OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_EXPORTS",
-      4588,
+      4587,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
       "OPENCLAW_PLUGIN_SDK_MAX_PUBLIC_FUNCTION_EXPORTS",
-      2694,
+      2693,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(
