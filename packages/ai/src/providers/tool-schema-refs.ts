@@ -1,5 +1,6 @@
 import { parseLocalSchemaRefPointer } from "@openclaw/normalization-core/json-schema";
 import { isRecord as isSchemaRecord } from "@openclaw/normalization-core/record-coerce";
+import { assertToolSchemaDepth, isWithinToolSchemaDepth } from "./tool-schema-depth.js";
 
 export function setOwnSchemaProperty(
   target: Record<string, unknown>,
@@ -135,10 +136,12 @@ function inlineLocalSchemaRefsWithDefs(
   refStack: Set<string> | undefined,
   state: { unresolvedLocalRefs: boolean },
   rootDocument: unknown,
+  depth = 0,
 ): unknown {
+  assertToolSchemaDepth(depth);
   if (Array.isArray(schema)) {
     return schema.map((entry) =>
-      inlineLocalSchemaRefsWithDefs(entry, defs, refStack, state, rootDocument),
+      inlineLocalSchemaRefsWithDefs(entry, defs, refStack, state, rootDocument, depth + 1),
     );
   }
 
@@ -169,6 +172,7 @@ function inlineLocalSchemaRefsWithDefs(
       nextRefStack,
       state,
       rootDocument,
+      depth + 1,
     );
     if (!isSchemaRecord(inlined)) {
       return inlined;
@@ -190,14 +194,28 @@ function inlineLocalSchemaRefsWithDefs(
     if (SCHEMA_MAP_KEYS.has(key) && isSchemaRecord(value)) {
       const entries = Object.entries(value);
       for (const entry of entries) {
-        entry[1] = inlineLocalSchemaRefsWithDefs(entry[1], nextDefs, refStack, state, rootDocument);
+        entry[1] = inlineLocalSchemaRefsWithDefs(
+          entry[1],
+          nextDefs,
+          refStack,
+          state,
+          rootDocument,
+          depth + 1,
+        );
       }
       next = Object.fromEntries(entries);
     } else if (SCHEMA_OBJECT_KEYS.has(key) && isSchemaRecord(value)) {
-      next = inlineLocalSchemaRefsWithDefs(value, nextDefs, refStack, state, rootDocument);
+      next = inlineLocalSchemaRefsWithDefs(
+        value,
+        nextDefs,
+        refStack,
+        state,
+        rootDocument,
+        depth + 1,
+      );
     } else if (SCHEMA_ARRAY_KEYS.has(key) && Array.isArray(value)) {
       next = value.map((entry) =>
-        inlineLocalSchemaRefsWithDefs(entry, nextDefs, refStack, state, rootDocument),
+        inlineLocalSchemaRefsWithDefs(entry, nextDefs, refStack, state, rootDocument, depth + 1),
       );
     }
     setOwnSchemaProperty(result, key, next);
@@ -248,7 +266,12 @@ export function canPreserveRootSchemaRefs(schema: unknown): boolean {
   }
   let hasRefs = false;
   const ancestors = new Set<object>();
-  function visit(node: unknown, inDefinitions = false): boolean {
+  function visit(node: unknown, inDefinitions = false, depth = 0): boolean {
+    if (!isWithinToolSchemaDepth(depth)) {
+      // Too deep to certify ref preservation; the caller falls back to the
+      // bounded inliner, which rejects genuinely un-manageable schemas.
+      return false;
+    }
     if (!isSchemaRecord(node)) {
       return true;
     }
@@ -278,14 +301,14 @@ export function canPreserveRootSchemaRefs(schema: unknown): boolean {
       for (const [key, value] of Object.entries(node)) {
         if (SCHEMA_MAP_KEYS.has(key) && isSchemaRecord(value)) {
           const childInDefinitions = inDefinitions || key === "$defs" || key === "definitions";
-          if (!Object.values(value).every((entry) => visit(entry, childInDefinitions))) {
+          if (!Object.values(value).every((entry) => visit(entry, childInDefinitions, depth + 1))) {
             return false;
           }
         } else if (SCHEMA_ARRAY_KEYS.has(key) && Array.isArray(value)) {
-          if (!value.every((entry) => visit(entry, inDefinitions))) {
+          if (!value.every((entry) => visit(entry, inDefinitions, depth + 1))) {
             return false;
           }
-        } else if (SCHEMA_OBJECT_KEYS.has(key) && !visit(value, inDefinitions)) {
+        } else if (SCHEMA_OBJECT_KEYS.has(key) && !visit(value, inDefinitions, depth + 1)) {
           return false;
         }
       }

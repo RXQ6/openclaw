@@ -5,7 +5,25 @@ import { describe, expect, it } from "vitest";
 import { normalizeToolParameterSchema } from "./agent-tools-parameter-schema.js";
 import { convertResponsesToolPayload } from "./openai-responses-tools.js";
 import { normalizeOpenAIStrictCompatSchema } from "./openai-tool-schema-compat.js";
+import { MAX_TOOL_SCHEMA_DEPTH, ToolSchemaDepthExceededError } from "./tool-schema-depth.js";
 import { projectRuntimeToolInputSchema } from "./tool-schema-json-projection.js";
+
+function deepNestedSchema(levels: number): unknown {
+  let schema: unknown = { type: "object" };
+  for (let index = 0; index < levels; index += 1) {
+    schema = { type: "object", properties: { child: schema } };
+  }
+  return schema;
+}
+
+function deepRefChainSchema(links: number): unknown {
+  const defs: Record<string, unknown> = {};
+  for (let index = 0; index < links - 1; index += 1) {
+    defs[`link_${index}`] = { $ref: `#/$defs/link_${index + 1}` };
+  }
+  defs[`link_${links - 1}`] = { type: "object" };
+  return { $ref: "#/$defs/link_0", $defs: defs };
+}
 
 const detail = {
   type: "object",
@@ -381,5 +399,28 @@ describe("root unions with preset and custom strings", () => {
         expect(normalized).toHaveProperty("properties.value", valueSchema);
       }
     }
+  });
+});
+
+describe("tool schema depth budget", () => {
+  it("rejects deeply nested external schemas with a typed error instead of a RangeError", () => {
+    expect(() => normalizeToolParameterSchema(deepNestedSchema(3000))).toThrow(
+      ToolSchemaDepthExceededError,
+    );
+  });
+
+  it("rejects deep local $ref chains with a typed error instead of a RangeError", () => {
+    expect(() => normalizeToolParameterSchema(deepRefChainSchema(3000))).toThrow(
+      ToolSchemaDepthExceededError,
+    );
+  });
+
+  it("still normalizes schemas within the depth budget", () => {
+    // Well under the budget: ordinary tool schemas stay far below this size.
+    const normalized = normalizeToolParameterSchema(
+      deepNestedSchema(Math.floor(MAX_TOOL_SCHEMA_DEPTH / 4)),
+    );
+    expect(normalized).toBeDefined();
+    expect(normalizeToolParameterSchema(deepRefChainSchema(100))).toBeDefined();
   });
 });

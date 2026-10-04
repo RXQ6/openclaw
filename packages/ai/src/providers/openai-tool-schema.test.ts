@@ -11,6 +11,7 @@ import {
   normalizeStrictOpenAIJsonSchema,
   resolveOpenAIProjectedToolsStrictToolFlag,
 } from "./openai-tool-schema.js";
+import { ToolSchemaDepthExceededError } from "./tool-schema-depth.js";
 
 describe("OpenAI strict tool schema normalization", () => {
   it.each([
@@ -311,5 +312,30 @@ describe("OpenAI strict tool schema normalization", () => {
     const normalized = normalizeOpenAIStrictToolParameters(tool?.parameters, true);
     expect(normalizeOpenAIStrictToolParameters(tool?.parameters, true)).toBe(normalized);
     expect(serializationCount).toBe(1);
+  });
+});
+
+describe("OpenAI strict tool schema depth budget", () => {
+  function deepNestedSchema(levels: number): unknown {
+    let schema: unknown = { type: "object" };
+    for (let index = 0; index < levels; index += 1) {
+      schema = { type: "object", properties: { child: schema } };
+    }
+    return schema;
+  }
+
+  it("rejects deeply nested strict normalization with a typed error instead of a RangeError", () => {
+    expect(() => normalizeOpenAIStrictToolParameters(deepNestedSchema(3000), true, null)).toThrow(
+      ToolSchemaDepthExceededError,
+    );
+  });
+
+  it("treats schemas past the depth budget as strict-incompatible instead of crashing", () => {
+    expect(isStrictOpenAIJsonSchemaCompatible(deepNestedSchema(3000))).toBe(false);
+  });
+
+  it("reports a bounded depth violation instead of overflowing the violation walker", () => {
+    const violations = findOpenAIStrictSchemaViolations(deepNestedSchema(3000), "tool.parameters");
+    expect(violations.some((violation) => violation.endsWith(".depth"))).toBe(true);
   });
 });
