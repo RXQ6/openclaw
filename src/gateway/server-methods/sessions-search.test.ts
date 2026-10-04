@@ -270,6 +270,47 @@ describe("sessions.search gateway method", () => {
     },
   );
 
+  it("searches an ACP harness store scoped to its own session keys", async () => {
+    cfg = {
+      agents: { ownership: "explicit", entries: { main: {} } },
+      acp: { allowedAgents: ["codex"] },
+    };
+    searchSessionTranscriptsMock.mockReturnValue({
+      hits: [
+        {
+          sessionKey: "agent:codex:acp:one",
+          sessionId: "session-acp",
+          messageId: "message-1",
+          role: "assistant",
+          timestamp: 123,
+          snippet: "needle",
+          score: 1,
+        },
+      ],
+      indexing: false,
+    });
+
+    const respond = await callSearch({
+      agentId: "codex",
+      query: "needle",
+      sessionKeys: ["agent:codex:acp:one"],
+    });
+
+    expect(searchSessionTranscriptsMock).toHaveBeenCalledWith({
+      agentId: "codex",
+      query: "needle",
+      limit: undefined,
+      sessionKeys: ["agent:codex:acp:one"],
+      storePath: expect.any(String),
+    });
+    expect(respond).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({
+        results: [expect.objectContaining({ sessionKey: "agent:codex:acp:one" })],
+      }),
+    );
+  });
+
   it("rejects a bare fixed-store key scoped to a non-owner before transcript lookup", async () => {
     cfg = {
       session: { store: fixedStorePath },

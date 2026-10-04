@@ -1,4 +1,5 @@
 import type { SessionsSearchParams } from "../../../packages/gateway-protocol/src/index.js";
+import { listAgentIds } from "../../agents/agent-scope.js";
 import { isConfiguredSessionStoreAgentId } from "../../config/sessions.js";
 import { resolvePersistedSessionStoreOwnerForKey } from "../../config/sessions/session-store-owner.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
@@ -14,12 +15,16 @@ export function resolveSessionSearchScope(cfg: OpenClawConfig, params: SessionsS
     return invalidSessionRequest(`Unknown agent id "${params.agentId}"`);
   }
   const requestedAgentId = normalizedRequest?.value;
+  // Roster agents take full session-request validation. Harness-only store owners
+  // (ACP agents absent from the roster) have no roster path to admit them, so they
+  // are admitted like other non-roster ids when their own keys are explicit.
+  const rosterAgentIds = requestedAgentId === undefined ? undefined : listAgentIds(cfg);
   const sessionKeys: string[] | undefined = params.sessionKeys ? [] : undefined;
   const agentIds = new Set<string>();
   for (const sessionKey of params.sessionKeys ?? []) {
     const requestedAgent =
       requestedAgentId &&
-      !isConfiguredSessionStoreAgentId(cfg, requestedAgentId) &&
+      !rosterAgentIds?.includes(requestedAgentId) &&
       resolvePersistedSessionStoreOwnerForKey(cfg, sessionKey).kind === "none"
         ? ({ ok: true, agentId: requestedAgentId } as const)
         : resolveRequestedSessionAgentId(cfg, sessionKey, requestedAgentId);
