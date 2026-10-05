@@ -86,7 +86,19 @@ function normalizeToolSchemasIfChanged(
     if (!tool.parameters || typeof tool.parameters !== "object") {
       return tool;
     }
-    const parameters = normalizeSchema(tool.parameters);
+    let parameters: unknown;
+    try {
+      parameters = normalizeSchema(tool.parameters);
+    } catch (error) {
+      if (error instanceof ToolSchemaDepthExceededError) {
+        // Contain the depth rejection at the tool boundary: one pathological
+        // external schema must not abort preparation of every healthy sibling
+        // tool. Keep the tool with its original schema and surface a warning.
+        logWarn(`provider tool "${tool.name}" kept un-normalized: ${error.message}`);
+        return tool;
+      }
+      throw error;
+    }
     return parameters === tool.parameters
       ? tool
       : {

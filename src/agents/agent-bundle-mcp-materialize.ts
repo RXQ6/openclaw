@@ -1,6 +1,9 @@
 /** Materializes configured MCP catalog entries into agent tools and runtime helpers. */
 import crypto from "node:crypto";
-import { normalizeToolParameterSchema } from "@openclaw/ai/internal/tool-schema";
+import {
+  normalizeToolParameterSchema,
+  ToolSchemaDepthExceededError,
+} from "@openclaw/ai/internal/tool-schema";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
@@ -239,11 +242,26 @@ export function buildBundleMcpToolsFromCatalog(params: {
       );
     }
     reservedNames.add(normalizeLowercaseStringOrEmpty(safeToolName));
+    let parameters: unknown;
+    try {
+      parameters = normalizeToolParameterSchema(tool.inputSchema);
+    } catch (error) {
+      if (error instanceof ToolSchemaDepthExceededError) {
+        // Contain the depth rejection at the tool boundary: one pathological
+        // external MCP schema must not abort materialization of every healthy
+        // sibling tool in the catalog loop.
+        logWarn(
+          `bundle-mcp: skipping tool "${tool.toolName}" from server "${tool.serverName}": ${error.message}`,
+        );
+        continue;
+      }
+      throw error;
+    }
     const agentTool: AnyAgentTool = {
       name: safeToolName,
       label: tool.title ?? tool.toolName,
       description: tool.description || tool.fallbackDescription,
-      parameters: normalizeToolParameterSchema(tool.inputSchema),
+      parameters,
       executionMode,
       ...(params.createExecute && !sessionDeniedOnly
         ? { resultContentSource: "network" as const }

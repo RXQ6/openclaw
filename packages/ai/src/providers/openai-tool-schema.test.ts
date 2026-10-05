@@ -338,4 +338,15 @@ describe("OpenAI strict tool schema depth budget", () => {
     const violations = findOpenAIStrictSchemaViolations(deepNestedSchema(3000), "tool.parameters");
     expect(violations.some((violation) => violation.endsWith(".depth"))).toBe(true);
   });
+
+  it("counts schema maps transparently so near-budget chains stay strict-normalizable", () => {
+    // A 300-level properties chain is within the shared 512-level budget. The
+    // strict walker must not double-count map containers, or direct strict
+    // normalization throws ToolSchemaDepthExceededError for schemas the
+    // general walker accepts.
+    expect(() =>
+      normalizeOpenAIStrictToolParameters(deepNestedSchema(300), true, null),
+    ).not.toThrow();
+    expect(normalizeOpenAIStrictToolParameters(deepNestedSchema(300), true, null)).toBeDefined();
+  });
 });
