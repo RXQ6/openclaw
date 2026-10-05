@@ -27,7 +27,10 @@ function normalizeOpenAIStrictCompatSchemaMap(schema: unknown, depth = 0): unkno
   // Schema names are literal data; indexed writes would invoke __proto__'s setter.
   const normalized = Object.fromEntries<unknown>(
     Object.entries(schema).map(([key, value]) => {
-      const next = normalizeOpenAIStrictCompatSchemaRecursive(value, false, depth + 1);
+      // A properties/definitions map is a transparent container: its entries sit
+      // one level below the owning schema, matching the shared depth accounting
+      // used by the general normalizer (the map itself adds no level).
+      const next = normalizeOpenAIStrictCompatSchemaRecursive(value, false, depth);
       changed ||= next !== value;
       return [key, next];
     }),
