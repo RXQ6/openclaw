@@ -405,7 +405,6 @@ describe("embedded session history for configured ACP store owners", () => {
   it("reads a configured ACP owner transcript without an explicit agent id", async () => {
     const tool = createSessionsHistoryTool({
       config: acpConfig,
-      agentId: "main",
       requesterAgentIdOverride: "main",
       agentSessionKey: "agent:main:main",
       callGateway,
