@@ -82,29 +82,34 @@ function normalizeToolSchemasIfChanged(
   ctx: ProviderNormalizeToolSchemasContext,
   normalizeSchema: (schema: unknown) => unknown,
 ): AnyAgentTool[] {
-  return ctx.tools.map((tool) => {
+  return ctx.tools.flatMap((tool) => {
     if (!tool.parameters || typeof tool.parameters !== "object") {
-      return tool;
+      return [tool];
     }
     let parameters: unknown;
     try {
       parameters = normalizeSchema(tool.parameters);
     } catch (error) {
       if (error instanceof ToolSchemaDepthExceededError) {
-        // Contain the depth rejection at the tool boundary: one pathological
-        // external schema must not abort preparation of every healthy sibling
-        // tool. Keep the tool with its original schema and surface a warning.
-        logWarn(`provider tool "${tool.name}" kept un-normalized: ${error.message}`);
-        return tool;
+        // Contain the depth rejection at the tool boundary and quarantine the
+        // rejected tool: returning the original (un-cleaned) schema could ship
+        // provider-unsupported constraints downstream, so the tool is omitted
+        // with a warning while every healthy sibling still prepares.
+        logWarn(
+          `provider tool "${tool.name}" omitted: its schema exceeds the depth budget and cannot be safely cleaned (${error.message})`,
+        );
+        return [];
       }
       throw error;
     }
     return parameters === tool.parameters
-      ? tool
-      : {
-          ...tool,
-          parameters: parameters as TSchema,
-        };
+      ? [tool]
+      : [
+          {
+            ...tool,
+            parameters: parameters as TSchema,
+          },
+        ];
   });
 }
 
